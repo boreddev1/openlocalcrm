@@ -11,6 +11,7 @@ let existingSystemConfig = null;
 document.addEventListener('DOMContentLoaded', () => {
   generatePassword();
   checkInitialStatus();
+  checkForUpdates(false);
 });
 
 async function checkInitialStatus() {
@@ -108,26 +109,55 @@ async function runPreflight() {
     const res = await fetch('/api/preflight', { method: 'POST' });
     const status = await res.json();
 
-    // 1. WSL Check
-    if (status.wsl_installed) {
-      wslEl.className = 'status-badge healthy';
-      wslEl.textContent = 'Bereit';
-      wslDetailEl.textContent = 'WSL 2 ist verfügbar und betriebsbereit.';
-      wslActionBox.classList.remove('hidden');
-      if (btnInstallWsl) {
-        btnInstallWsl.disabled = true;
-        btnInstallWsl.textContent = '✅ WSL 2 bereits installiert';
-        btnInstallWsl.title = 'WSL 2 ist bereits auf diesem Rechner installiert.';
+    // 0. OS & Badge adaptation
+    const isWindows = status.os === 'windows';
+    const isDarwin = status.os === 'darwin';
+    const isLinux = status.os === 'linux';
+
+    const badge = document.getElementById('launcher-version-badge');
+    if (badge && status.os) {
+      const osLabel = isDarwin ? 'macOS' : (isLinux ? 'Linux' : 'Windows');
+      const archLabel = status.arch === 'arm64' ? 'ARM64' : 'x86_64';
+      badge.textContent = `v3.0 ${osLabel} (${archLabel})`;
+    }
+
+    const introText = document.getElementById('preflight-intro-text');
+    if (introText) {
+      if (isDarwin) {
+        introText.textContent = 'Wir prüfen Ihr Mac-System auf Docker und Port-Verfügbarkeit.';
+      } else if (isLinux) {
+        introText.textContent = 'Wir prüfen Ihr Linux-System auf Docker und Port-Verfügbarkeit.';
+      } else {
+        introText.textContent = 'Wir prüfen Ihr Windows-System auf WSL2, Docker Desktop und Port-Verfügbarkeit.';
       }
-    } else {
-      wslEl.className = 'status-badge danger';
-      wslEl.textContent = 'Nicht installiert';
-      wslDetailEl.textContent = status.wsl_status || 'WSL 2 wird für Docker benötigt.';
-      wslActionBox.classList.remove('hidden');
-      if (btnInstallWsl) {
-        btnInstallWsl.disabled = false;
-        btnInstallWsl.textContent = '🚀 WSL2 jetzt installieren (Admin UAC)';
-        btnInstallWsl.title = '';
+    }
+
+    // 1. WSL Check (only visible on Windows)
+    const wslCard = document.getElementById('status-wsl-card');
+    if (!isWindows && wslCard) {
+      wslCard.style.display = 'none';
+    } else if (wslCard) {
+      wslCard.style.display = '';
+      if (status.wsl_installed) {
+        wslEl.className = 'status-badge healthy';
+        wslEl.textContent = 'Bereit';
+        wslDetailEl.textContent = 'WSL 2 ist verfügbar und betriebsbereit.';
+        wslActionBox.classList.remove('hidden');
+        if (btnInstallWsl) {
+          btnInstallWsl.disabled = true;
+          btnInstallWsl.textContent = '✅ WSL 2 bereits installiert';
+          btnInstallWsl.title = 'WSL 2 ist bereits auf diesem Rechner installiert.';
+        }
+      } else {
+        wslEl.className = 'status-badge danger';
+        wslEl.textContent = 'Nicht installiert';
+        wslDetailEl.textContent = status.wsl_status || 'WSL 2 wird für Docker benötigt.';
+        wslActionBox.classList.remove('hidden');
+        if (btnInstallWsl) {
+          btnInstallWsl.disabled = false;
+          btnInstallWsl.textContent = '🚀 WSL2 jetzt installieren (Admin UAC)';
+          btnInstallWsl.title = '';
+        }
       }
     }
 
@@ -138,10 +168,13 @@ async function runPreflight() {
       dockerDetailEl.textContent = 'Docker Engine läuft einwandfrei.';
       dockerActionBox.classList.remove('hidden');
       if (btnInstallDocker) {
-        btnInstallDocker.classList.remove('hidden');
-        btnInstallDocker.disabled = true;
-        btnInstallDocker.textContent = '✅ Docker bereits installiert';
-        btnInstallDocker.title = 'Docker Desktop ist bereits vorhanden und aktiv.';
+        if (isWindows) {
+          btnInstallDocker.classList.remove('hidden');
+          btnInstallDocker.disabled = true;
+          btnInstallDocker.textContent = '✅ Docker bereits installiert';
+        } else {
+          btnInstallDocker.classList.add('hidden');
+        }
       }
       if (btnStartDocker) {
         btnStartDocker.classList.add('hidden');
@@ -149,29 +182,55 @@ async function runPreflight() {
     } else if (status.docker_installed) {
       dockerEl.className = 'status-badge warning';
       dockerEl.textContent = 'Gestoppt';
-      dockerDetailEl.textContent = 'Docker Desktop ist installiert, läuft aber aktuell nicht.';
       dockerActionBox.classList.remove('hidden');
-      if (btnInstallDocker) {
-        btnInstallDocker.classList.remove('hidden');
-        btnInstallDocker.disabled = true;
-        btnInstallDocker.textContent = '✅ Docker bereits installiert';
-        btnInstallDocker.title = 'Docker Desktop ist bereits auf diesem Rechner installiert.';
-      }
-      if (btnStartDocker) {
-        btnStartDocker.classList.remove('hidden');
-        btnStartDocker.disabled = false;
-        btnStartDocker.textContent = '▶️ Docker starten';
+
+      if (isDarwin) {
+        dockerDetailEl.textContent = 'Docker Desktop / OrbStack ist installiert, läuft aber aktuell nicht.';
+        if (btnInstallDocker) btnInstallDocker.classList.add('hidden');
+        if (btnStartDocker) {
+          btnStartDocker.classList.remove('hidden');
+          btnStartDocker.disabled = false;
+          btnStartDocker.textContent = '▶️ Docker starten';
+        }
+      } else if (isLinux) {
+        dockerDetailEl.textContent = 'Docker Engine läuft nicht. Starten Sie den Dienst z. B. mit "sudo systemctl start docker" oder prüfen Sie "sudo usermod -aG docker $USER".';
+        if (btnInstallDocker) btnInstallDocker.classList.add('hidden');
+        if (btnStartDocker) {
+          btnStartDocker.classList.remove('hidden');
+          btnStartDocker.disabled = false;
+          btnStartDocker.textContent = '▶️ Docker starten';
+        }
+      } else {
+        dockerDetailEl.textContent = 'Docker Desktop ist installiert, läuft aber aktuell nicht.';
+        if (btnInstallDocker) {
+          btnInstallDocker.classList.remove('hidden');
+          btnInstallDocker.disabled = true;
+          btnInstallDocker.textContent = '✅ Docker bereits installiert';
+        }
+        if (btnStartDocker) {
+          btnStartDocker.classList.remove('hidden');
+          btnStartDocker.disabled = false;
+          btnStartDocker.textContent = '▶️ Docker starten';
+        }
       }
     } else {
       dockerEl.className = 'status-badge danger';
       dockerEl.textContent = 'Nicht installiert';
-      dockerDetailEl.textContent = 'Docker Desktop wurde nicht gefunden.';
       dockerActionBox.classList.remove('hidden');
-      if (btnInstallDocker) {
-        btnInstallDocker.classList.remove('hidden');
-        btnInstallDocker.disabled = false;
-        btnInstallDocker.textContent = '🐳 Docker Desktop installieren (Admin UAC)';
-        btnInstallDocker.title = '';
+
+      if (isDarwin) {
+        dockerDetailEl.textContent = 'Docker Desktop wurde nicht gefunden. Installieren Sie Docker z. B. via "brew install --cask docker" oder https://docker.com';
+        if (btnInstallDocker) btnInstallDocker.classList.add('hidden');
+      } else if (isLinux) {
+        dockerDetailEl.textContent = 'Docker Engine wurde nicht gefunden. Installieren Sie Docker via Paketmanager oder "curl -fsSL https://get.docker.com | sh".';
+        if (btnInstallDocker) btnInstallDocker.classList.add('hidden');
+      } else {
+        dockerDetailEl.textContent = 'Docker Desktop wurde nicht gefunden.';
+        if (btnInstallDocker) {
+          btnInstallDocker.classList.remove('hidden');
+          btnInstallDocker.disabled = false;
+          btnInstallDocker.textContent = '🐳 Docker Desktop installieren (Admin UAC)';
+        }
       }
       if (btnStartDocker) {
         btnStartDocker.classList.add('hidden');
@@ -187,7 +246,7 @@ async function runPreflight() {
     } else if (status.port_8080_free) {
       portsEl.className = 'status-badge warning';
       portsEl.textContent = 'Port 8080 (Ausweich-Port)';
-      portsDetailEl.textContent = 'Port 80 ist belegt (z. B. durch IIS). Port 8080 wird genutzt.';
+      portsDetailEl.textContent = 'Port 80 ist belegt. Port 8080 wird genutzt.';
       document.getElementById('web-port').value = 8080;
     } else {
       portsEl.className = 'status-badge warning';
@@ -905,4 +964,161 @@ async function executeFactoryReset() {
     if (btnCancel) btnCancel.disabled = false;
     if (btnConfirm) btnConfirm.disabled = false;
   }
+}
+
+// ==========================================
+// GITHUB AUTO-UPDATE & HOT-SWAP LOGIC
+// ==========================================
+
+let updateInfo = null;
+
+async function checkUpdatesManually() {
+  await checkForUpdates(true);
+}
+
+async function checkForUpdates(manual = false) {
+  const btn = document.getElementById('btn-check-updates');
+  const badgeBtn = document.getElementById('btn-update-available');
+  if (btn && manual) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Prüfe GitHub auf Updates...';
+  }
+
+  try {
+    const res = await fetch('/api/update/check');
+    const data = await res.json();
+    updateInfo = data;
+
+    if (data.has_update) {
+      if (badgeBtn) {
+        badgeBtn.classList.remove('hidden');
+        badgeBtn.style.display = 'inline-block';
+      }
+      if (manual) {
+        openUpdateModal();
+      }
+    } else {
+      if (badgeBtn) {
+        badgeBtn.classList.add('hidden');
+        badgeBtn.style.display = 'none';
+      }
+      if (manual) {
+        alert(data.rate_limited 
+          ? 'GitHub Rate-Limit erreicht. Bitte versuchen Sie es in wenigen Minuten erneut.' 
+          : 'OpenLocalCRM ist bereits auf dem neuesten Stand (' + (data.current_commit || 'aktuell') + ').');
+      }
+    }
+  } catch (err) {
+    console.error('Update check failed:', err);
+    if (manual) {
+      alert('Konnte GitHub nicht erreichen: ' + err.message);
+    }
+  } finally {
+    if (btn && manual) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Nach GitHub-Updates suchen';
+    }
+  }
+}
+
+function openUpdateModal() {
+  const modal = document.getElementById('update-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+
+  const curCommitEl = document.getElementById('update-current-commit');
+  const newCommitEl = document.getElementById('update-latest-commit');
+  const msgEl = document.getElementById('update-commit-msg');
+  const feedback = document.getElementById('update-progress-feedback');
+
+  if (curCommitEl) curCommitEl.textContent = updateInfo?.current_commit || 'Lokal';
+  if (newCommitEl) newCommitEl.textContent = updateInfo?.latest_commit ? updateInfo.latest_commit.substring(0, 7) : 'Neueste Version';
+  if (msgEl) msgEl.textContent = updateInfo?.commit_message || 'Neues Update von GitHub';
+  if (feedback) {
+    feedback.textContent = '';
+    feedback.style.color = '';
+  }
+
+  const btn = document.getElementById('btn-confirm-update');
+  if (btn) btn.disabled = false;
+}
+
+function closeUpdateModal() {
+  const modal = document.getElementById('update-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.style.display = 'none';
+}
+
+async function executeSystemUpdate() {
+  const btn = document.getElementById('btn-confirm-update');
+  const cancelBtn = document.getElementById('btn-cancel-update');
+  const feedback = document.getElementById('update-progress-feedback');
+
+  if (btn) btn.disabled = true;
+  if (cancelBtn) cancelBtn.disabled = true;
+  if (feedback) {
+    feedback.textContent = '🚀 Update wird ausgeführt... Bitte warten (Archiv wird heruntergeladen und entpackt)...';
+    feedback.style.color = '#38bdf8';
+  }
+
+  try {
+    const res = await fetch('/api/update/execute', { method: 'POST' });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Update konnte nicht gestartet werden');
+    }
+
+    if (feedback) {
+      feedback.textContent = '🔄 Systemdateien und Launcher aktualisiert! Launcher startet neu, verbinde neu...';
+      feedback.style.color = '#34d399';
+    }
+
+    // Wait 2.5 seconds, then poll for restart
+    setTimeout(pollForRestartAndReload, 2500);
+  } catch (err) {
+    if (feedback) {
+      feedback.textContent = 'Fehler beim Starten des Updates: ' + err.message;
+      feedback.style.color = '#f87171';
+    }
+    if (btn) btn.disabled = false;
+    if (cancelBtn) cancelBtn.disabled = false;
+  }
+}
+
+function pollForRestartAndReload() {
+  const feedback = document.getElementById('update-progress-feedback');
+  let attempts = 0;
+  const maxAttempts = 30;
+
+  const interval = setInterval(async () => {
+    attempts++;
+    if (feedback) {
+      feedback.textContent = `Warte auf Neustart des Launchers (Versuch ${attempts}/${maxAttempts})...`;
+    }
+
+    try {
+      const res = await fetch('/api/status', { cache: 'no-store' });
+      if (res.ok) {
+        clearInterval(interval);
+        if (feedback) {
+          feedback.textContent = '✅ Launcher erfolgreich neu gestartet! Lade Seite neu...';
+        }
+        setTimeout(() => {
+          window.location.reload();
+        }, 800);
+      }
+    } catch (e) {
+      // Still restarting, retry
+    }
+
+    if (attempts >= maxAttempts) {
+      clearInterval(interval);
+      if (feedback) {
+        feedback.textContent = 'Der Neustart dauert länger als erwartet. Bitte aktualisieren Sie die Seite manuell.';
+        feedback.style.color = '#f59e0b';
+      }
+    }
+  }, 1500);
 }

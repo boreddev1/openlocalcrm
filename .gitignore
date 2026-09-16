@@ -1,13 +1,23 @@
 # Binaries and build artifacts
 /bin/*
 !bin/openlocalcrm-setup.exe
+!bin/openlocalcrm-setup-windows-amd64.exe
 !bin/openlocalcrm-setup-debug.exe
+!bin/openlocalcrm-setup-darwin-arm64
+!bin/openlocalcrm-setup-darwin-amd64
+!bin/openlocalcrm-setup-linux-amd64
+!bin/openlocalcrm-setup-linux-arm64
 !bin/mavalio-setup.exe
 !bin/mavalio-setup-debug.exe
 /tmp/
 *.exe
 !bin/openlocalcrm-setup.exe
+!bin/openlocalcrm-setup-windows-amd64.exe
 !bin/openlocalcrm-setup-debug.exe
+!bin/openlocalcrm-setup-darwin-arm64
+!bin/openlocalcrm-setup-darwin-amd64
+!bin/openlocalcrm-setup-linux-amd64
+!bin/openlocalcrm-setup-linux-arm64
 !bin/mavalio-setup.exe
 !bin/mavalio-setup-debug.exe
 *.exe~

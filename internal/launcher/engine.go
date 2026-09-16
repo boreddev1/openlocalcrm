@@ -208,7 +208,7 @@ func (e *Engine) getDBUserAndName() (string, string) {
 }
 
 func (e *Engine) Up(ctx context.Context, logChan chan<- string) error {
-	cmd := execCommand(ctx, "docker", "compose", "up", "-d")
+	cmd := execCommand(ctx, "docker", "compose", "up", "-d", "--remove-orphans")
 	cmd.Dir = e.BaseDir
 
 	stdout, err := cmd.StdoutPipe()
@@ -284,6 +284,17 @@ func (e *Engine) ResetAll(ctx context.Context, logChan chan<- string) error {
 		rmCmd := execCommand(ctx, "docker", "rm", "-f", name)
 		_ = rmCmd.Run()
 	}
+	// Dynamic container cleanup for any remaining matches
+	if psOut, psErr := execCommand(ctx, "docker", "ps", "-a", "--format", "{{.Names}}").Output(); psErr == nil {
+		for _, line := range strings.Split(string(psOut), "\n") {
+			name := strings.TrimSpace(line)
+			cleanName := strings.TrimPrefix(name, "/")
+			lower := strings.ToLower(cleanName)
+			if lower != "" && (strings.Contains(lower, "crm") || strings.Contains(lower, "openlocalcrm") || strings.Contains(lower, "mavalio")) {
+				_ = execCommand(ctx, "docker", "rm", "-f", cleanName).Run()
+			}
+		}
+	}
 
 	// 3. Force remove persistent CRM volumes (including legacy mavalio)
 	if logChan != nil {
@@ -299,6 +310,16 @@ func (e *Engine) ResetAll(ctx context.Context, logChan chan<- string) error {
 	for _, vol := range lingeringVolumes {
 		volCmd := execCommand(ctx, "docker", "volume", "rm", "-f", vol)
 		_ = volCmd.Run()
+	}
+	// Dynamic volume cleanup for any remaining matches
+	if volOut, volErr := execCommand(ctx, "docker", "volume", "ls", "--format", "{{.Name}}").Output(); volErr == nil {
+		for _, line := range strings.Split(string(volOut), "\n") {
+			vol := strings.TrimSpace(line)
+			lower := strings.ToLower(vol)
+			if lower != "" && (strings.Contains(lower, "crm") || strings.Contains(lower, "openlocalcrm") || strings.Contains(lower, "mavalio")) {
+				_ = execCommand(ctx, "docker", "volume", "rm", "-f", vol).Run()
+			}
+		}
 	}
 
 	// 4. Delete local .env file

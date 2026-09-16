@@ -43,50 +43,19 @@ func openBrowser(url string) error {
 	return cmd.Start()
 }
 
-func ResolveProjectBaseDir() string {
-	// 1. If docker-compose.yml exists in current working dir, use it
-	if _, err := os.Stat("docker-compose.yml"); err == nil {
-		return "."
-	}
-	// 2. Check executable directory and parent directory (e.g. when run from bin/)
-	if exePath, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exePath)
-		if _, err := os.Stat(filepath.Join(exeDir, "docker-compose.yml")); err == nil {
-			return exeDir
-		}
-		parentDir := filepath.Dir(exeDir)
-		if _, err := os.Stat(filepath.Join(parentDir, "docker-compose.yml")); err == nil {
-			return parentDir
-		}
-
-		// 3. Check known standard installation directories on Windows
-		candidates := []string{
-			"C:\\openlocalcrm",
-			"C:\\mavalio",
-			filepath.Join(os.Getenv("LOCALAPPDATA"), "openlocalcrm"),
-			filepath.Join(os.Getenv("LOCALAPPDATA"), "mavalio"),
-			filepath.Join(os.Getenv("ProgramFiles"), "OpenLocalCRM"),
-			filepath.Join(os.Getenv("ProgramFiles"), "mavalio CRM"),
-		}
-		for _, c := range candidates {
-			if c != "" {
-				if _, err := os.Stat(filepath.Join(c, "docker-compose.yml")); err == nil {
-					return c
-				}
-				if _, err := os.Stat(filepath.Join(c, ".env")); err == nil {
-					return c
-				}
-			}
-		}
-
-		return exeDir
-	}
-	return "."
-}
-
 func main() {
+	// If CLI arguments are provided, dispatch directly to CLI runner
+	if len(os.Args) > 1 && os.Args[1] != "gui" {
+		dirFlag := extractDirFlag(os.Args[1:])
+		baseDir := ResolveProjectBaseDir(dirFlag)
+		handled, exitCode := RunCLI(os.Args[1:], baseDir)
+		if handled {
+			os.Exit(exitCode)
+		}
+	}
+
 	// Determine base directory (checks ., bin/.., and exeDir)
-	baseDir := ResolveProjectBaseDir()
+	baseDir := ResolveProjectBaseDir("")
 	if err := launcher.EnsureComposeAndCaddyFiles(baseDir); err != nil {
 		log.Printf("[WARNING] EnsureComposeAndCaddyFiles: %v", err)
 	}
@@ -99,20 +68,55 @@ func main() {
 	}
 
 	log.Println("==================================================")
-	log.Printf("  OpenLocalCRM — Windows Setup & Control Launcher")
+	log.Printf("  OpenLocalCRM — Setup & Control Center")
 	log.Printf("  Started at: %s", time.Now().Format("2006-01-02 15:04:05"))
 	log.Printf("  Base Dir:   %s", baseDir)
 	log.Printf("  Log File:   %s", logFilePath)
 	log.Println("==================================================")
+
+	// Clean up any old executable backups from previous updates
+	updater := launcher.NewUpdater(baseDir)
+	updater.CleanupStaleOldExecutables()
 
 	port := findAvailablePort(9099)
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	serverURL := fmt.Sprintf("http://%s", addr)
 
 	engine := launcher.NewEngine(baseDir)
-	handler := launcher.NewServer(baseDir, engine)
 
-	srv := &http.Server{
+	var srv *http.Server
+
+	restartFunc := func(newExe string) {
+		log.Println("[Restart] Fahre bestehenden Server geordnet herunter und gebe Port frei...")
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer shutdownCancel()
+		if srv != nil {
+			_ = srv.Shutdown(shutdownCtx)
+		}
+
+		exeToRun := newExe
+		if exeToRun == "" {
+			if exe, err := os.Executable(); err == nil {
+				exeToRun = exe
+			}
+		}
+
+		if exeToRun != "" {
+			log.Printf("[Restart] Starte neuen Launcher-Prozess: %s", exeToRun)
+			cmd := exec.Command(exeToRun)
+			cmd.Dir = baseDir
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if startErr := cmd.Start(); startErr != nil {
+				log.Printf("[FEHLER] Konnte neuen Prozess nicht starten: %v", startErr)
+			}
+		}
+		os.Exit(0)
+	}
+
+	handler := launcher.NewServerWithUpdater(baseDir, engine, updater, restartFunc)
+
+	srv = &http.Server{
 		Addr:         addr,
 		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
@@ -129,9 +133,17 @@ func main() {
 		}
 	}()
 
-	// Open browser automatically after brief delay
+	isHeadlessLinux := runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == ""
+
+	// Open browser automatically after brief delay (unless headless Linux)
 	go func() {
 		time.Sleep(300 * time.Millisecond)
+		if isHeadlessLinux {
+			log.Println("[Headless] Keine grafische Anzeige erkannt ($DISPLAY unset).")
+			log.Printf("[Headless] Web-Oberfläche erreichbar unter: %s (z. B. via SSH-Tunnel).", serverURL)
+			log.Println("[Headless] Nutzen Sie 'openlocalcrm --help' für die Steuerung im Terminal.")
+			return
+		}
 		log.Printf("[Browser] Opening %s in default browser...", serverURL)
 		_ = openBrowser(serverURL)
 	}()

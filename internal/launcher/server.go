@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/launcher/ui"
 )
@@ -18,16 +19,25 @@ import (
 type Server struct {
 	baseDir string
 	engine  *Engine
+	updater *Updater
 
 	mu   sync.RWMutex
 	logs []string
+
+	onRestart func(newExe string)
 }
 
 func NewServer(baseDir string, engine *Engine) http.Handler {
+	return NewServerWithUpdater(baseDir, engine, NewUpdater(baseDir), nil)
+}
+
+func NewServerWithUpdater(baseDir string, engine *Engine, updater *Updater, onRestart func(string)) http.Handler {
 	s := &Server{
-		baseDir: baseDir,
-		engine:  engine,
-		logs:    make([]string, 0),
+		baseDir:   baseDir,
+		engine:    engine,
+		updater:   updater,
+		logs:      make([]string, 0),
+		onRestart: onRestart,
 	}
 
 	mux := http.NewServeMux()
@@ -46,6 +56,8 @@ func NewServer(baseDir string, engine *Engine) http.Handler {
 	mux.HandleFunc("/api/admin/reset-password", s.handleResetAdminPassword)
 	mux.HandleFunc("/api/install/", s.handleInstall)
 	mux.HandleFunc("/api/logs", s.handleLogs)
+	mux.HandleFunc("/api/update/check", s.handleUpdateCheck)
+	mux.HandleFunc("/api/update/execute", s.handleUpdateExecute)
 
 	// Embedded Static UI
 	mux.Handle("/", ui.Handler())
@@ -479,5 +491,67 @@ func (s *Server) handleResetAdminPassword(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"message": fmt.Sprintf("Passwort für %s erfolgreich aktualisiert!", req.Email),
+	})
+}
+
+func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	commit := r.URL.Query().Get("commit")
+	if commit == "" {
+		commit = BuildCommit
+	}
+
+	res, err := s.updater.CheckForUpdate(commit)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"has_update":     false,
+			"current_commit": commit,
+			"error":          err.Error(),
+			"checked_at":     time.Now(),
+		})
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(res)
+}
+
+func (s *Server) handleUpdateExecute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	logChan := make(chan string, 100)
+	go func() {
+		for line := range logChan {
+			s.appendLog(line)
+			log.Println("[Updater]", line)
+		}
+	}()
+
+	go func() {
+		defer close(logChan)
+		s.appendLog("[Update] Starte Aktualisierung von GitHub...")
+		if err := s.updater.ExecuteUpdate(context.Background(), s.engine, logChan); err != nil {
+			s.appendLog(fmt.Sprintf("[FEHLER] Update fehlgeschlagen: %v", err))
+			return
+		}
+
+		if s.onRestart != nil {
+			time.Sleep(500 * time.Millisecond)
+			s.appendLog("[Update] Fahre Launcher herunter und starte neu...")
+			s.onRestart("")
+		}
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"message": "Update gestartet",
 	})
 }

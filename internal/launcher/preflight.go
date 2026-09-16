@@ -13,6 +13,8 @@ import (
 )
 
 type SystemStatus struct {
+	OS              string `json:"os"`
+	Arch            string `json:"arch"`
 	WSLInstalled    bool   `json:"wsl_installed"`
 	WSLStatus       string `json:"wsl_status"`
 	DockerInstalled bool   `json:"docker_installed"`
@@ -26,11 +28,22 @@ type SystemStatus struct {
 func CheckPortAvailable(port int) bool {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return false
+	if err == nil {
+		_ = ln.Close()
+		return true
 	}
-	_ = ln.Close()
-	return true
+	// If non-root user attempts port < 1024 on Unix, net.Listen returns permission denied.
+	// Check whether anything is actively listening by connecting:
+	if runtime.GOOS != "windows" && port < 1024 && strings.Contains(strings.ToLower(err.Error()), "permission denied") {
+		conn, dialErr := net.DialTimeout("tcp", addr, 150*time.Millisecond)
+		if dialErr != nil {
+			// Connection refused or timed out -> port is NOT occupied by any listening server!
+			return true
+		}
+		_ = conn.Close()
+		return false // Port is actively occupied
+	}
+	return false
 }
 
 func parseWSLOutput(output string) bool {
@@ -50,7 +63,7 @@ func parseWSLOutput(output string) bool {
 
 func CheckWSLStatus(ctx context.Context) (bool, string) {
 	if runtime.GOOS != "windows" {
-		return true, "WSL not required on non-Windows host"
+		return true, "WSL nicht erforderlich auf macOS/Linux"
 	}
 
 	if _, err := exec.LookPath("wsl.exe"); err != nil {
@@ -90,16 +103,24 @@ func TriggerDockerInstall(ctx context.Context) error {
 }
 
 func TriggerDockerStart(ctx context.Context) error {
-	if runtime.GOOS != "windows" {
-		return fmt.Errorf("Docker Desktop auto-start is only supported on Windows")
+	switch runtime.GOOS {
+	case "darwin":
+		return execCommand(ctx, "open", "-a", "Docker").Run()
+	case "linux":
+		return execCommand(ctx, "systemctl", "start", "docker").Run()
+	case "windows":
+		standardPath := filepath.Join(os.Getenv("ProgramFiles"), "Docker", "Docker", "Docker Desktop.exe")
+		cmd := execCommand(ctx, "powershell.exe", "-NoProfile", "-Command", fmt.Sprintf("Start-Process '%s'", standardPath))
+		return cmd.Run()
+	default:
+		return fmt.Errorf("Docker Desktop auto-start is not supported on %s", runtime.GOOS)
 	}
-	standardPath := filepath.Join(os.Getenv("ProgramFiles"), "Docker", "Docker", "Docker Desktop.exe")
-	cmd := execCommand(ctx, "powershell.exe", "-NoProfile", "-Command", fmt.Sprintf("Start-Process '%s'", standardPath))
-	return cmd.Run()
 }
 
 func RunPreflightCheck(ctx context.Context) SystemStatus {
 	status := SystemStatus{
+		OS:           runtime.GOOS,
+		Arch:         runtime.GOARCH,
 		Port80Free:   CheckPortAvailable(80),
 		Port8080Free: CheckPortAvailable(8080),
 	}

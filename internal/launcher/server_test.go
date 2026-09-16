@@ -218,5 +218,43 @@ func TestServerControlResetEndpoint(t *testing.T) {
 	}
 }
 
+func TestServer_UpdateCheckRoute(t *testing.T) {
+	tmpDir := t.TempDir()
+	engine := NewEngine(tmpDir)
+	handler := NewServer(tmpDir, engine)
 
+	req := httptest.NewRequest("GET", "/api/update/check", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if !strings.Contains(w.Body.String(), "current_commit") {
+		t.Errorf("expected response to contain current_commit, got %s", w.Body.String())
+	}
+}
+
+func TestServer_UpdateExecuteRoute(t *testing.T) {
+	tmpDir := t.TempDir()
+	engine := NewEngine(tmpDir)
+	handler := NewServer(tmpDir, engine)
+
+	req := httptest.NewRequest("POST", "/api/update/execute", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if !strings.Contains(w.Body.String(), `"success":true`) {
+		t.Errorf("expected success:true in response, got %s", w.Body.String())
+	}
+
+	time.Sleep(150 * time.Millisecond)
+}
 

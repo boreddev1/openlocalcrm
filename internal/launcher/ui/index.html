@@ -3,14 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenLocalCRM — Windows Setup & Control Center</title>
+  <title>OpenLocalCRM — Setup & Control Center</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header>
     <div class="logo">
       <span>🏢 OpenLocalCRM</span> Launcher
-      <span class="badge-version">v3.0 Windows</span>
+      <span class="badge-version" id="launcher-version-badge">v3.0</span>
+      <button id="btn-update-available" class="btn btn-warning btn-sm hidden" style="margin-left: 0.5rem; padding: 0.2rem 0.5rem; font-size: 0.75rem; display: none;" onclick="openUpdateModal()">⚡ Update verfügbar</button>
     </div>
     <div id="header-status">
       <span class="status-badge healthy" id="system-overall-badge">● System bereit</span>
@@ -55,11 +56,11 @@
       <!-- STEP 1: PRE-FLIGHT -->
       <div id="step-content-1">
         <h2>1. Systemvoraussetzungen prüfen</h2>
-        <p class="helper-text">Wir prüfen Ihr Windows-System auf WSL2, Docker Desktop und Port-Verfügbarkeit.</p>
+        <p class="helper-text" id="preflight-intro-text">Wir prüfen Ihr System auf Docker und Port-Verfügbarkeit.</p>
 
         <div class="status-grid">
           <!-- WSL2 CARD -->
-          <div class="status-card">
+          <div class="status-card" id="status-wsl-card">
             <h4>WSL 2 (Linux-Subsystem)</h4>
             <div id="status-wsl" class="status-badge warning">Prüfe...</div>
             <p id="wsl-detail" class="helper-text"></p>
@@ -236,7 +237,8 @@
       </div>
 
       <div style="margin: 1.5rem 0; display: flex; gap: 0.75rem; flex-wrap: wrap;">
-        <button class="btn btn-primary" onclick="updateContainers()">🔄 System & Container aktualisieren (Rebuild)</button>
+        <button class="btn btn-primary" onclick="updateContainers()">🔄 Container aktualisieren (Rebuild)</button>
+        <button class="btn btn-outline" id="btn-check-updates" onclick="checkUpdatesManually()">⚡ Nach GitHub-Updates suchen</button>
         <button class="btn btn-secondary" onclick="controlAction('start')">▶️ Stack starten</button>
         <button class="btn btn-secondary" onclick="controlAction('restart')">🔄 Neu starten</button>
         <button class="btn btn-secondary" onclick="controlAction('stop')">⏹️ Anhalten</button>
@@ -342,6 +344,34 @@
       <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
         <button type="button" class="btn btn-secondary" onclick="closeResetModal()" id="btn-cancel-reset">Abbrechen</button>
         <button type="button" class="btn btn-danger" id="btn-confirm-reset" disabled onclick="executeFactoryReset()">🗑️ Alles löschen & neu aufsetzen</button>
+      </div>
+  <!-- SYSTEM UPDATE MODAL -->
+  <div id="update-modal" class="modal-overlay hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; z-index: 9999;">
+    <div class="card" style="max-width: 540px; width: 92%; margin: auto; position: relative; border: 1px solid rgba(245, 158, 11, 0.4); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0; font-size: 1.2rem; color: #fbbf24;">🚀 OpenLocalCRM Update verfügbar</h3>
+        <button onclick="closeUpdateModal()" style="background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer; padding: 0 0.5rem; line-height: 1;">&times;</button>
+      </div>
+
+      <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; margin-bottom: 1.25rem;">
+        <p style="margin-bottom: 0.5rem; font-size: 0.9rem;"><strong>Installierte Version:</strong> <code id="update-current-commit" style="color: #cbd5e1;">dev</code></p>
+        <p style="margin-bottom: 0.5rem; font-size: 0.9rem;"><strong>Neueste GitHub-Version:</strong> <code id="update-latest-commit" style="color: #34d399;">prüfe...</code></p>
+        <p style="font-size: 0.85rem; color: #94a3b8; margin-top: 0.5rem;"><strong>Änderung:</strong> <span id="update-commit-msg" style="color: #e2e8f0; font-style: italic;"></span></p>
+      </div>
+
+      <p style="color: #cbd5e1; font-size: 0.9rem; line-height: 1.5; margin-bottom: 1rem;">
+        Das Update lädt die neuesten Repository-Dateien herunter, aktualisiert das Windows-Launcher-Executable und startet den Launcher nahtlos neu.
+      </p>
+
+      <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.85rem; color: #6ee7b7;">
+        🛡️ <strong>Sicherheit garantiert:</strong> Ihre <code>.env</code>-Konfiguration und alle Datenbank-Backups bleiben unberührt. Vor dem Update wird zusätzlich ein automatisches Sicherheits-Backup erstellt.
+      </div>
+
+      <div id="update-progress-feedback" style="margin-bottom: 1rem; font-size: 0.9rem; min-height: 1.2rem; font-weight: 500;"></div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+        <button type="button" class="btn btn-secondary" onclick="closeUpdateModal()" id="btn-cancel-update">Später</button>
+        <button type="button" class="btn btn-warning" id="btn-confirm-update" onclick="executeSystemUpdate()">⚡ Jetzt aktualisieren & neu starten</button>
       </div>
     </div>
   </div>
