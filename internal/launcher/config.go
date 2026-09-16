@@ -21,6 +21,7 @@ type SetupConfig struct {
 	AIBaseURL     string `json:"ai_base_url"`
 	AIAPIKey      string `json:"ai_api_key"`
 	AIModel       string `json:"ai_model"`
+	Version       string `json:"version"`
 }
 
 func randomHex(bytes int) string {
@@ -80,6 +81,14 @@ func ReadExistingConfig(baseDir string) (*SetupConfig, bool) {
 		AIBaseURL:     envMap["AI_BASE_URL"],
 		AIAPIKey:      envMap["AI_API_KEY"],
 		AIModel:       envMap["OLLAMA_MODEL"],
+		Version:       envMap["OPENLOCALCRM_VERSION"],
+	}
+
+	if cfg.Version == "" {
+		cfg.Version = envMap["CRM_VERSION"]
+	}
+	if cfg.Version == "" {
+		cfg.Version = "v0.9"
 	}
 
 	if cfg.AdminEmail == "" {
@@ -132,8 +141,9 @@ func DetectExistingInstallation(ctx context.Context, baseDir string, engine *Eng
 					IsDemoMode:    strings.EqualFold(recovered["DEMO_MODE"], "true"),
 					AIProvider:    recovered["AI_PROVIDER"],
 					AIBaseURL:     recovered["OLLAMA_BASE_URL"],
-					AIModel:       recovered["OLLAMA_MODEL"],
 					AIAPIKey:      recovered["AI_API_KEY"],
+					AIModel:       recovered["OLLAMA_MODEL"],
+					Version:       recovered["OPENLOCALCRM_VERSION"],
 				}
 				if cfg.AdminEmail == "" {
 					cfg.AdminEmail = "admin@openlocalcrm.local"
@@ -195,6 +205,15 @@ func GenerateEnvContentWithExisting(cfg SetupConfig, existing map[string]string)
 		cfg.AdminPassword = randomHex(12)
 	}
 
+	version := cfg.Version
+	if version == "" {
+		if existing != nil && existing["OPENLOCALCRM_VERSION"] != "" {
+			version = existing["OPENLOCALCRM_VERSION"]
+		} else {
+			version = "v0.9"
+		}
+	}
+
 	dbPassword := randomHex(16)
 	if existing != nil && existing["DB_PASSWORD"] != "" {
 		dbPassword = existing["DB_PASSWORD"]
@@ -224,6 +243,7 @@ func GenerateEnvContentWithExisting(cfg SetupConfig, existing map[string]string)
 		"DOMAIN=localhost",
 		fmt.Sprintf("PORT=%d", cfg.Port),
 		fmt.Sprintf("APP_PORT=%d", cfg.Port),
+		fmt.Sprintf("OPENLOCALCRM_VERSION=%s", version),
 		"LOG_LEVEL=info",
 		"",
 		"# Administrator Account",

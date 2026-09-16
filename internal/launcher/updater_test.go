@@ -3,11 +3,13 @@ package launcher
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -205,5 +207,75 @@ func TestApplyStagedFiles_SkipsAllBinaries(t *testing.T) {
 		t.Errorf("binary in bin/ should NOT be copied during staging walk")
 	}
 }
+
+func TestGetAvailableVersions(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"name": "v0.9",
+				"commit": map[string]any{
+					"sha": "cdf51e5123456789",
+				},
+			},
+			{
+				"name": "v0.8",
+				"commit": map[string]any{
+					"sha": "1234567abcdef",
+				},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	targetDir := t.TempDir()
+	u := NewUpdater(targetDir)
+	u.TagsURL = ts.URL
+	u.Client = ts.Client()
+
+	resp := u.GetAvailableVersions(context.Background())
+	if len(resp.Versions) != 3 { // v0.9, v0.8, main
+		t.Fatalf("expected 3 versions (v0.9, v0.8, main), got %d: %+v", len(resp.Versions), resp.Versions)
+	}
+
+	if resp.Versions[0].Tag != "v0.9" || !resp.Versions[0].IsLatest {
+		t.Errorf("expected v0.9 to be latest, got %+v", resp.Versions[0])
+	}
+	if resp.Versions[1].Tag != "v0.8" || resp.Versions[1].IsLatest {
+		t.Errorf("expected v0.8 not latest, got %+v", resp.Versions[1])
+	}
+	if resp.Versions[2].Tag != "main" {
+		t.Errorf("expected main branch, got %+v", resp.Versions[2])
+	}
+
+	// Test fallback when offline / error
+	uBad := NewUpdater(targetDir)
+	uBad.TagsURL = "http://127.0.0.1:54321/error"
+	fallbackResp := uBad.GetAvailableVersions(context.Background())
+	if len(fallbackResp.Versions) < 2 {
+		t.Errorf("expected fallback versions on error, got %+v", fallbackResp)
+	}
+}
+
+func TestEnsureProjectFilesForVersion_SkipIfExists(t *testing.T) {
+	targetDir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(targetDir, "Dockerfile.server"), []byte("FROM alpine"), 0644)
+
+	u := NewUpdater(targetDir)
+	logChan := make(chan string, 10)
+	err := u.EnsureProjectFilesForVersion(context.Background(), "v0.9", false, logChan)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	close(logChan)
+	var logs []string
+	for l := range logChan {
+		logs = append(logs, l)
+	}
+	if len(logs) == 0 || !strings.Contains(logs[0], "bereits lokal vorhanden") {
+		t.Errorf("expected log that files already exist, got %v", logs)
+	}
+}
+
 
 

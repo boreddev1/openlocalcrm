@@ -200,4 +200,28 @@ func TestWriteConfigAndDirectoriesWithEnv(t *testing.T) {
 	}
 }
 
+func TestGenerateEnvContent_Version(t *testing.T) {
+	cfg := SetupConfig{
+		Port:       80,
+		AdminEmail: "admin@openlocalcrm.local",
+		Version:    "v0.9",
+	}
+
+	content, err := GenerateEnvContent(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(content, "OPENLOCALCRM_VERSION=v0.9") {
+		t.Errorf("expected OPENLOCALCRM_VERSION=v0.9 in env content, got:\n%s", content)
+	}
+
+	tmp := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tmp, ".env"), []byte(content), 0600)
+	loaded, ok := ReadExistingConfig(tmp)
+	if !ok || loaded.Version != "v0.9" {
+		t.Errorf("expected ReadExistingConfig to read version v0.9, got %+v", loaded)
+	}
+}
+
+
 

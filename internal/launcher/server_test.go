@@ -258,3 +258,24 @@ func TestServer_UpdateExecuteRoute(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 }
 
+func TestServerVersionsEndpoint(t *testing.T) {
+	tmpDir := t.TempDir()
+	engine := NewEngine(tmpDir)
+	handler := NewServer(tmpDir, engine)
+
+	req := httptest.NewRequest("GET", "/api/versions", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "versions") || !strings.Contains(body, "v0.9") {
+		t.Errorf("expected versions response containing v0.9, got: %s", body)
+	}
+}
+
+

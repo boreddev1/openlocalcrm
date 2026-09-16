@@ -43,6 +43,23 @@ type UpdateCheckResult struct {
 	Error         string    `json:"error,omitempty"`
 }
 
+type VersionInfo struct {
+	Tag      string `json:"tag"`
+	Name     string `json:"name"`
+	Commit   string `json:"commit,omitempty"`
+	IsLatest bool   `json:"is_latest"`
+}
+
+type VersionsResponse struct {
+	CurrentVersion string        `json:"current_version"`
+	Versions       []VersionInfo `json:"versions"`
+}
+
+type cachedVersions struct {
+	result    *VersionsResponse
+	timestamp time.Time
+}
+
 type cachedCheck struct {
 	etag      string
 	result    *UpdateCheckResult
@@ -53,9 +70,13 @@ type Updater struct {
 	BaseDir string
 	Client  *http.Client
 	RepoURL string
+	TagsURL string
 
 	cacheMu sync.RWMutex
 	cache   *cachedCheck
+
+	versionsMu     sync.RWMutex
+	versionsCache  *cachedVersions
 }
 
 func NewUpdater(baseDir string) *Updater {
@@ -65,6 +86,7 @@ func NewUpdater(baseDir string) *Updater {
 			Timeout: 60 * time.Second,
 		},
 		RepoURL: "https://api.github.com/repos/boreddev1/openlocalcrm/commits/main",
+		TagsURL: "https://api.github.com/repos/boreddev1/openlocalcrm/tags",
 	}
 }
 
@@ -584,3 +606,227 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	}
 	return nil
 }
+
+// GetAvailableVersions fetches all release tags from GitHub with caching and offline fallback
+func (u *Updater) GetAvailableVersions(ctx context.Context) VersionsResponse {
+	currentVersion := "v0.9"
+	if cfg, ok := ReadExistingConfig(u.BaseDir); ok && strings.TrimSpace(cfg.Version) != "" {
+		currentVersion = strings.TrimSpace(cfg.Version)
+	}
+
+	fallback := VersionsResponse{
+		CurrentVersion: currentVersion,
+		Versions: []VersionInfo{
+			{Tag: "v0.9", Name: "v0.9 (Neueste Version / Empfohlen)", IsLatest: true},
+			{Tag: "main", Name: "main (Edge / Entwicklungszweig)", IsLatest: false},
+		},
+	}
+
+	u.versionsMu.RLock()
+	if u.versionsCache != nil && time.Since(u.versionsCache.timestamp) < 15*time.Minute && u.versionsCache.result != nil {
+		res := *u.versionsCache.result
+		u.versionsMu.RUnlock()
+		res.CurrentVersion = currentVersion
+		return res
+	}
+	u.versionsMu.RUnlock()
+
+	tagsURL := u.TagsURL
+	if tagsURL == "" {
+		tagsURL = "https://api.github.com/repos/boreddev1/openlocalcrm/tags"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tagsURL, nil)
+	if err != nil {
+		return fallback
+	}
+	req.Header.Set("User-Agent", "OpenLocalCRM-Updater/3.0 (+https://github.com/boreddev1/openlocalcrm)")
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	resp, err := u.Client.Do(req)
+	if err != nil {
+		return fallback
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fallback
+	}
+
+	var ghTags []struct {
+		Name   string `json:"name"`
+		Commit struct {
+			SHA string `json:"sha"`
+		} `json:"commit"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&ghTags); err != nil || len(ghTags) == 0 {
+		return fallback
+	}
+
+	var versions []VersionInfo
+	for i, t := range ghTags {
+		tagName := strings.TrimSpace(t.Name)
+		if tagName == "" {
+			continue
+		}
+		commitSHA := t.Commit.SHA
+		if len(commitSHA) > 7 {
+			commitSHA = commitSHA[:7]
+		}
+		isLatest := (i == 0)
+		displayName := tagName
+		if isLatest {
+			displayName += " (Neueste Version / Empfohlen)"
+		}
+		versions = append(versions, VersionInfo{
+			Tag:      tagName,
+			Name:     displayName,
+			Commit:   commitSHA,
+			IsLatest: isLatest,
+		})
+	}
+
+	// Always append 'main' edge branch at the end
+	versions = append(versions, VersionInfo{
+		Tag:      "main",
+		Name:     "main (Edge / Entwicklungszweig)",
+		IsLatest: false,
+	})
+
+	res := VersionsResponse{
+		CurrentVersion: currentVersion,
+		Versions:       versions,
+	}
+
+	u.versionsMu.Lock()
+	u.versionsCache = &cachedVersions{
+		result:    &res,
+		timestamp: time.Now(),
+	}
+	u.versionsMu.Unlock()
+
+	return res
+}
+
+// EnsureProjectFilesForVersion checks if repository files (like Dockerfile.server) are present.
+// If missing or forced, it downloads and stages the zip archive for the requested version tag.
+func (u *Updater) EnsureProjectFilesForVersion(ctx context.Context, version string, force bool, logChan chan<- string) error {
+	v := strings.TrimSpace(version)
+	if v == "" {
+		v = "v0.9"
+	}
+
+	dockerfilePath := filepath.Join(u.BaseDir, "Dockerfile.server")
+	if !force {
+		if _, err := os.Stat(dockerfilePath); err == nil {
+			if logChan != nil {
+				logChan <- fmt.Sprintf("[Setup] Projektdateien für %s bereits lokal vorhanden.", v)
+			}
+			return nil
+		}
+	}
+
+	var zipURLs []string
+	if v == "main" || v == "master" || v == "edge" {
+		zipURLs = []string{"https://github.com/boreddev1/openlocalcrm/archive/refs/heads/main.zip"}
+	} else {
+		tag := v
+		var altTag string
+		if strings.HasPrefix(tag, "v") {
+			altTag = strings.TrimPrefix(tag, "v")
+		} else {
+			altTag = "v" + tag
+		}
+		zipURLs = []string{
+			fmt.Sprintf("https://github.com/boreddev1/openlocalcrm/archive/refs/tags/%s.zip", tag),
+			fmt.Sprintf("https://github.com/boreddev1/openlocalcrm/archive/refs/tags/%s.zip", altTag),
+			"https://github.com/boreddev1/openlocalcrm/archive/refs/heads/main.zip",
+		}
+	}
+
+	if logChan != nil {
+		logChan <- fmt.Sprintf("[Setup] Lade Projektdateien für Version %s von GitHub herunter...", v)
+	}
+
+	var resp *http.Response
+	var downloadErr error
+	var successfulURL string
+
+	for _, url := range zipURLs {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			downloadErr = err
+			continue
+		}
+		req.Header.Set("User-Agent", "OpenLocalCRM-Updater/3.0 (+https://github.com/boreddev1/openlocalcrm)")
+
+		r, err := u.Client.Do(req)
+		if err != nil {
+			downloadErr = err
+			continue
+		}
+		if r.StatusCode == http.StatusOK {
+			resp = r
+			successfulURL = url
+			break
+		}
+		r.Body.Close()
+		downloadErr = fmt.Errorf("status %d from %s", r.StatusCode, url)
+	}
+
+	if resp == nil {
+		return fmt.Errorf("failed downloading repository archive for version %s: %w", v, downloadErr)
+	}
+	defer resp.Body.Close()
+
+	tmpZip, err := os.CreateTemp("", "openlocalcrm_setup_*.zip")
+	if err != nil {
+		return fmt.Errorf("failed creating temp file for setup zip: %w", err)
+	}
+	tmpZipPath := tmpZip.Name()
+	defer os.Remove(tmpZipPath)
+
+	zipSize, err := io.Copy(tmpZip, resp.Body)
+	_ = tmpZip.Close()
+	if err != nil {
+		return fmt.Errorf("failed saving setup zip: %w", err)
+	}
+
+	if logChan != nil {
+		logChan <- fmt.Sprintf("[Setup] Archiv heruntergeladen (%s von %s).", formatBytes(zipSize), successfulURL)
+		logChan <- "[Setup] Entpacke Projektdateien..."
+	}
+
+	stagingDir := filepath.Join(u.BaseDir, ".openlocalcrm_setup_staging")
+	_ = os.RemoveAll(stagingDir)
+	if err := os.MkdirAll(stagingDir, 0755); err != nil {
+		return fmt.Errorf("failed creating staging directory: %w", err)
+	}
+	defer os.RemoveAll(stagingDir)
+
+	zr, err := zip.OpenReader(tmpZipPath)
+	if err != nil {
+		return fmt.Errorf("failed opening setup zip archive: %w", err)
+	}
+	defer zr.Close()
+
+	if err := u.ExtractZipSafely(&zr.Reader, stagingDir); err != nil {
+		return fmt.Errorf("failed extracting setup zip archive: %w", err)
+	}
+
+	if logChan != nil {
+		logChan <- "[Setup] Richte Repository-Dateien im Zielverzeichnis ein..."
+	}
+
+	if err := u.ApplyStagedFiles(stagingDir, logChan); err != nil {
+		return fmt.Errorf("failed applying staged files: %w", err)
+	}
+
+	if logChan != nil {
+		logChan <- fmt.Sprintf("[Setup] ✅ Projektdateien für %s erfolgreich eingerichtet!", v)
+	}
+
+	return nil
+}
+

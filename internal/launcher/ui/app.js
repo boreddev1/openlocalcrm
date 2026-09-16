@@ -10,6 +10,7 @@ let existingSystemConfig = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   generatePassword();
+  loadAvailableVersions();
   checkInitialStatus();
   checkForUpdates(false);
 });
@@ -440,6 +441,9 @@ async function startSetup() {
   configuredPort = parseInt(document.getElementById('web-port').value, 10) || 80;
   savedAdminPassword = document.getElementById('admin-password').value;
 
+  const versionSelect = document.getElementById('install-version');
+  const selectedVersion = versionSelect ? versionSelect.value : 'v0.9';
+
   const payload = {
     admin_email: document.getElementById('admin-email').value,
     admin_password: savedAdminPassword,
@@ -448,7 +452,8 @@ async function startSetup() {
     ai_provider: document.getElementById('ai-provider').value,
     ai_base_url: document.getElementById('ai-url').value,
     ai_api_key: document.getElementById('ai-key').value,
-    ai_model: document.getElementById('ai-model').value
+    ai_model: document.getElementById('ai-model').value,
+    version: selectedVersion
   };
 
   const terminal = document.getElementById('deployment-terminal');
@@ -1122,3 +1127,40 @@ function pollForRestartAndReload() {
     }
   }, 1500);
 }
+
+async function loadAvailableVersions() {
+  const select = document.getElementById('install-version');
+  const helper = document.getElementById('version-helper-text');
+  if (!select) return;
+
+  try {
+    const res = await fetch('/api/versions');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.versions || data.versions.length === 0) return;
+
+    const currentVal = select.value;
+    select.innerHTML = '';
+
+    data.versions.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v.tag;
+      opt.textContent = v.name;
+      select.appendChild(opt);
+    });
+
+    const preferred = existingSystemConfig?.version || currentVal || data.current_version;
+    if (preferred && Array.from(select.options).some(o => o.value === preferred)) {
+      select.value = preferred;
+    } else if (data.versions.length > 0) {
+      select.value = data.versions[0].tag;
+    }
+
+    if (helper) {
+      helper.textContent = `Verfügbare Versionen von GitHub geladen (${data.versions.length} Optionen).`;
+    }
+  } catch (err) {
+    console.warn('Fehler beim Laden der Versionen:', err);
+  }
+}
+
