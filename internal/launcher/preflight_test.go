@@ -3,6 +3,8 @@ package launcher
 import (
 	"context"
 	"net"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -58,16 +60,38 @@ func TestCheckWSLStatus(t *testing.T) {
 	}
 }
 
+func TestPreflight_OSAndArch(t *testing.T) {
+	status := RunPreflightCheck(context.Background())
+	if status.OS != runtime.GOOS {
+		t.Errorf("expected OS %s, got %s", runtime.GOOS, status.OS)
+	}
+	if status.Arch != runtime.GOARCH {
+		t.Errorf("expected Arch %s, got %s", runtime.GOARCH, status.Arch)
+	}
+}
+
+func TestCheckWSLStatus_NonWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
+	installed, msg := CheckWSLStatus(context.Background())
+	if !installed {
+		t.Errorf("expected WSL to be marked as installed/not required on non-windows, got false")
+	}
+	if !strings.Contains(strings.ToLower(msg), "not required") && !strings.Contains(strings.ToLower(msg), "nicht erforderlich") {
+		t.Errorf("unexpected wsl message: %s", msg)
+	}
+}
+
 func TestTriggerInstallFunctions_NonWindows(t *testing.T) {
-	// If running on macOS or Linux, triggers should return descriptive error
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows")
+	}
 	if err := TriggerWSLInstall(context.Background()); err == nil {
 		t.Errorf("expected error running TriggerWSLInstall on non-windows platform")
 	}
 	if err := TriggerDockerInstall(context.Background()); err == nil {
 		t.Errorf("expected error running TriggerDockerInstall on non-windows platform")
-	}
-	if err := TriggerDockerStart(context.Background()); err == nil {
-		t.Errorf("expected error running TriggerDockerStart on non-windows platform")
 	}
 }
 

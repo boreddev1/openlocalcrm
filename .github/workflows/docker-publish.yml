@@ -125,6 +125,12 @@ jobs:
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o dist-bin/crm-server-darwin-arm64 ./cmd/server
           # macOS AMD64 (Intel)
           CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-w -s" -o dist-bin/crm-server-darwin-amd64 ./cmd/server
+          # Windows AMD64 Launcher
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-w -s -H=windowsgui -X github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildCommit=${{ github.sha }} -X github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildDate=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o dist-bin/openlocalcrm-setup.exe ./cmd/setup-launcher
+          cp dist-bin/openlocalcrm-setup.exe dist-bin/mavalio-setup.exe
+          # Windows AMD64 Launcher Debug
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-w -s -X github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildCommit=${{ github.sha }} -X github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildDate=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o dist-bin/openlocalcrm-setup-debug.exe ./cmd/setup-launcher
+          cp dist-bin/openlocalcrm-setup-debug.exe dist-bin/mavalio-setup-debug.exe
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

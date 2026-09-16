@@ -48,6 +48,14 @@ Plans:
 - Task 6: complete (commits bf7d2ef..fde183b, review clean)
 - Task 7: complete (commits fde183b..ae3b95f, review clean)
 
+## Feature: GitHub Self-Updater for Windows Launcher & Repository Files
+- Task 1: complete (commit ffba1c9: protected blacklist & zip-slip guard)
+- Task 2: complete (commit ce6c996: github commit checker with ETag caching)
+- Task 3: complete (commit 8278053: staging file application, hot-swap & cleanup)
+- Task 4: complete (commit 7fe76de: /api/update/check & /api/update/execute with port release)
+- Task 5: complete (commit b6d9e3b: launcher embedded UI badge, modal & reconnect)
+- Task 6: complete (commit 652b469: Makefile commit injection & release workflow)
+
 
 
 

@@ -19,13 +19,32 @@ build: build-web ## Build Web and Go binary
 	go build -ldflags="-w -s" -o bin/crm-server ./cmd/server
 	go build -ldflags="-w -s" -o bin/crm-worker ./cmd/worker
 
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+LAUNCHER_LDFLAGS = -w -s -X "github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildCommit=$(GIT_COMMIT)" -X "github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildDate=$(BUILD_DATE)"
+
 build-windows: ## Build CGO-free Windows Release Binary (no console window)
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-w -s -H=windowsgui" -o bin/openlocalcrm-setup.exe ./cmd/setup-launcher
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(LAUNCHER_LDFLAGS) -H=windowsgui" -o bin/openlocalcrm-setup.exe ./cmd/setup-launcher
 	cp bin/openlocalcrm-setup.exe bin/mavalio-setup.exe
+	cp bin/openlocalcrm-setup.exe bin/openlocalcrm-setup-windows-amd64.exe
 
 build-windows-debug: ## Build Windows Debug Binary with visible console
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-w -s" -o bin/openlocalcrm-setup-debug.exe ./cmd/setup-launcher
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(LAUNCHER_LDFLAGS)" -o bin/openlocalcrm-setup-debug.exe ./cmd/setup-launcher
 	cp bin/openlocalcrm-setup-debug.exe bin/mavalio-setup-debug.exe
+
+build-darwin-arm64: ## Build macOS Apple Silicon binary
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$(LAUNCHER_LDFLAGS)" -o bin/openlocalcrm-setup-darwin-arm64 ./cmd/setup-launcher
+
+build-darwin-amd64: ## Build macOS Intel binary
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(LAUNCHER_LDFLAGS)" -o bin/openlocalcrm-setup-darwin-amd64 ./cmd/setup-launcher
+
+build-linux-amd64: ## Build Linux x86_64 binary
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LAUNCHER_LDFLAGS)" -o bin/openlocalcrm-setup-linux-amd64 ./cmd/setup-launcher
+
+build-linux-arm64: ## Build Linux ARM64 binary
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LAUNCHER_LDFLAGS)" -o bin/openlocalcrm-setup-linux-arm64 ./cmd/setup-launcher
+
+build-all-launcher: build-windows build-darwin-arm64 build-darwin-amd64 build-linux-amd64 build-linux-arm64 ## Build launcher for all platforms
 
 up: ## Start Docker Compose stack in background
 	docker compose up -d --build

@@ -217,6 +217,17 @@ input:focus, select:focus {
   background: #b91c1c;
 }
 
+.btn-warning {
+  background: #f59e0b;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.btn-warning:hover {
+  background: #d97706;
+  color: #0f172a;
+}
+
 button:disabled, .btn:disabled, .btn[disabled] {
   opacity: 0.5;
   cursor: not-allowed !important;
