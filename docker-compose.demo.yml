@@ -1,0 +1,48 @@
+# docker-compose.demo.yml
+# Standalone Demo-Deployment für OpenLocalCRM (Single-Tenant v3)
+# Startet den Server im autarken Demo-Modus ohne externe PostgreSQL-Datenbank.
+# Startbefehl: docker compose -f docker-compose.demo.yml up
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: crm-demo-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_demo_data:/data
+      - caddy_demo_config:/config
+    depends_on:
+      - server
+    networks:
+      - crm-demo-net
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: crm-demo-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DEMO_MODE=true
+      - STORAGE_PATH=/data/storage
+      - JWT_SECRET_KEY_PATH=/data/storage/keys/ed25519.key
+    volumes:
+      - crm_demo_storage:/data/storage
+    networks:
+      - crm-demo-net
+
+volumes:
+  crm_demo_storage:
+  caddy_demo_data:
+  caddy_demo_config:
+
+networks:
+  crm-demo-net:
+    driver: bridge

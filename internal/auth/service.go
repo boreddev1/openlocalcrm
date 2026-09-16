@@ -1,0 +1,262 @@
+package auth
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
+)
+
+var (
+	ErrInvalidCredentials = errors.New("ungültige E-Mail-Adresse oder Passwort")
+	ErrRateLimited        = errors.New("zu viele fehlgeschlagene Versuche. Bitte warten Sie 5 Minuten")
+	ErrUserNotActive      = errors.New("dieses Benutzerkonto ist nicht aktiv")
+	ErrInvalidTOTPCode    = errors.New("ungültiger 2FA/TOTP Authentifizierungscode")
+	ErrTOTPRequired       = errors.New("totp_code_required")
+	ErrPasswordTooShort   = errors.New("das Passwort muss mindestens 8 Zeichen lang sein")
+	ErrInvalidOldPassword = errors.New("das aktuelle Passwort ist ungültig")
+	ErrUserNotFound       = errors.New("benutzer nicht gefunden")
+)
+
+type AuthService struct {
+	querier db.Querier
+	privKey ed25519.PrivateKey
+	pubKey  ed25519.PublicKey
+	limiter *RateLimiter
+}
+
+func NewAuthService(querier db.Querier, privKey ed25519.PrivateKey, pubKey ed25519.PublicKey, limiter *RateLimiter) *AuthService {
+	if limiter == nil {
+		limiter = NewRateLimiter(5, 5*time.Minute, 5*time.Minute)
+	}
+	return &AuthService{
+		querier: querier,
+		privKey: privKey,
+		pubKey:  pubKey,
+		limiter: limiter,
+	}
+}
+
+type LoginResult struct {
+	Token        string  `json:"token,omitempty"`
+	RefreshToken string  `json:"refresh_token,omitempty"`
+	TOTPRequired bool    `json:"totp_required,omitempty"`
+	User         db.User `json:"user,omitempty"`
+}
+
+func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, userAgent string) (*LoginResult, error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" || password == "" {
+		return nil, ErrInvalidCredentials
+	}
+
+	rateLimitKey := fmt.Sprintf("%s:%s", ip, email)
+	if locked, remaining := s.limiter.IsLocked(rateLimitKey); locked {
+		return nil, fmt.Errorf("%w (gesperrt für noch %s)", ErrRateLimited, remaining.Round(time.Second))
+	}
+
+	user, err := s.querier.GetUserByEmail(ctx, email)
+	if err != nil {
+		s.limiter.RecordFailure(rateLimitKey)
+		return nil, ErrInvalidCredentials
+	}
+
+	if user.Status != "ACTIVE" {
+		return nil, ErrUserNotActive
+	}
+
+	if !CheckPassword(user.PasswordHash, password) {
+		s.limiter.RecordFailure(rateLimitKey)
+		return nil, ErrInvalidCredentials
+	}
+
+	// 2FA Verification
+	if user.TotpEnabled {
+		if totpCode == "" {
+			return &LoginResult{
+				TOTPRequired: true,
+			}, nil
+		}
+
+		secret := user.TotpSecretEncrypted.String
+		if !ValidateTOTPCode(totpCode, secret) {
+			s.limiter.RecordFailure(rateLimitKey)
+			return nil, ErrInvalidTOTPCode
+		}
+	}
+
+	// Authentication succeeded -> Reset RateLimiter
+	s.limiter.Reset(rateLimitKey)
+
+	// Update last login
+	_ = s.querier.UpdateUserLastLogin(ctx, db.UpdateUserLastLoginParams{
+		ID:          user.ID,
+		LastLoginAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	})
+
+	// Generate Access Token (JWT with Ed25519)
+	userID := uuid.UUID(user.ID.Bytes)
+	token, err := GenerateAccessToken(userID, user.Email, user.Role, s.privKey, 24*time.Hour)
+	if err != nil {
+		return nil, fmt.Errorf("failed generating access token: %w", err)
+	}
+
+	// Generate Refresh Token
+	rawBytes := make([]byte, 32)
+	_, _ = rand.Read(rawBytes)
+	rawRefreshToken := hex.EncodeToString(rawBytes)
+	tokenHash := hashToken(rawRefreshToken)
+
+	_, _ = s.querier.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
+		UserID:    user.ID,
+		TokenHash: tokenHash,
+		UserAgent: pgtype.Text{String: userAgent, Valid: userAgent != ""},
+		IpAddress: pgtype.Text{String: ip, Valid: ip != ""},
+		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(30 * 24 * time.Hour), Valid: true},
+	})
+
+	return &LoginResult{
+		Token:        token,
+		RefreshToken: rawRefreshToken,
+		User:         user,
+	}, nil
+}
+
+func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ip, userAgent string) (string, error) {
+	if rawRefreshToken == "" {
+		return "", errors.New("refresh token required")
+	}
+
+	tokenHash := hashToken(rawRefreshToken)
+	rf, err := s.querier.GetRefreshToken(ctx, tokenHash)
+	if err != nil {
+		return "", errors.New("invalid or expired refresh token")
+	}
+
+	user, err := s.querier.GetUserByID(ctx, rf.UserID)
+	if err != nil || user.Status != "ACTIVE" {
+		return "", errors.New("user account invalid or inactive")
+	}
+
+	userID := uuid.UUID(user.ID.Bytes)
+	newToken, err := GenerateAccessToken(userID, user.Email, user.Role, s.privKey, 24*time.Hour)
+	if err != nil {
+		return "", fmt.Errorf("failed generating access token: %w", err)
+	}
+
+	return newToken, nil
+}
+
+type TOTPSetupResult struct {
+	Secret string `json:"secret"`
+	URL    string `json:"url"`
+}
+
+func (s *AuthService) SetupTOTP(ctx context.Context, userID uuid.UUID) (*TOTPSetupResult, error) {
+	pgID := pgtype.UUID{Bytes: userID, Valid: true}
+	user, err := s.querier.GetUserByID(ctx, pgID)
+	if err != nil {
+		return nil, ErrUserNotFound
+	}
+
+	secret, url, err := GenerateTOTPKey(user.Email)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store secret temporarily (not enabled until verified)
+	err = s.querier.UpdateUserTOTP(ctx, db.UpdateUserTOTPParams{
+		ID:                  pgID,
+		TotpSecretEncrypted: pgtype.Text{String: secret, Valid: true},
+		TotpEnabled:         false,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &TOTPSetupResult{
+		Secret: secret,
+		URL:    url,
+	}, nil
+}
+
+func (s *AuthService) VerifyTOTP(ctx context.Context, userID uuid.UUID, code string) error {
+	pgID := pgtype.UUID{Bytes: userID, Valid: true}
+	user, err := s.querier.GetUserByID(ctx, pgID)
+	if err != nil {
+		return ErrUserNotFound
+	}
+
+	secret := user.TotpSecretEncrypted.String
+	if secret == "" {
+		return errors.New("no TOTP setup found in progress")
+	}
+
+	if !ValidateTOTPCode(code, secret) {
+		return ErrInvalidTOTPCode
+	}
+
+	return s.querier.UpdateUserTOTP(ctx, db.UpdateUserTOTPParams{
+		ID:                  pgID,
+		TotpSecretEncrypted: pgtype.Text{String: secret, Valid: true},
+		TotpEnabled:         true,
+	})
+}
+
+func (s *AuthService) DisableTOTP(ctx context.Context, userID uuid.UUID, currentPassword string) error {
+	pgID := pgtype.UUID{Bytes: userID, Valid: true}
+	user, err := s.querier.GetUserByID(ctx, pgID)
+	if err != nil {
+		return ErrUserNotFound
+	}
+
+	if !CheckPassword(user.PasswordHash, currentPassword) {
+		return ErrInvalidOldPassword
+	}
+
+	return s.querier.UpdateUserTOTP(ctx, db.UpdateUserTOTPParams{
+		ID:                  pgID,
+		TotpSecretEncrypted: pgtype.Text{Valid: false},
+		TotpEnabled:         false,
+	})
+}
+
+func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldPassword, newPassword string) error {
+	if len(newPassword) < 8 {
+		return ErrPasswordTooShort
+	}
+
+	pgID := pgtype.UUID{Bytes: userID, Valid: true}
+	user, err := s.querier.GetUserByID(ctx, pgID)
+	if err != nil {
+		return ErrUserNotFound
+	}
+
+	if !CheckPassword(user.PasswordHash, oldPassword) {
+		return ErrInvalidOldPassword
+	}
+
+	hash, err := HashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("failed hashing password: %w", err)
+	}
+
+	return s.querier.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
+		ID:           pgID,
+		PasswordHash: hash,
+	})
+}
+
+func hashToken(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}

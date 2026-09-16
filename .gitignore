@@ -1,0 +1,51 @@
+# Binaries and build artifacts
+/bin/*
+!bin/openlocalcrm-setup.exe
+!bin/openlocalcrm-setup-debug.exe
+!bin/mavalio-setup.exe
+!bin/mavalio-setup-debug.exe
+/tmp/
+*.exe
+!bin/openlocalcrm-setup.exe
+!bin/openlocalcrm-setup-debug.exe
+!bin/mavalio-setup.exe
+!bin/mavalio-setup-debug.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+coverage.out
+coverage.html
+test-results/
+playwright-report/
+
+# Dependencies
+node_modules/
+/vendor/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Root Data & storage directories
+/data/
+/storage/
+/backups/
+user-errors/
+*.db
+*.sqlite
+*.sql
+!internal/db/migrations/*.sql
+!internal/db/queries/*.sql
+!migrations/*.sql
+
+# OS and Editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
