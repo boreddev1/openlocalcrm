@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenLocalCRM — Windows Setup & Control Center</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <span>🏢 OpenLocalCRM</span> Launcher
+      <span class="badge-version">v3.0 Windows</span>
+    </div>
+    <div id="header-status">
+      <span class="status-badge healthy" id="system-overall-badge">● System bereit</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- SETUP WIZARD SECTION -->
+    <div id="wizard-section" class="card">
+      <div id="wizard-already-installed-banner" class="status-card hidden" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+          <div>
+            <strong style="color: #34d399; font-size: 0.95rem;">📦 Bestehende Version bereits installiert!</strong>
+            <p id="wizard-already-installed-text" class="helper-text" style="color: #cbd5e1; margin-top: 0.25rem;">Auf diesem System existiert bereits eine betriebsbereite OpenLocalCRM-Instanz.</p>
+          </div>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button class="btn btn-primary btn-sm" onclick="switchToControlCenter()">Zur Steuerungszentrale wechseln ➔</button>
+            <button class="btn btn-danger btn-sm" onclick="openResetModal()">⚠️ Alles löschen & neu aufsetzen</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="stepper">
+        <div class="step-item active" id="step-nav-1">
+          <div class="step-circle">1</div>
+          <div class="step-label">Systemprüfung</div>
+        </div>
+        <div class="step-item" id="step-nav-2">
+          <div class="step-circle">2</div>
+          <div class="step-label">Konfiguration</div>
+        </div>
+        <div class="step-item" id="step-nav-3">
+          <div class="step-circle">3</div>
+          <div class="step-label">Bereitstellung</div>
+        </div>
+        <div class="step-item" id="step-nav-4">
+          <div class="step-circle">4</div>
+          <div class="step-label">Fertig</div>
+        </div>
+      </div>
+
+      <!-- STEP 1: PRE-FLIGHT -->
+      <div id="step-content-1">
+        <h2>1. Systemvoraussetzungen prüfen</h2>
+        <p class="helper-text">Wir prüfen Ihr Windows-System auf WSL2, Docker Desktop und Port-Verfügbarkeit.</p>
+
+        <div class="status-grid">
+          <!-- WSL2 CARD -->
+          <div class="status-card">
+            <h4>WSL 2 (Linux-Subsystem)</h4>
+            <div id="status-wsl" class="status-badge warning">Prüfe...</div>
+            <p id="wsl-detail" class="helper-text"></p>
+            <div id="wsl-action-box" class="hidden" style="margin-top: 0.75rem;">
+              <button id="btn-install-wsl" class="btn btn-secondary btn-sm" onclick="installWSL()">🚀 WSL2 jetzt installieren (Admin UAC)</button>
+            </div>
+          </div>
+
+          <!-- DOCKER CARD -->
+          <div class="status-card">
+            <h4>Docker Desktop & Engine</h4>
+            <div id="status-docker" class="status-badge warning">Prüfe...</div>
+            <p id="docker-detail" class="helper-text"></p>
+            <div id="docker-action-box" class="hidden" style="margin-top: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <button id="btn-install-docker" class="btn btn-secondary btn-sm hidden" onclick="installDocker()">🐳 Docker Desktop installieren (Admin UAC)</button>
+              <button id="btn-start-docker" class="btn btn-secondary btn-sm hidden" onclick="startDocker()">▶️ Docker starten</button>
+            </div>
+          </div>
+
+          <!-- PORTS CARD -->
+          <div class="status-card">
+            <h4>Netzwerk-Ports</h4>
+            <div id="status-ports" class="status-badge warning">Prüfe...</div>
+            <p id="ports-detail" class="helper-text"></p>
+          </div>
+        </div>
+
+        <div id="system-action-feedback" class="helper-text" style="min-height: 1.25rem; font-weight: 500;"></div>
+
+        <div style="margin-top: 1.5rem; display: flex; justify-content: space-between; align-items: center;">
+          <button class="btn btn-outline" onclick="retryPreflight()">🔄 Erneut prüfen</button>
+          <button id="btn-step1-next" class="btn btn-primary" onclick="goToStep(2)">Weiter zur Konfiguration →</button>
+        </div>
+      </div>
+
+      <!-- STEP 2: CONFIGURATION & AI -->
+      <div id="step-content-2" class="hidden">
+        <h2>2. Administrator & Systemeinstellungen</h2>
+        <p class="helper-text">Legen Sie Ihr Zugangskonto fest und konfigurieren Sie optionale Backups oder KI.</p>
+
+        <div class="form-group" style="margin-top: 1.25rem;">
+          <label for="admin-email">Administrator E-Mail</label>
+          <input type="text" id="admin-email" value="admin@openlocalcrm.local">
+        </div>
+
+        <div class="form-group">
+          <label for="admin-password">Initiales Administrator-Passwort</label>
+          <div class="input-row">
+            <input type="text" id="admin-password" value="">
+            <button type="button" class="btn btn-secondary" onclick="generatePassword()">Generieren</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="web-port">Web-Port</label>
+          <input type="number" id="web-port" value="80">
+          <p class="helper-text">Standard: 80 (oder 8080 falls 80 durch Windows IIS belegt ist)</p>
+        </div>
+
+        <!-- ACCORDION: DATABASE RESTORE / IMPORT -->
+        <div class="accordion-box" style="margin: 1.5rem 0;">
+          <details>
+            <summary style="cursor: pointer; font-weight: 600; color: #38bdf8;">📦 Bestehende Datenbank importieren (.sql Dump) (Optional)</summary>
+            <div style="padding: 1rem 0;">
+              <p class="helper-text" style="margin-bottom: 0.75rem;">Falls Sie von einer früheren Version oder einem anderen Server migrieren, können Sie hier einen SQL-Dump hochladen.</p>
+              <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                <input type="file" id="setup-backup-file" accept=".sql" style="color: #94a3b8; font-size: 0.85rem;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="uploadSetupBackup()">Dump hochladen</button>
+              </div>
+              <div id="setup-backup-status" class="helper-text" style="margin-top: 0.5rem; font-weight: 500;"></div>
+            </div>
+          </details>
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 1.5rem 0;">
+
+        <h3>🧠 Flexible KI-Integration</h3>
+        <div class="form-group" style="margin-top: 1rem;">
+          <label for="ai-provider">KI-Provider</label>
+          <select id="ai-provider" onchange="onAIProviderChange()">
+            <option value="ollama">🖥️ Lokales Ollama (DSGVO 100 % lokal)</option>
+            <option value="openai">🌐 OpenAI / OpenAI-kompatibel (OpenRouter, Groq, vLLM, etc.)</option>
+            <option value="none">🚫 Keine KI (vorerst deaktiviert)</option>
+          </select>
+        </div>
+
+        <div id="ai-settings-box">
+          <div class="form-group">
+            <label for="ai-url">Endpunkt URL</label>
+            <input type="text" id="ai-url" value="http://localhost:11434">
+            <p class="helper-text">Lokale Adressen werden automatisch für Docker angepasst.</p>
+          </div>
+          <div class="form-group" id="ai-key-group" class="hidden">
+            <label for="ai-key">API-Key</label>
+            <input type="password" id="ai-key" placeholder="sk-...">
+          </div>
+          <div class="form-group">
+            <label for="ai-model">Modellname</label>
+            <input type="text" id="ai-model" value="gemma2:12b">
+          </div>
+
+          <div style="margin-bottom: 1rem;">
+            <button type="button" class="btn btn-outline" onclick="testAIConnection()">🧪 KI-Verbindung testen</button>
+            <span id="ai-probe-status" style="margin-left: 0.75rem; font-size: 0.85rem;"></span>
+          </div>
+        </div>
+
+        <div style="margin-top: 1.5rem; display: flex; justify-content: space-between;">
+          <button class="btn btn-secondary" onclick="goToStep(1)">← Zurück</button>
+          <button class="btn btn-primary" onclick="startSetup()">Installation jetzt starten 🚀</button>
+        </div>
+      </div>
+
+      <!-- STEP 3: DEPLOYMENT -->
+      <div id="step-content-3" class="hidden">
+        <h2>3. Installation & Container-Start</h2>
+        <p class="helper-text">Docker-Stack wird initialisiert. Dies kann beim ersten Download wenige Minuten dauern.</p>
+
+        <div class="terminal-box" id="deployment-terminal">Initialisiere Installation...\n</div>
+
+        <div style="display: flex; align-items: center; gap: 1rem; margin-top: 1rem; flex-wrap: wrap;">
+          <div class="status-badge warning" id="deploy-spinner">⏳ Startet Dienste...</div>
+          <span id="deploy-health-info" style="font-size: 0.85rem; color: var(--text-muted);">Health-Check läuft</span>
+        </div>
+        <div id="deploy-error-actions" class="hidden" style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+          <button class="btn btn-secondary" onclick="retryHealthCheck()">🔄 Status erneut prüfen</button>
+          <button class="btn btn-primary" onclick="switchToControlCenter()">📊 Zum Control-Center</button>
+          <button class="btn btn-outline" onclick="goToStep(2)">← Zurück zur Konfiguration</button>
+          <button class="btn btn-danger" onclick="openResetModal()">⚠️ Alles bereinigen & neu aufsetzen</button>
+        </div>
+      </div>
+
+      <!-- STEP 4: SUCCESS -->
+      <div id="step-content-4" class="hidden">
+        <h2>🎉 Einrichtung erfolgreich abgeschlossen!</h2>
+        <p class="helper-text">OpenLocalCRM läuft nun einsatzbereit auf Ihrem Windows-System.</p>
+
+        <div style="background: #0f172a; padding: 1.5rem; border-radius: 8px; margin: 1.5rem 0; border: 1px solid var(--border-color);">
+          <p><strong>URL:</strong> <span id="success-url">http://localhost</span></p>
+          <p><strong>Admin:</strong> <span id="success-email">admin@openlocalcrm.local</span></p>
+          <p><strong>Passwort:</strong> <span id="success-password" style="font-family: monospace;"></span></p>
+          <p class="helper-text" style="color: #38bdf8; margin-top: 0.75rem;">ℹ️ Bitte melden Sie sich im CRM-Browserfenster mit dieser Admin-E-Mail und dem Kennwort an, um Ihre authentifizierte Sitzung zu starten.</p>
+        </div>
+
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+          <button class="btn btn-primary" onclick="openCRM()">🌐 CRM im Browser öffnen & anmelden</button>
+          <button class="btn btn-secondary" onclick="switchToControlCenter()">📊 Zum Control-Center</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTROL CENTER DASHBOARD (When installed) -->
+    <div id="control-section" class="card hidden">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h2>OpenLocalCRM Steuerungszentrale</h2>
+          <p class="helper-text">Verwalten Sie Container-Updates, Wiederherstellung von Backups und Systemstatus.</p>
+        </div>
+        <button class="btn btn-primary" onclick="openCRM()">🌐 CRM öffnen</button>
+      </div>
+
+      <div id="installed-detected-banner" class="status-card" style="background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); margin-bottom: 1.5rem; display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+          <div>
+            <span style="font-weight: bold; color: #38bdf8; font-size: 0.95rem;">📦 Bestehende Installation erkannt</span>
+            <p id="installed-detected-text" class="helper-text" style="color: #cbd5e1; margin-top: 0.25rem;">OpenLocalCRM v3.0 ist auf diesem System betriebsbereit.</p>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="editExistingConfig()">⚙️ Konfiguration anpassen</button>
+        </div>
+      </div>
+
+      <div class="status-grid" id="control-containers-grid">
+        <!-- Containers injected here -->
+      </div>
+
+      <div style="margin: 1.5rem 0; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button class="btn btn-primary" onclick="updateContainers()">🔄 System & Container aktualisieren (Rebuild)</button>
+        <button class="btn btn-secondary" onclick="controlAction('start')">▶️ Stack starten</button>
+        <button class="btn btn-secondary" onclick="controlAction('restart')">🔄 Neu starten</button>
+        <button class="btn btn-secondary" onclick="controlAction('stop')">⏹️ Anhalten</button>
+        <button class="btn btn-outline" onclick="createBackup()">💾 1-Klick Backup erstellen</button>
+        <button class="btn btn-outline" onclick="openResetPasswordModal()">🔑 Admin-Passwort zurücksetzen</button>
+        <button class="btn btn-danger" onclick="openResetModal()">⚠️ Alles zurücksetzen (Neuaufbau)</button>
+      </div>
+
+      <div id="backup-result" class="helper-text" style="margin-bottom: 1rem;"></div>
+
+      <!-- BACKUP MANAGEMENT TABLE -->
+      <div style="margin: 2rem 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+          <h3>📦 Gespeicherte Backups & Wiederherstellung</h3>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <input type="file" id="control-backup-file" accept=".sql" style="display: none;" onchange="uploadControlBackup()">
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('control-backup-file').click()">⬆️ Backup hochladen (.sql)</button>
+            <button class="btn btn-outline btn-sm" onclick="fetchBackups()">🔄 Aktualisieren</button>
+          </div>
+        </div>
+
+        <div style="overflow-x: auto;">
+          <table class="data-table" id="backups-table">
+            <thead>
+              <tr>
+                <th>Dateiname</th>
+                <th>Größe</th>
+                <th>Erstellungsdatum</th>
+                <th style="text-align: right;">Aktion</th>
+              </tr>
+            </thead>
+            <tbody id="backups-tbody">
+              <tr><td colspan="4" class="helper-text">Lade Backups...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <h3>Live-Logs</h3>
+      <div class="terminal-box" id="control-terminal">Verbinde mit Log-Stream...\n</div>
+    </div>
+  </main>
+
+  <!-- RESET ADMIN PASSWORD MODAL -->
+  <div id="reset-password-modal" class="modal-overlay hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; z-index: 9999;">
+    <div class="card" style="max-width: 520px; width: 92%; margin: auto; position: relative; border: 1px solid rgba(255, 255, 255, 0.15); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0; font-size: 1.15rem; color: #f8fafc;">🔑 Administrator-Passwort zurücksetzen</h3>
+        <button onclick="closeResetPasswordModal()" style="background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer; padding: 0 0.5rem; line-height: 1;">&times;</button>
+      </div>
+      <p class="helper-text" style="margin-bottom: 1.25rem;">
+        Setzt das Kennwort des Administrators direkt in der PostgreSQL-Datenbank auf einen neuen Argon2id-Hash zurück. Eventuell aktives 2FA (TOTP) wird zur Entsperrung automatisch deaktiviert und bestehende Sitzungen werden abgemeldet.
+      </p>
+
+      <div class="form-group" style="margin-bottom: 1rem;">
+        <label for="reset-admin-email" style="display: block; margin-bottom: 0.35rem; font-size: 0.85rem; color: #cbd5e1;">Administrator-Konto (E-Mail)</label>
+        <input type="email" id="reset-admin-email" class="form-input" style="width: 100%; box-sizing: border-box;" placeholder="admin@openlocalcrm.local">
+      </div>
+
+      <div class="form-group" style="margin-bottom: 1.25rem;">
+        <label for="reset-admin-password" style="display: block; margin-bottom: 0.35rem; font-size: 0.85rem; color: #cbd5e1;">Neues Passwort</label>
+        <div style="display: flex; gap: 0.5rem;">
+          <input type="text" id="reset-admin-password" class="form-input" style="width: 100%; box-sizing: border-box; font-family: monospace;" placeholder="Mindestens 8 Zeichen">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="generateResetPassword()" style="white-space: nowrap;">🎲 Neu würfeln</button>
+        </div>
+      </div>
+
+      <div id="reset-password-feedback" style="margin-bottom: 1rem; font-size: 0.9rem; min-height: 1.2rem;"></div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+        <button type="button" class="btn btn-secondary" onclick="closeResetPasswordModal()">Schließen</button>
+        <button type="button" class="btn btn-primary" id="btn-submit-reset-password" onclick="submitResetPassword()">Passwort jetzt zurücksetzen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FACTORY RESET CONFIRMATION MODAL -->
+  <div id="reset-modal" class="modal-overlay hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; z-index: 9999;">
+    <div class="card" style="max-width: 540px; width: 92%; margin: auto; position: relative; border: 1px solid rgba(239, 68, 68, 0.4); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0; font-size: 1.2rem; color: #f87171;">⚠️ Gesamtes System zurücksetzen</h3>
+        <button onclick="closeResetModal()" style="background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer; padding: 0 0.5rem; line-height: 1;">&times;</button>
+      </div>
+      
+      <p style="color: #cbd5e1; font-size: 0.95rem; line-height: 1.5; margin-bottom: 0.75rem;">
+        Diese Aktion führt einen <strong>vollständigen Factory Reset</strong> durch:
+      </p>
+      <ul style="color: #cbd5e1; font-size: 0.9rem; line-height: 1.6; margin-left: 1.25rem; margin-bottom: 1.25rem;">
+        <li>Alle Docker-Container (CRM, Datenbank, Caddy-Proxy) werden gestoppt und entfernt.</li>
+        <li>Alle Datenbank-Volumes (CRM-Kundendaten, Einstellungen, Backups) werden restlos gelöscht.</li>
+        <li>Die lokale Konfigurationsdatei (<code>.env</code>) wird entfernt.</li>
+      </ul>
+
+      <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1.25rem;">
+        <label style="display: flex; align-items: center; gap: 0.5rem; margin: 0; cursor: pointer; color: #fca5a5; font-size: 0.85rem; font-weight: 500;">
+          <input type="checkbox" id="reset-confirm-checkbox" onchange="onResetCheckboxChange(this.checked)" style="width: auto; cursor: pointer;">
+          Ich bestätige, dass alle Daten restlos gelöscht werden dürfen.
+        </label>
+      </div>
+
+      <div id="reset-progress-feedback" style="margin-bottom: 1rem; font-size: 0.9rem; min-height: 1.2rem;"></div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+        <button type="button" class="btn btn-secondary" onclick="closeResetModal()" id="btn-cancel-reset">Abbrechen</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-reset" disabled onclick="executeFactoryReset()">🗑️ Alles löschen & neu aufsetzen</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

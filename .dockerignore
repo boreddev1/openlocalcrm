@@ -1,0 +1,13 @@
+.git
+.github
+.gemini
+.superpowers
+node_modules
+web/node_modules
+web/dist
+bin
+dist-bin
+test-results
+playwright-report
+*.tmp
+*.log

@@ -1,0 +1,39 @@
+# Caddyfile for OpenLocalCRM (Single-Tenant v3)
+{
+    admin off
+}
+
+:80, :443 {
+    encode gzip zstd
+
+    # HTTP Security Headers
+    header {
+        # Clickjacking Protection
+        X-Frame-Options "DENY"
+        # MIME-Type Sniffing Protection
+        X-Content-Type-Options "nosniff"
+        # Referrer Policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # XSS Protection
+        X-XSS-Protection "1; mode=block"
+        # Content Security Policy (allows self, inline styles for Tailwind, and local connect)
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:8080 http://localhost:11434 http://127.0.0.1:11434 http://host.docker.internal:11434; img-src 'self' data: https:; font-src 'self' data:; object-src 'none'; base-uri 'self';"
+    }
+
+    # API routes
+    handle /api/* {
+        reverse_proxy server:8080
+    }
+
+    # SSE streaming route with immediate flush
+    handle /events/* {
+        reverse_proxy server:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Static assets and SPA fallback
+    handle {
+        reverse_proxy server:8080
+    }
+}
