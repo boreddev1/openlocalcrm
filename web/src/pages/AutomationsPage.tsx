@@ -21,15 +21,17 @@ export const AutomationsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'WORKFLOWS' | 'RUNS'>('WORKFLOWS');
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
-  const { data: workflows = [], isLoading } = useQuery<any[]>({
+  const { data: rawWorkflows = [], isLoading } = useQuery<any[]>({
     queryKey: ['automations'],
     queryFn: () => apiFetch('/api/v1/automations'),
   });
+  const workflows = Array.isArray(rawWorkflows) ? rawWorkflows : [];
 
-  const { data: runs = [] } = useQuery<any[]>({
+  const { data: rawRuns = [] } = useQuery<any[]>({
     queryKey: ['automation-runs'],
     queryFn: () => apiFetch('/api/v1/automations/runs'),
   });
+  const runs = Array.isArray(rawRuns) ? rawRuns : [];
 
   const createMutation = useMutation({
     mutationFn: (newWf: any) =>

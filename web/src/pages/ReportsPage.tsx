@@ -9,7 +9,9 @@ export const ReportsPage: React.FC = () => {
     queryFn: () => apiFetch('/api/v1/reports/sales'),
   });
 
-  const forecast = reportData?.forecast || [
+  const forecast = Array.isArray(reportData?.forecast)
+    ? reportData.forecast
+    : [
     { month_name: 'Sep 2026', weighted_eur: 42500, committed_eur: 28000, deal_count: 4 },
     { month_name: 'Okt 2026', weighted_eur: 58000, committed_eur: 35000, deal_count: 6 },
     { month_name: 'Nov 2026', weighted_eur: 69000, committed_eur: 41000, deal_count: 7 },

@@ -37,10 +37,11 @@ export const CompaniesPage: React.FC = () => {
   const [researchResult, setResearchResult] = useState<any | null>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
 
-  const { data: companies = [], isLoading } = useQuery<any[]>({
+  const { data: rawCompanies = [], isLoading } = useQuery<any[]>({
     queryKey: ['companies'],
     queryFn: () => apiFetch('/api/v1/companies'),
   });
+  const companies = Array.isArray(rawCompanies) ? rawCompanies : [];
 
   const createMutation = useMutation({
     mutationFn: (newComp: any) =>

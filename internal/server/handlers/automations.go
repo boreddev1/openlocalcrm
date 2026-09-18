@@ -22,6 +22,9 @@ func (h *AutomationHandler) ListWorkflows(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if workflows == nil {
+		workflows = []automation.Workflow{}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(workflows)
 }

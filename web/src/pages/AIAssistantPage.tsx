@@ -137,10 +137,11 @@ export const AIAssistantPage: React.FC = () => {
     content: '',
   });
 
-  const { data: kbArticles = [] } = useQuery<any[]>({
+  const { data: rawKbArticles = [] } = useQuery<any[]>({
     queryKey: ['ai-kb'],
     queryFn: () => apiFetch('/api/v1/ai/kb'),
   });
+  const kbArticles = Array.isArray(rawKbArticles) ? rawKbArticles : [];
 
   const createKbMutation = useMutation({
     mutationFn: (newDoc: any) =>
@@ -188,10 +189,11 @@ export const AIAssistantPage: React.FC = () => {
   const [researchCategory, setResearchCategory] = useState('Gewerbesolar & Hallendach');
   const [selectedResearchJob, setSelectedResearchJob] = useState<any>(null);
 
-  const { data: researchJobs = [] } = useQuery<any[]>({
+  const { data: rawResearchJobs = [] } = useQuery<any[]>({
     queryKey: ['ai-research-jobs'],
     queryFn: () => apiFetch('/api/v1/ai/research/jobs'),
   });
+  const researchJobs = Array.isArray(rawResearchJobs) ? rawResearchJobs : [];
 
   const createResearchJobMutation = useMutation({
     mutationFn: (job: any) =>

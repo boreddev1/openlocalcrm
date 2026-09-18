@@ -225,8 +225,13 @@ func (h *AIHandler) ListKB(w http.ResponseWriter, r *http.Request) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	articles := h.kbArticles
+	if articles == nil {
+		articles = []KBArticle{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(h.kbArticles)
+	_ = json.NewEncoder(w).Encode(articles)
 }
 
 func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
@@ -321,8 +326,13 @@ func (h *AIHandler) ListResearchJobs(w http.ResponseWriter, r *http.Request) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	jobs := h.researchJobs
+	if jobs == nil {
+		jobs = []ResearchJob{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(h.researchJobs)
+	_ = json.NewEncoder(w).Encode(jobs)
 }
 
 func (h *AIHandler) CreateResearchJob(w http.ResponseWriter, r *http.Request) {

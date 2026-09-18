@@ -68,8 +68,8 @@ func nowTimestamptz() pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 }
 
-func NewInMemoryQuerier() *InMemoryQuerier {
-	q := &InMemoryQuerier{
+func NewEmptyInMemoryQuerier() *InMemoryQuerier {
+	return &InMemoryQuerier{
 		users:          make(map[string]db.User),
 		companies:      make(map[string]db.Company),
 		contacts:       make(map[string]db.Contact),
@@ -89,6 +89,10 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 		workflows:      make(map[string]db.Workflow),
 		workflowRuns:   make(map[string]db.WorkflowRun),
 	}
+}
+
+func NewInMemoryQuerier() *InMemoryQuerier {
+	q := NewEmptyInMemoryQuerier()
 
 	hash, err := auth.HashPassword("demo123")
 	if err != nil {
