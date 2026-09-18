@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -205,5 +206,57 @@ func (h *DealHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (h *DealHandler) AttachSolarCalculation(w http.ResponseWriter, r *http.Request) {
+	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
+	var actorID pgtype.UUID
+	if claims != nil {
+		_ = actorID.Scan(claims.UserID.String())
+	}
+
+	idStr := chi.URLParam(r, "id")
+	var dealID pgtype.UUID
+	if err := dealID.Scan(idStr); err != nil {
+		http.Error(w, `{"error":"invalid_id"}`, http.StatusBadRequest)
+		return
+	}
+
+	var calc SolarCalcResponse
+	if err := json.NewDecoder(r.Body).Decode(&calc); err != nil {
+		http.Error(w, `{"error":"invalid solar calculation payload"}`, http.StatusBadRequest)
+		return
+	}
+
+	existing, err := h.service.GetByID(r.Context(), dealID)
+	if err != nil {
+		http.Error(w, `{"error":"deal_not_found"}`, http.StatusNotFound)
+		return
+	}
+
+	val := existing.Value
+	if calc.SystemCostGrossEuro > 0 {
+		_ = val.Scan(fmt.Sprintf("%d.00", calc.SystemCostGrossEuro))
+	}
+
+	updated, err := h.service.Update(r.Context(), actorID, deal.UpdateDealInput{
+		ID:          dealID,
+		Title:       existing.Title,
+		Stage:       existing.Stage,
+		Probability: existing.Probability,
+		Currency:    existing.Currency,
+		Value:       val,
+	})
+	if err != nil {
+		http.Error(w, `{"error":"failed to update deal with calculation"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":      "calculation_attached",
+		"deal":        updated,
+		"calculation": calc,
+	})
 }
 

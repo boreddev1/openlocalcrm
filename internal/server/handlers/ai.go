@@ -8,7 +8,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 type KBArticle struct {
@@ -42,6 +45,7 @@ type AIHandler struct {
 	researchSvc  *ai.ResearchService
 	obsSvc       *ai.ObservabilityService
 	gateway      *ai.Gateway
+	querier      db.Querier
 	mu           sync.RWMutex
 	kbArticles   []KBArticle
 	researchJobs []ResearchJob
@@ -53,6 +57,7 @@ func NewAIHandler(
 	researchSvc *ai.ResearchService,
 	obsSvc *ai.ObservabilityService,
 	gateway *ai.Gateway,
+	querier db.Querier,
 ) *AIHandler {
 	return &AIHandler{
 		triageSvc:   triageSvc,
@@ -60,6 +65,7 @@ func NewAIHandler(
 		researchSvc: researchSvc,
 		obsSvc:      obsSvc,
 		gateway:     gateway,
+		querier:     querier,
 		kbArticles: []KBArticle{
 			{
 				ID:          "kb-1",
@@ -196,6 +202,26 @@ func (h *AIHandler) ParseBill(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AIHandler) ListKB(w http.ResponseWriter, r *http.Request) {
+	if h.querier != nil {
+		dbArticles, err := h.querier.ListKBArticles(r.Context())
+		if err == nil && len(dbArticles) > 0 {
+			res := make([]KBArticle, len(dbArticles))
+			for i, a := range dbArticles {
+				res[i] = KBArticle{
+					ID:          uuid.UUID(a.ID.Bytes).String(),
+					Title:       a.Title,
+					Category:    a.Category,
+					Content:     a.Content,
+					Source:      a.Author,
+					ChunksCount: 4,
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(res)
+			return
+		}
+	}
+
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -210,13 +236,31 @@ func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if doc.ChunksCount == 0 {
+		doc.ChunksCount = 4
+	}
+
+	if h.querier != nil {
+		created, err := h.querier.CreateKBArticle(r.Context(), db.CreateKBArticleParams{
+			Title:    doc.Title,
+			Category: doc.Category,
+			Content:  doc.Content,
+			Tags:     []string{doc.Category},
+			Author:   "System",
+		})
+		if err == nil {
+			doc.ID = uuid.UUID(created.ID.Bytes).String()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(doc)
+			return
+		}
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	doc.ID = fmt.Sprintf("kb-%d", time.Now().UnixNano())
-	if doc.ChunksCount == 0 {
-		doc.ChunksCount = 4
-	}
 	h.kbArticles = append([]KBArticle{doc}, h.kbArticles...)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -226,6 +270,12 @@ func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 
 func (h *AIHandler) DeleteKB(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+
+	if h.querier != nil {
+		if u, err := uuid.Parse(id); err == nil {
+			_ = h.querier.DeleteKBArticle(r.Context(), pgtype.UUID{Bytes: u, Valid: true})
+		}
+	}
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -243,6 +293,31 @@ func (h *AIHandler) DeleteKB(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AIHandler) ListResearchJobs(w http.ResponseWriter, r *http.Request) {
+	if h.querier != nil {
+		dbJobs, err := h.querier.ListAIResearchJobs(r.Context())
+		if err == nil && len(dbJobs) > 0 {
+			res := make([]ResearchJob, len(dbJobs))
+			for i, j := range dbJobs {
+				res[i] = ResearchJob{
+					ID:          uuid.UUID(j.ID.Bytes).String(),
+					Query:       j.Domain,
+					CompanyName: j.CompanyName,
+					Category:    "Technik",
+					Depth:       "DEEP",
+					Status:      j.Status,
+					Result: &ResearchResult{
+						SiteTitle:      j.CompanyName + " - Analyse",
+						Summary:        "Automatisch erstellte Firmenrecherche.",
+						DecisionMakers: []string{"Geschäftsführung (" + j.Domain + ")"},
+					},
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(res)
+			return
+		}
+	}
+
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -262,11 +337,23 @@ func (h *AIHandler) CreateResearchJob(w http.ResponseWriter, r *http.Request) {
 		domain = "energie-dach.de"
 	}
 
+	jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
+	if h.querier != nil {
+		created, err := h.querier.CreateAIResearchJob(r.Context(), db.CreateAIResearchJobParams{
+			CompanyName: domain,
+			Domain:      domain,
+			Status:      "COMPLETED",
+		})
+		if err == nil {
+			jobID = uuid.UUID(created.ID.Bytes).String()
+		}
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	job := ResearchJob{
-		ID:          fmt.Sprintf("job-%d", time.Now().UnixNano()),
+		ID:          jobID,
 		Query:       domain,
 		CompanyName: domain,
 		Category:    req.Category,

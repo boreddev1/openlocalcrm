@@ -31,3 +31,24 @@ ORDER BY created_at ASC;
 UPDATE users
 SET last_login_at = $2, updated_at = NOW()
 WHERE id = $1;
+
+-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = $2, updated_at = NOW()
+WHERE id = $1;
+
+-- name: UpdateUserRole :exec
+UPDATE users
+SET role = $2, updated_at = NOW()
+WHERE id = $1;
+
+-- name: UpdateUserStatus :exec
+UPDATE users
+SET status = $2, updated_at = NOW()
+WHERE id = $1;
+
+-- name: UpdateUserTOTP :exec
+UPDATE users
+SET totp_secret_encrypted = $2, totp_enabled = $3, updated_at = NOW()
+WHERE id = $1;
+

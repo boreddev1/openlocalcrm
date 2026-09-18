@@ -32,6 +32,13 @@ type InMemoryQuerier struct {
 	emailMessages map[string]db.EmailMessage
 	emailAttachs  map[string]db.EmailAttachment
 	refreshTokens map[string]db.RefreshToken
+	appointments   map[string]db.Appointment
+	notes          map[string]db.Note
+	callActivities map[string]db.CallActivity
+	kbArticles     map[string]db.KnowledgeBaseArticle
+	aiResearchJobs map[string]db.AiResearchJob
+	workflows      map[string]db.Workflow
+	workflowRuns   map[string]db.WorkflowRun
 }
 
 func parseUUID(s string) pgtype.UUID {
@@ -63,17 +70,24 @@ func nowTimestamptz() pgtype.Timestamptz {
 
 func NewInMemoryQuerier() *InMemoryQuerier {
 	q := &InMemoryQuerier{
-		users:         make(map[string]db.User),
-		companies:     make(map[string]db.Company),
-		contacts:      make(map[string]db.Contact),
-		deals:         make(map[string]db.Deal),
-		todos:         make(map[string]db.Todo),
-		notifications: make(map[string]db.Notification),
-		auditLogs:     make([]db.AuditLog, 0),
-		emailAccounts: make(map[string]db.EmailAccount),
-		emailMessages: make(map[string]db.EmailMessage),
-		emailAttachs:  make(map[string]db.EmailAttachment),
-		refreshTokens: make(map[string]db.RefreshToken),
+		users:          make(map[string]db.User),
+		companies:      make(map[string]db.Company),
+		contacts:       make(map[string]db.Contact),
+		deals:          make(map[string]db.Deal),
+		todos:          make(map[string]db.Todo),
+		notifications:  make(map[string]db.Notification),
+		auditLogs:      make([]db.AuditLog, 0),
+		emailAccounts:  make(map[string]db.EmailAccount),
+		emailMessages:  make(map[string]db.EmailMessage),
+		emailAttachs:   make(map[string]db.EmailAttachment),
+		refreshTokens:  make(map[string]db.RefreshToken),
+		appointments:   make(map[string]db.Appointment),
+		notes:          make(map[string]db.Note),
+		callActivities: make(map[string]db.CallActivity),
+		kbArticles:     make(map[string]db.KnowledgeBaseArticle),
+		aiResearchJobs: make(map[string]db.AiResearchJob),
+		workflows:      make(map[string]db.Workflow),
+		workflowRuns:   make(map[string]db.WorkflowRun),
 	}
 
 	hash, err := auth.HashPassword("demo123")
@@ -263,6 +277,154 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 		Message:   "Alle Daten laufen autark im RAM. Änderungen werden isoliert ausgeführt.",
 		IsRead:    false,
 		CreatedAt: nowTimestamptz(),
+	}
+
+	// Appointments
+	app1ID := parseUUID("88888888-8888-8888-8888-888888888881")
+	app2ID := parseUUID("88888888-8888-8888-8888-888888888882")
+	app3ID := parseUUID("88888888-8888-8888-8888-888888888883")
+	nowTime := time.Now().UTC()
+	q.appointments[uuidToStr(app1ID)] = db.Appointment{
+		ID:         app1ID,
+		Title:      "Internes Vertriebs-Meeting (M365)",
+		ContactID:  pgtype.UUID{Valid: false},
+		CompanyID:  pgtype.UUID{Valid: false},
+		DealID:     pgtype.UUID{Valid: false},
+		StartTime:  pgtype.Timestamptz{Time: nowTime.Add(1 * time.Hour), Valid: true},
+		EndTime:    pgtype.Timestamptz{Time: nowTime.Add(2 * time.Hour), Valid: true},
+		Location:   "Microsoft Teams",
+		Notes:      "Wöchentliches Pipeline-Update Vertrieb",
+		IcsUid:     "m365-ext-1",
+		AssignedTo: "Max Vertriebsleiter",
+		Type:       "MEETING",
+		IsExternal: true,
+		Provider:   "microsoft",
+		IsPrivate:  false,
+		IsPushed:   true,
+		CreatedAt:  nowTimestamptz(),
+		UpdatedAt:  nowTimestamptz(),
+	}
+	q.appointments[uuidToStr(app2ID)] = db.Appointment{
+		ID:         app2ID,
+		Title:      "Privater Termin / Facharzt (Google)",
+		ContactID:  pgtype.UUID{Valid: false},
+		CompanyID:  pgtype.UUID{Valid: false},
+		DealID:     pgtype.UUID{Valid: false},
+		StartTime:  pgtype.Timestamptz{Time: nowTime.Add(5 * time.Hour), Valid: true},
+		EndTime:    pgtype.Timestamptz{Time: nowTime.Add(6 * time.Hour), Valid: true},
+		Location:   "Frankfurt",
+		Notes:      "Privatblocker",
+		IcsUid:     "google-ext-2",
+		AssignedTo: "Max Vertriebsleiter",
+		Type:       "MEETING",
+		IsExternal: true,
+		Provider:   "google",
+		IsPrivate:  true,
+		IsPushed:   true,
+		CreatedAt:  nowTimestamptz(),
+		UpdatedAt:  nowTimestamptz(),
+	}
+	q.appointments[uuidToStr(app3ID)] = db.Appointment{
+		ID:         app3ID,
+		Title:      "Vor-Ort Begehung & Dachprüfung",
+		ContactID:  cont2ID,
+		DealID:     deal2ID,
+		StartTime:  pgtype.Timestamptz{Time: nowTime.Add(48 * time.Hour), Valid: true},
+		EndTime:    pgtype.Timestamptz{Time: nowTime.Add(49 * time.Hour), Valid: true},
+		Location:   "Sonnenhang 12, Esslingen",
+		Notes:      "Dachaufmaß und Zählerkastenprüfung vor Ort",
+		IcsUid:     "crm-int-3",
+		AssignedTo: "Felix Setter",
+		Type:       "CONSULTATION",
+		IsExternal: false,
+		Provider:   "internal",
+		IsPrivate:  false,
+		IsPushed:   false,
+		CreatedAt:  nowTimestamptz(),
+		UpdatedAt:  nowTimestamptz(),
+	}
+
+	// Notes
+	not1ID := parseUUID("99999999-9999-9999-9999-999999999991")
+	not2ID := parseUUID("99999999-9999-9999-9999-999999999992")
+	q.notes[uuidToStr(not1ID)] = db.Note{
+		ID:         not1ID,
+		EntityType: "contact",
+		EntityID:   cont1ID,
+		Type:       "CALL",
+		Author:     "Max Vertriebsleiter",
+		Content:    "Telefonat mit Hr. Dr. Weber: Großes Interesse an 30 kWp Gewerbedach Solaranlage inkl. 20 kWh Batteriespeicher. Statikunterlagen liegen vor.",
+		CreatedAt:  pgtype.Timestamptz{Time: nowTime.Add(-2 * time.Hour), Valid: true},
+		UpdatedAt:  pgtype.Timestamptz{Time: nowTime.Add(-2 * time.Hour), Valid: true},
+	}
+	q.notes[uuidToStr(not2ID)] = db.Note{
+		ID:         not2ID,
+		EntityType: "contact",
+		EntityID:   cont1ID,
+		Type:       "NOTE",
+		Author:     "Laura Closerin",
+		Content:    "Vor-Ort Begehung vereinbart. Statikunterlagen an Planungsbüro übergeben.",
+		CreatedAt:  pgtype.Timestamptz{Time: nowTime.Add(-1 * time.Hour), Valid: true},
+		UpdatedAt:  pgtype.Timestamptz{Time: nowTime.Add(-1 * time.Hour), Valid: true},
+	}
+
+	// Knowledge Base
+	kb1ID := parseUUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	kb2ID := parseUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	q.kbArticles[uuidToStr(kb1ID)] = db.KnowledgeBaseArticle{
+		ID:        kb1ID,
+		Title:     "Technisches Handbuch Solarsysteme 2026",
+		Category:  "Photovoltaik & Speicher",
+		Content:   "Standardisierte Montagesysteme, Modulwirkungsgrade bis 22.8% und Hochvolt-Gewerbespeicher (BYD / RCT Power).",
+		Tags:      []string{"PV", "Speicher", "Montage"},
+		Author:    "System",
+		CreatedAt: nowTimestamptz(),
+		UpdatedAt: nowTimestamptz(),
+	}
+	q.kbArticles[uuidToStr(kb2ID)] = db.KnowledgeBaseArticle{
+		ID:        kb2ID,
+		Title:     "EEG 2026 Einspeisevergütung & Direktvermarktung",
+		Category:  "Fördermittel & Recht",
+		Content:   "Einspeisevergütungssätze 2026 für Dachanlagen bis 10 kWp, 40 kWp und 100 kWp inklusive Direktvermarktungspflicht ab 100 kWp.",
+		Tags:      []string{"EEG", "Förderung", "Netz"},
+		Author:    "System",
+		CreatedAt: nowTimestamptz(),
+		UpdatedAt: nowTimestamptz(),
+	}
+
+	// Workflows
+	q.workflows["wf-1"] = db.Workflow{
+		ID:          "wf-1",
+		Name:        "Erstkontakt & Qualifizierung (Neuer Lead)",
+		Description: "Automatische E-Mail-Triage bei Neukontakt, Tagging und Follow-up Aufgabe binnen 48 Stunden.",
+		TriggerType: "NEW_LEAD",
+		TargetType:  "CONTACT",
+		IsActive:    true,
+		StepsJson:   []byte(`[{"title":"Tag 'PV-Interessent' zuweisen","action_type":"SET_TAG"},{"title":"Erstkontakt E-Mail-Entwurf vorbereiten (Gemma 12B)","action_type":"DRAFT_EMAIL"},{"title":"Follow-Up Telefontermin anlegen","action_type":"CREATE_TASK"}]`),
+		CreatedAt:   nowTimestamptz(),
+		UpdatedAt:   nowTimestamptz(),
+	}
+	q.workflows["wf-2"] = db.Workflow{
+		ID:          "wf-2",
+		Name:        "Deal-Abschluss Routine (Phase: WON)",
+		Description: "Sendet Bestätigung, setzt Status auf Gewonnen und stößt Montage-Übergabe an.",
+		TriggerType: "DEAL_WON",
+		TargetType:  "DEAL",
+		IsActive:    true,
+		StepsJson:   []byte(`[{"title":"Auftragsbestätigung & Widerrufsbelehrung § 355 BGB senden","action_type":"DRAFT_EMAIL"},{"title":"Übergabe-Task an Technik/Montage erstellen","action_type":"CREATE_TASK"}]`),
+		CreatedAt:   nowTimestamptz(),
+		UpdatedAt:   nowTimestamptz(),
+	}
+	q.workflows["wf-3"] = db.Workflow{
+		ID:          "wf-3",
+		Name:        "Inaktivitäts-Reaktivierung (SLA 30 Tage)",
+		Description: "Erinnert Vertriebler an Leads ohne Interaktion seit 30 Tagen.",
+		TriggerType: "INACTIVITY_TIMEOUT",
+		TargetType:  "CONTACT",
+		IsActive:    false,
+		StepsJson:   []byte(`[{"title":"Reaktivierungs-Todo für Account Manager erstellen","action_type":"CREATE_TASK"}]`),
+		CreatedAt:   nowTimestamptz(),
+		UpdatedAt:   nowTimestamptz(),
 	}
 
 	return q
@@ -1255,6 +1417,461 @@ func (q *InMemoryQuerier) UpdateEmailAccountLastSynced(ctx context.Context, arg 
 		q.emailAccounts[idStr] = acc
 	}
 	return nil
+}
+
+// --- Appointments ---
+func (q *InMemoryQuerier) CreateAppointment(ctx context.Context, arg db.CreateAppointmentParams) (db.Appointment, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	id := newUUID()
+	app := db.Appointment{
+		ID:         id,
+		Title:      arg.Title,
+		ContactID:  arg.ContactID,
+		CompanyID:  arg.CompanyID,
+		DealID:     arg.DealID,
+		StartTime:  arg.StartTime,
+		EndTime:    arg.EndTime,
+		Location:   arg.Location,
+		Notes:      arg.Notes,
+		IcsUid:     arg.IcsUid,
+		AssignedTo: arg.AssignedTo,
+		Type:       arg.Type,
+		IsExternal: arg.IsExternal,
+		Provider:   arg.Provider,
+		IsPrivate:  arg.IsPrivate,
+		IsPushed:   arg.IsPushed,
+		CreatedAt:  nowTimestamptz(),
+		UpdatedAt:  nowTimestamptz(),
+	}
+	q.appointments[uuidToStr(id)] = app
+	return app, nil
+}
+
+func (q *InMemoryQuerier) GetAppointmentByID(ctx context.Context, id pgtype.UUID) (db.Appointment, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	app, ok := q.appointments[uuidToStr(id)]
+	if !ok {
+		return db.Appointment{}, ErrNotFound
+	}
+	return app, nil
+}
+
+func (q *InMemoryQuerier) ListAppointments(ctx context.Context) ([]db.Appointment, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.Appointment
+	for _, app := range q.appointments {
+		list = append(list, app)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].StartTime.Time.Before(list[j].StartTime.Time)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) UpdateAppointment(ctx context.Context, arg db.UpdateAppointmentParams) (db.Appointment, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	app, ok := q.appointments[idStr]
+	if !ok {
+		return db.Appointment{}, ErrNotFound
+	}
+
+	app.Title = arg.Title
+	app.ContactID = arg.ContactID
+	app.StartTime = arg.StartTime
+	app.EndTime = arg.EndTime
+	app.Location = arg.Location
+	app.Notes = arg.Notes
+	app.AssignedTo = arg.AssignedTo
+	app.Type = arg.Type
+	app.UpdatedAt = nowTimestamptz()
+
+	q.appointments[idStr] = app
+	return app, nil
+}
+
+func (q *InMemoryQuerier) UpdateAppointmentPushStatus(ctx context.Context, arg db.UpdateAppointmentPushStatusParams) (db.Appointment, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	app, ok := q.appointments[idStr]
+	if !ok {
+		return db.Appointment{}, ErrNotFound
+	}
+
+	app.IsPushed = arg.IsPushed
+	app.UpdatedAt = nowTimestamptz()
+	q.appointments[idStr] = app
+	return app, nil
+}
+
+func (q *InMemoryQuerier) DeleteAppointment(ctx context.Context, id pgtype.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	delete(q.appointments, uuidToStr(id))
+	return nil
+}
+
+// --- Notes ---
+func (q *InMemoryQuerier) CreateNote(ctx context.Context, arg db.CreateNoteParams) (db.Note, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	id := newUUID()
+	note := db.Note{
+		ID:         id,
+		EntityType: arg.EntityType,
+		EntityID:   arg.EntityID,
+		Type:       arg.Type,
+		Author:     arg.Author,
+		Content:    arg.Content,
+		CreatedAt:  nowTimestamptz(),
+		UpdatedAt:  nowTimestamptz(),
+	}
+	q.notes[uuidToStr(id)] = note
+	return note, nil
+}
+
+func (q *InMemoryQuerier) GetNoteByID(ctx context.Context, id pgtype.UUID) (db.Note, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	n, ok := q.notes[uuidToStr(id)]
+	if !ok {
+		return db.Note{}, ErrNotFound
+	}
+	return n, nil
+}
+
+func (q *InMemoryQuerier) ListNotes(ctx context.Context) ([]db.Note, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.Note
+	for _, n := range q.notes {
+		list = append(list, n)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) ListNotesByEntity(ctx context.Context, arg db.ListNotesByEntityParams) ([]db.Note, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.Note
+	entityIDStr := uuidToStr(arg.EntityID)
+	for _, n := range q.notes {
+		if strings.EqualFold(n.EntityType, arg.EntityType) && uuidToStr(n.EntityID) == entityIDStr {
+			list = append(list, n)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) UpdateNote(ctx context.Context, arg db.UpdateNoteParams) (db.Note, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	n, ok := q.notes[idStr]
+	if !ok {
+		return db.Note{}, ErrNotFound
+	}
+	n.Content = arg.Content
+	n.Type = arg.Type
+	n.UpdatedAt = nowTimestamptz()
+	q.notes[idStr] = n
+	return n, nil
+}
+
+func (q *InMemoryQuerier) DeleteNote(ctx context.Context, id pgtype.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	delete(q.notes, uuidToStr(id))
+	return nil
+}
+
+// --- Call Activities ---
+func (q *InMemoryQuerier) CreateCallActivity(ctx context.Context, arg db.CreateCallActivityParams) (db.CallActivity, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	id := newUUID()
+	ca := db.CallActivity{
+		ID:              id,
+		ContactID:       arg.ContactID,
+		DurationSeconds: arg.DurationSeconds,
+		Disposition:     arg.Disposition,
+		Notes:           arg.Notes,
+		CreatedAt:       nowTimestamptz(),
+	}
+	q.callActivities[uuidToStr(id)] = ca
+	return ca, nil
+}
+
+func (q *InMemoryQuerier) ListCallActivitiesByContact(ctx context.Context, contactID pgtype.UUID) ([]db.CallActivity, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.CallActivity
+	targetContactID := uuidToStr(contactID)
+	for _, ca := range q.callActivities {
+		if uuidToStr(ca.ContactID) == targetContactID {
+			list = append(list, ca)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) ListRecentCallActivities(ctx context.Context, limit int32) ([]db.CallActivity, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.CallActivity
+	for _, ca := range q.callActivities {
+		list = append(list, ca)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
+	})
+	if int32(len(list)) > limit {
+		list = list[:limit]
+	}
+	return list, nil
+}
+
+// --- Knowledge Base ---
+func (q *InMemoryQuerier) CreateKBArticle(ctx context.Context, arg db.CreateKBArticleParams) (db.KnowledgeBaseArticle, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	id := newUUID()
+	article := db.KnowledgeBaseArticle{
+		ID:        id,
+		Title:     arg.Title,
+		Category:  arg.Category,
+		Content:   arg.Content,
+		Tags:      arg.Tags,
+		Author:    arg.Author,
+		CreatedAt: nowTimestamptz(),
+		UpdatedAt: nowTimestamptz(),
+	}
+	q.kbArticles[uuidToStr(id)] = article
+	return article, nil
+}
+
+func (q *InMemoryQuerier) GetKBArticleByID(ctx context.Context, id pgtype.UUID) (db.KnowledgeBaseArticle, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	a, ok := q.kbArticles[uuidToStr(id)]
+	if !ok {
+		return db.KnowledgeBaseArticle{}, ErrNotFound
+	}
+	return a, nil
+}
+
+func (q *InMemoryQuerier) ListKBArticles(ctx context.Context) ([]db.KnowledgeBaseArticle, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.KnowledgeBaseArticle
+	for _, a := range q.kbArticles {
+		list = append(list, a)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) DeleteKBArticle(ctx context.Context, id pgtype.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	delete(q.kbArticles, uuidToStr(id))
+	return nil
+}
+
+// --- AI Research Jobs ---
+func (q *InMemoryQuerier) CreateAIResearchJob(ctx context.Context, arg db.CreateAIResearchJobParams) (db.AiResearchJob, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	id := newUUID()
+	job := db.AiResearchJob{
+		ID:          id,
+		CompanyName: arg.CompanyName,
+		Domain:      arg.Domain,
+		Status:      arg.Status,
+		ResultJson:  []byte("{}"),
+		CreatedAt:   nowTimestamptz(),
+	}
+	q.aiResearchJobs[uuidToStr(id)] = job
+	return job, nil
+}
+
+func (q *InMemoryQuerier) GetAIResearchJobByID(ctx context.Context, id pgtype.UUID) (db.AiResearchJob, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	job, ok := q.aiResearchJobs[uuidToStr(id)]
+	if !ok {
+		return db.AiResearchJob{}, ErrNotFound
+	}
+	return job, nil
+}
+
+func (q *InMemoryQuerier) ListAIResearchJobs(ctx context.Context) ([]db.AiResearchJob, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.AiResearchJob
+	for _, j := range q.aiResearchJobs {
+		list = append(list, j)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) UpdateAIResearchJobStatus(ctx context.Context, arg db.UpdateAIResearchJobStatusParams) (db.AiResearchJob, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	job, ok := q.aiResearchJobs[idStr]
+	if !ok {
+		return db.AiResearchJob{}, ErrNotFound
+	}
+	job.Status = arg.Status
+	job.ResultJson = arg.ResultJson
+	job.ErrorMessage = arg.ErrorMessage
+	job.CompletedAt = arg.CompletedAt
+	q.aiResearchJobs[idStr] = job
+	return job, nil
+}
+
+// --- Workflows ---
+func (q *InMemoryQuerier) CreateWorkflow(ctx context.Context, arg db.CreateWorkflowParams) (db.Workflow, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	id := arg.ID
+	if id == "" {
+		id = "wf-" + uuid.New().String()[:8]
+	}
+	wf := db.Workflow{
+		ID:          id,
+		Name:        arg.Name,
+		Description: arg.Description,
+		TriggerType: arg.TriggerType,
+		TargetType:  arg.TargetType,
+		IsActive:    arg.IsActive,
+		StepsJson:   arg.StepsJson,
+		CreatedAt:   nowTimestamptz(),
+		UpdatedAt:   nowTimestamptz(),
+	}
+	q.workflows[id] = wf
+	return wf, nil
+}
+
+func (q *InMemoryQuerier) GetWorkflowByID(ctx context.Context, id string) (db.Workflow, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	wf, ok := q.workflows[id]
+	if !ok {
+		return db.Workflow{}, ErrNotFound
+	}
+	return wf, nil
+}
+
+func (q *InMemoryQuerier) ListWorkflows(ctx context.Context) ([]db.Workflow, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.Workflow
+	for _, wf := range q.workflows {
+		list = append(list, wf)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) CreateWorkflowRun(ctx context.Context, arg db.CreateWorkflowRunParams) (db.WorkflowRun, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	id := arg.ID
+	if id == "" {
+		id = "run-" + uuid.New().String()[:8]
+	}
+	run := db.WorkflowRun{
+		ID:           id,
+		WorkflowID:   arg.WorkflowID,
+		TargetID:     arg.TargetID,
+		TargetType:   arg.TargetType,
+		TargetName:   arg.TargetName,
+		Status:       arg.Status,
+		CurrentStep:  arg.CurrentStep,
+		SnapshotJson: arg.SnapshotJson,
+		StartedAt:    nowTimestamptz(),
+	}
+	q.workflowRuns[id] = run
+	return run, nil
+}
+
+func (q *InMemoryQuerier) ListWorkflowRuns(ctx context.Context) ([]db.WorkflowRun, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.WorkflowRun
+	for _, r := range q.workflowRuns {
+		list = append(list, r)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].StartedAt.Time.After(list[j].StartedAt.Time)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg db.UpdateWorkflowRunStatusParams) (db.WorkflowRun, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	run, ok := q.workflowRuns[arg.ID]
+	if !ok {
+		return db.WorkflowRun{}, ErrNotFound
+	}
+	run.Status = arg.Status
+	run.CurrentStep = arg.CurrentStep
+	run.CompletedAt = arg.CompletedAt
+	q.workflowRuns[arg.ID] = run
+	return run, nil
 }
 
 // Compile-time check that InMemoryQuerier implements db.Querier

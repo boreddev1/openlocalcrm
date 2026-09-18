@@ -8,6 +8,52 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AiAuditLog struct {
+	ID                 pgtype.UUID        `json:"id"`
+	InteractionType    string             `json:"interaction_type"`
+	ModelName          string             `json:"model_name"`
+	Provider           string             `json:"provider"`
+	PromptTokens       int32              `json:"prompt_tokens"`
+	CompletionTokens   int32              `json:"completion_tokens"`
+	LatencyMs          int32              `json:"latency_ms"`
+	PiiFilterTriggered bool               `json:"pii_filter_triggered"`
+	PiiRedactionsCount int32              `json:"pii_redactions_count"`
+	HumanApproved      pgtype.Bool        `json:"human_approved"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type AiResearchJob struct {
+	ID           pgtype.UUID        `json:"id"`
+	CompanyName  string             `json:"company_name"`
+	Domain       string             `json:"domain"`
+	Status       string             `json:"status"`
+	ResultJson   []byte             `json:"result_json"`
+	ErrorMessage string             `json:"error_message"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+}
+
+type Appointment struct {
+	ID         pgtype.UUID        `json:"id"`
+	Title      string             `json:"title"`
+	ContactID  pgtype.UUID        `json:"contact_id"`
+	CompanyID  pgtype.UUID        `json:"company_id"`
+	DealID     pgtype.UUID        `json:"deal_id"`
+	StartTime  pgtype.Timestamptz `json:"start_time"`
+	EndTime    pgtype.Timestamptz `json:"end_time"`
+	Location   string             `json:"location"`
+	Notes      string             `json:"notes"`
+	IcsUid     string             `json:"ics_uid"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	AssignedTo string             `json:"assigned_to"`
+	Type       string             `json:"type"`
+	IsExternal bool               `json:"is_external"`
+	Provider   string             `json:"provider"`
+	IsPrivate  bool               `json:"is_private"`
+	IsPushed   bool               `json:"is_pushed"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AuditLog struct {
 	ID         pgtype.UUID        `json:"id"`
 	UserID     pgtype.UUID        `json:"user_id"`
@@ -18,6 +64,15 @@ type AuditLog struct {
 	IpAddress  pgtype.Text        `json:"ip_address"`
 	UserAgent  pgtype.Text        `json:"user_agent"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type CallActivity struct {
+	ID              pgtype.UUID        `json:"id"`
+	ContactID       pgtype.UUID        `json:"contact_id"`
+	DurationSeconds int32              `json:"duration_seconds"`
+	Disposition     string             `json:"disposition"`
+	Notes           string             `json:"notes"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type Company struct {
@@ -33,6 +88,17 @@ type Company struct {
 	CustomFields   []byte             `json:"custom_fields"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CompanyResearch struct {
+	ID               pgtype.UUID        `json:"id"`
+	CompanyID        pgtype.UUID        `json:"company_id"`
+	Domain           string             `json:"domain"`
+	Title            string             `json:"title"`
+	MetaDescription  string             `json:"meta_description"`
+	Summary          string             `json:"summary"`
+	IndustryKeywords []string           `json:"industry_keywords"`
+	ResearchedAt     pgtype.Timestamptz `json:"researched_at"`
 }
 
 type Contact struct {
@@ -127,6 +193,37 @@ type EmailMessage struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type IntakeForm struct {
+	ID         pgtype.UUID        `json:"id"`
+	Name       string             `json:"name"`
+	Slug       string             `json:"slug"`
+	FieldsJson []byte             `json:"fields_json"`
+	IsActive   bool               `json:"is_active"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type KnowledgeBaseArticle struct {
+	ID        pgtype.UUID        `json:"id"`
+	Title     string             `json:"title"`
+	Category  string             `json:"category"`
+	Content   string             `json:"content"`
+	Tags      []string           `json:"tags"`
+	Author    string             `json:"author"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Note struct {
+	ID         pgtype.UUID        `json:"id"`
+	EntityType string             `json:"entity_type"`
+	EntityID   pgtype.UUID        `json:"entity_id"`
+	Type       string             `json:"type"`
+	Author     string             `json:"author"`
+	Content    string             `json:"content"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Notification struct {
 	ID        pgtype.UUID        `json:"id"`
 	UserID    pgtype.UUID        `json:"user_id"`
@@ -175,4 +272,41 @@ type User struct {
 	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Workflow struct {
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	TriggerType string             `json:"trigger_type"`
+	TargetType  string             `json:"target_type"`
+	IsActive    bool               `json:"is_active"`
+	StepsJson   []byte             `json:"steps_json"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowRun struct {
+	ID           string             `json:"id"`
+	WorkflowID   string             `json:"workflow_id"`
+	TargetID     string             `json:"target_id"`
+	TargetType   string             `json:"target_type"`
+	TargetName   string             `json:"target_name"`
+	Status       string             `json:"status"`
+	CurrentStep  int32              `json:"current_step"`
+	SnapshotJson []byte             `json:"snapshot_json"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+}
+
+type WorkflowStep struct {
+	ID          string             `json:"id"`
+	RunID       string             `json:"run_id"`
+	StepNumber  int32              `json:"step_number"`
+	Title       string             `json:"title"`
+	ActionType  string             `json:"action_type"`
+	PayloadJson []byte             `json:"payload_json"`
+	Status      string             `json:"status"`
+	PreparedAt  pgtype.Timestamptz `json:"prepared_at"`
+	ExecutedAt  pgtype.Timestamptz `json:"executed_at"`
 }

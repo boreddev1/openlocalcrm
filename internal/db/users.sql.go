@@ -177,7 +177,11 @@ func (q *Queries) UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLog
 	return err
 }
 
-const updateUserPassword = `UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1`
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = $2, updated_at = NOW()
+WHERE id = $1
+`
 
 type UpdateUserPasswordParams struct {
 	ID           pgtype.UUID `json:"id"`
@@ -189,7 +193,11 @@ func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPassword
 	return err
 }
 
-const updateUserRole = `UPDATE users SET role = $2, updated_at = NOW() WHERE id = $1`
+const updateUserRole = `-- name: UpdateUserRole :exec
+UPDATE users
+SET role = $2, updated_at = NOW()
+WHERE id = $1
+`
 
 type UpdateUserRoleParams struct {
 	ID   pgtype.UUID `json:"id"`
@@ -201,7 +209,11 @@ func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) 
 	return err
 }
 
-const updateUserStatus = `UPDATE users SET status = $2, updated_at = NOW() WHERE id = $1`
+const updateUserStatus = `-- name: UpdateUserStatus :exec
+UPDATE users
+SET status = $2, updated_at = NOW()
+WHERE id = $1
+`
 
 type UpdateUserStatusParams struct {
 	ID     pgtype.UUID `json:"id"`
@@ -213,7 +225,11 @@ func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusPara
 	return err
 }
 
-const updateUserTOTP = `UPDATE users SET totp_secret_encrypted = $2, totp_enabled = $3, updated_at = NOW() WHERE id = $1`
+const updateUserTOTP = `-- name: UpdateUserTOTP :exec
+UPDATE users
+SET totp_secret_encrypted = $2, totp_enabled = $3, updated_at = NOW()
+WHERE id = $1
+`
 
 type UpdateUserTOTPParams struct {
 	ID                  pgtype.UUID `json:"id"`
@@ -225,4 +241,3 @@ func (q *Queries) UpdateUserTOTP(ctx context.Context, arg UpdateUserTOTPParams) 
 	_, err := q.db.Exec(ctx, updateUserTOTP, arg.ID, arg.TotpSecretEncrypted, arg.TotpEnabled)
 	return err
 }
-

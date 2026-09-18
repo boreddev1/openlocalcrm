@@ -2,36 +2,34 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/appointment"
 )
 
 type AppointmentHandler struct {
-	svc  *appointment.Service
-	mu   sync.RWMutex
-	apps []appointment.Appointment
+	svc *appointment.Service
 }
 
 func NewAppointmentHandler(svc *appointment.Service) *AppointmentHandler {
-	initial, _ := svc.List(nil)
 	return &AppointmentHandler{
-		svc:  svc,
-		apps: initial,
+		svc: svc,
 	}
 }
 
 func (h *AppointmentHandler) List(w http.ResponseWriter, r *http.Request) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	apps, err := h.svc.List(r.Context())
+	if err != nil {
+		http.Error(w, `{"error":"failed to list appointments"}`, http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(h.apps)
+	_ = json.NewEncoder(w).Encode(apps)
 }
 
 func (h *AppointmentHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -46,43 +44,39 @@ func (h *AppointmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Location     string    `json:"location"`
 		AssignedTo   string    `json:"assigned_to"`
 		Notes        string    `json:"notes"`
-		Reminder     string    `json:"reminder"`
-		Status       string    `json:"status"`
+		ContactID    *string   `json:"contact_id,omitempty"`
+		CompanyID    *string   `json:"company_id,omitempty"`
+		DealID       *string   `json:"deal_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	id := fmt.Sprintf("app-%d", time.Now().UnixNano())
-	app := appointment.Appointment{
-		ID:          id,
-		Title:       input.Title,
-		StartTime:   input.StartTime,
-		EndTime:     input.EndTime,
-		Location:    input.Location,
-		Notes:       input.Notes,
-		ICSUID:      id,
-		ContactName: input.ContactName,
-		CompanyName: input.CompanyName,
-		AssignedTo:  input.AssignedTo,
-		Type:        input.Type,
+	actorID := pgtype.UUID{Valid: false}
+	if claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims); ok && claims != nil {
+		_ = actorID.Scan(claims.UserID)
 	}
 
-	h.apps = append([]appointment.Appointment{app}, h.apps...)
-
-	var actorID pgtype.UUID
-	_ = actorID.Scan("00000000-0000-0000-0000-000000000001")
-	_, _ = h.svc.Create(r.Context(), actorID, appointment.CreateAppointmentInput{
-		Title:     input.Title,
-		StartTime: input.StartTime,
-		EndTime:   input.EndTime,
-		Location:  input.Location,
-		Notes:     input.Notes,
+	app, err := h.svc.Create(r.Context(), actorID, appointment.CreateAppointmentInput{
+		Title:        input.Title,
+		ContactID:    input.ContactID,
+		CompanyID:    input.CompanyID,
+		DealID:       input.DealID,
+		ContactName:  input.ContactName,
+		ContactEmail: input.ContactEmail,
+		CompanyName:  input.CompanyName,
+		StartTime:    input.StartTime,
+		EndTime:      input.EndTime,
+		Location:     input.Location,
+		Notes:        input.Notes,
+		AssignedTo:   input.AssignedTo,
+		Type:         input.Type,
 	})
+	if err != nil {
+		http.Error(w, `{"error":"failed to create appointment"}`, http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -96,37 +90,21 @@ func (h *AppointmentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
 	}
+	input.ID = id
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	for i, a := range h.apps {
-		if a.ID == id {
-			input.ID = id
-			h.apps[i] = input
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(input)
-			return
-		}
+	app, err := h.svc.Update(r.Context(), input)
+	if err != nil {
+		http.Error(w, `{"error":"failed to update appointment"}`, http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(input)
+	_ = json.NewEncoder(w).Encode(app)
 }
 
 func (h *AppointmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	filtered := make([]appointment.Appointment, 0, len(h.apps))
-	for _, a := range h.apps {
-		if a.ID != id {
-			filtered = append(filtered, a)
-		}
-	}
-	h.apps = filtered
+	_ = h.svc.Delete(r.Context(), id)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -134,14 +112,7 @@ func (h *AppointmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *AppointmentHandler) PushExternal(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	h.mu.Lock()
-	for i, a := range h.apps {
-		if a.ID == id {
-			h.apps[i].IsPushed = true
-			break
-		}
-	}
-	h.mu.Unlock()
+	_ = h.svc.PushExternal(r.Context(), id)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -152,20 +123,8 @@ func (h *AppointmentHandler) PushExternal(w http.ResponseWriter, r *http.Request
 
 func (h *AppointmentHandler) DownloadICS(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	h.mu.RLock()
-	var found *appointment.Appointment
-	for _, a := range h.apps {
-		if a.ID == id {
-			found = &a
-			break
-		}
-	}
-	h.mu.RUnlock()
-
-	var app appointment.Appointment
-	if found != nil {
-		app = *found
-	} else {
+	app, err := h.svc.GetByID(r.Context(), id)
+	if err != nil {
 		app = appointment.Appointment{
 			ID:        id,
 			Title:     "Kundentermin",
@@ -173,7 +132,7 @@ func (h *AppointmentHandler) DownloadICS(w http.ResponseWriter, r *http.Request)
 			EndTime:   time.Now().Add(25 * time.Hour),
 			Location:  "Kundenadresse",
 			Notes:     "OpenLocalCRM Termin",
-			ICSUID:    id,
+			ICSUID:    id + "@openlocalcrm.crm",
 		}
 	}
 

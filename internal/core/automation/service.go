@@ -2,8 +2,11 @@ package automation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 type StepDefinition struct {
@@ -37,15 +40,42 @@ type WorkflowRun struct {
 	CompletedAt *time.Time`json:"completed_at,omitempty"`
 }
 
-type Service struct{}
+type Service struct {
+	querier db.Querier
+}
 
-func NewService() *Service {
-	return &Service{}
+func NewService(querier db.Querier) *Service {
+	return &Service{
+		querier: querier,
+	}
 }
 
 func (s *Service) ListDefaultWorkflows(ctx context.Context) ([]Workflow, error) {
-	now := time.Now()
-	return []Workflow{
+	if s.querier != nil {
+		dbWfs, err := s.querier.ListWorkflows(ctx)
+		if err == nil && len(dbWfs) > 0 {
+			result := make([]Workflow, len(dbWfs))
+			for i, w := range dbWfs {
+				var steps []StepDefinition
+				_ = json.Unmarshal(w.StepsJson, &steps)
+				result[i] = Workflow{
+					ID:          w.ID,
+					Name:        w.Name,
+					Description: w.Description,
+					TriggerType: w.TriggerType,
+					TargetType:  w.TargetType,
+					IsActive:    w.IsActive,
+					Steps:       steps,
+					CreatedAt:   w.CreatedAt.Time,
+					UpdatedAt:   w.UpdatedAt.Time,
+				}
+			}
+			return result, nil
+		}
+	}
+
+	now := time.Now().UTC()
+	defaultWfs := []Workflow{
 		{
 			ID:          "wf-1",
 			Name:        "Erstkontakt & Qualifizierung (Neuer Lead)",
@@ -118,7 +148,9 @@ func (s *Service) ListDefaultWorkflows(ctx context.Context) ([]Workflow, error) 
 			CreatedAt: now.Add(-72 * time.Hour),
 			UpdatedAt: now,
 		},
-	}, nil
+	}
+
+	return defaultWfs, nil
 }
 
 func (s *Service) CreateWorkflow(ctx context.Context, wf Workflow) (*Workflow, error) {
@@ -128,7 +160,26 @@ func (s *Service) CreateWorkflow(ctx context.Context, wf Workflow) (*Workflow, e
 	if wf.ID == "" {
 		wf.ID = fmt.Sprintf("wf-%d", time.Now().UnixNano())
 	}
-	wf.CreatedAt = time.Now()
-	wf.UpdatedAt = time.Now()
+	wf.CreatedAt = time.Now().UTC()
+	wf.UpdatedAt = time.Now().UTC()
+
+	if s.querier != nil {
+		stepsJSON, _ := json.Marshal(wf.Steps)
+		created, err := s.querier.CreateWorkflow(ctx, db.CreateWorkflowParams{
+			ID:          wf.ID,
+			Name:        wf.Name,
+			Description: wf.Description,
+			TriggerType: wf.TriggerType,
+			TargetType:  wf.TargetType,
+			IsActive:    wf.IsActive,
+			StepsJson:   stepsJSON,
+		})
+		if err == nil {
+			wf.ID = created.ID
+			wf.CreatedAt = created.CreatedAt.Time
+			wf.UpdatedAt = created.UpdatedAt.Time
+		}
+	}
+
 	return &wf, nil
 }
