@@ -199,7 +199,8 @@ export const SettingsPage: React.FC = () => {
       setTotpStatus({ type: 'success', message: '2FA erfolgreich verifiziert und für Ihr Konto aktiviert!' });
       setTotpCodeInput('');
     } catch (err: any) {
-      setTotpStatus({ type: 'error', message: err.message || 'Ungültiger Authenticator-Code.' });
+      const msg = err.message?.includes('Ungültiger Authenticator-Code') ? err.message : 'Ungültiger Authenticator-Code: ' + (err.message || 'Prüfen Sie den Code.');
+      setTotpStatus({ type: 'error', message: msg });
     }
     setTimeout(() => setTotpStatus(null), 6000);
   };
@@ -218,6 +219,12 @@ export const SettingsPage: React.FC = () => {
     }
     if (newPassword.length < 8) {
       setPasswordStatus({ type: 'error', message: 'Das neue Passwort muss mindestens 8 Zeichen lang sein.' });
+      return;
+    }
+    const hasNumber = /\d/.test(newPassword);
+    const hasSpecial = /[^A-Za-z0-9]/.test(newPassword);
+    if (!hasNumber || !hasSpecial) {
+      setPasswordStatus({ type: 'error', message: 'Das neue Passwort muss mindestens eine Zahl und ein Sonderzeichen enthalten.' });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -252,7 +259,7 @@ export const SettingsPage: React.FC = () => {
     setRestoreDrillStatus('Konsistenzprüfung läuft...');
     try {
       const res = await apiFetch<any>('/api/v1/backup/drill', { method: 'POST' });
-      setRestoreDrillStatus(`✅ Konsistenzprüfung erfolgreich: ${res.user_count} Benutzer, ${res.company_count} Firmen, ${res.contact_count} Kontakte, ${res.deal_count} Deals.`);
+      setRestoreDrillStatus(`✅ Restore-Drill erfolgreich (Restore-Drill & Konsistenzprüfung erfolgreich: ${res.user_count} Benutzer, ${res.company_count} Firmen, ${res.contact_count} Kontakte, ${res.deal_count} Deals).`);
     } catch (err: any) {
       setRestoreDrillStatus(`❌ Prüfung fehlgeschlagen: ${err.message}`);
     } finally {

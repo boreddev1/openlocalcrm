@@ -67,7 +67,8 @@ export const DemoBanner: React.FC = () => {
         <button
           onClick={() => setClosed(true)}
           className="p-1 hover:bg-amber-500/20 rounded text-amber-400/70 hover:text-amber-300 transition-colors ml-1"
-          title="Banner für diese Sitzung schließen"
+          title="Banner ausblenden"
+          aria-label="Banner ausblenden"
         >
           <X className="w-3.5 h-3.5" />
         </button>

@@ -266,11 +266,20 @@ func NewRouter(cfg Config) http.Handler {
 					air.Post("/chat", aiH.Chat)
 					air.Post("/research/company", aiH.ResearchCompany)
 					air.Get("/observability", aiH.GetObservability)
+					air.Post("/parse-bill", aiH.ParseBill)
+					air.Get("/kb", aiH.ListKB)
+					air.Post("/kb", aiH.CreateKB)
+					air.Delete("/kb/{id}", aiH.DeleteKB)
+					air.Get("/research/jobs", aiH.ListResearchJobs)
+					air.Post("/research/jobs", aiH.CreateResearchJob)
 					if noteH != nil {
 						air.Post("/synthesize-notes", noteH.Synthesize)
 					}
 				})
 			}
+
+			calcH := handlers.NewCalculatorHandler()
+			protected.Post("/calculator/solar", calcH.CalculateSolar)
 
 			appointmentSvc := appointment.NewService(cfg.SSEHub)
 			telephonySvc := telephony.NewService(cfg.SSEHub)
@@ -286,6 +295,9 @@ func NewRouter(cfg Config) http.Handler {
 				protected.Route("/appointments", func(appr chi.Router) {
 					appr.Get("/", appointmentH.List)
 					appr.Post("/", appointmentH.Create)
+					appr.Put("/{id}", appointmentH.Update)
+					appr.Delete("/{id}", appointmentH.Delete)
+					appr.Post("/{id}/push-external", appointmentH.PushExternal)
 					appr.Get("/{id}/ics", appointmentH.DownloadICS)
 				})
 			}

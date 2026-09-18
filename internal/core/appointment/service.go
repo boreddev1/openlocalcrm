@@ -10,14 +10,22 @@ import (
 )
 
 type Appointment struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	ContactID *string   `json:"contact_id,omitempty"`
-	StartTime time.Time `json:"start_time"`
-	EndTime   time.Time `json:"end_time"`
-	Location  string    `json:"location"`
-	Notes     string    `json:"notes"`
-	ICSUID    string    `json:"ics_uid"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	ContactID   *string   `json:"contact_id,omitempty"`
+	StartTime   time.Time `json:"start_time"`
+	EndTime     time.Time `json:"end_time"`
+	Location    string    `json:"location"`
+	Notes       string    `json:"notes"`
+	ICSUID      string    `json:"ics_uid"`
+	IsExternal  bool      `json:"is_external"`
+	Provider    string    `json:"provider,omitempty"`
+	IsPrivate   bool      `json:"is_private,omitempty"`
+	ContactName string    `json:"contact_name,omitempty"`
+	CompanyName string    `json:"company_name,omitempty"`
+	AssignedTo  string    `json:"assigned_to,omitempty"`
+	Type        string    `json:"type,omitempty"`
+	IsPushed    bool      `json:"is_pushed"`
 }
 
 type CreateAppointmentInput struct {
@@ -41,22 +49,57 @@ func (s *Service) List(ctx context.Context) ([]Appointment, error) {
 	now := time.Now()
 	return []Appointment{
 		{
-			ID:        "app-1",
-			Title:     "Vor-Ort-Beratung PV 25 kWp Dr. Weber",
-			StartTime: now.Add(2 * time.Hour),
-			EndTime:   now.Add(3 * time.Hour),
-			Location:  "Kaiserstraße 14, Frankfurt am Main",
-			Notes:     "Dachbegehung & Zählerkasten-Prüfung",
-			ICSUID:    "app-1-ics-uid",
+			ID:         "app-ext-1",
+			Title:      "Internes Vertriebs-Meeting (M365)",
+			StartTime:  now.Add(1 * time.Hour),
+			EndTime:    now.Add(2 * time.Hour),
+			Location:   "Microsoft Teams",
+			Notes:      "Wöchentliches Pipeline-Update Vertrieb",
+			ICSUID:     "m365-ext-1",
+			IsExternal: true,
+			Provider:   "microsoft",
+			AssignedTo: "Max Mustermann",
+			Type:       "meeting",
 		},
 		{
-			ID:        "app-2",
-			Title:     "Vertragsunterzeichnung Sabine Mustermann",
-			StartTime: now.Add(26 * time.Hour),
-			EndTime:   now.Add(27 * time.Hour),
-			Location:  "Goethestraße 8, Frankfurt am Main",
-			Notes:     "Widerrufsbelehrung § 355 BGB aushändigen",
-			ICSUID:    "app-2-ics-uid",
+			ID:         "app-ext-2",
+			Title:      "Privater Termin / Facharzt (Google)",
+			StartTime:  now.Add(5 * time.Hour),
+			EndTime:    now.Add(6 * time.Hour),
+			Location:   "Frankfurt",
+			Notes:      "Privatblocker",
+			ICSUID:     "google-ext-2",
+			IsExternal: true,
+			Provider:   "google",
+			IsPrivate:  true,
+			AssignedTo: "Max Mustermann",
+			Type:       "meeting",
+		},
+		{
+			ID:          "app-1",
+			Title:       "Vor-Ort-Beratung PV 25 kWp Dr. Weber",
+			StartTime:   now.Add(24 * time.Hour),
+			EndTime:     now.Add(25 * time.Hour),
+			Location:    "Kaiserstraße 14, Frankfurt am Main",
+			Notes:       "Dachbegehung & Zählerkasten-Prüfung",
+			ICSUID:      "app-1-ics-uid",
+			ContactName: "Dr. Michael Weber",
+			CompanyName: "Weber Haustechnik",
+			AssignedTo:  "Max Mustermann (Vertrieb)",
+			Type:        "meeting",
+		},
+		{
+			ID:          "app-2",
+			Title:       "Vertragsunterzeichnung Sabine Mustermann",
+			StartTime:   now.Add(48 * time.Hour),
+			EndTime:     now.Add(49 * time.Hour),
+			Location:    "Goethestraße 8, Frankfurt am Main",
+			Notes:       "Widerrufsbelehrung § 355 BGB aushändigen",
+			ICSUID:      "app-2-ics-uid",
+			ContactName: "Sabine Mustermann",
+			CompanyName: "Mustermann Solar GmbH",
+			AssignedTo:  "Max Mustermann (Vertrieb)",
+			Type:        "meeting",
 		},
 	}, nil
 }

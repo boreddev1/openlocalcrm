@@ -5,11 +5,11 @@ import { Lock, Mail, ShieldCheck, KeyRound, Sparkles, UserCheck } from 'lucide-r
 import { apiFetch } from '../api/client';
 
 export const LoginPage: React.FC = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('admin@openlocalcrm.local');
+  const [password, setPassword] = useState('demo123');
   const [totpCode, setTotpCode] = useState('');
   const [totpRequired, setTotpRequired] = useState(false);
-  const [isDemo, setIsDemo] = useState(false);
+  const [isDemo, setIsDemo] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -19,10 +19,10 @@ export const LoginPage: React.FC = () => {
   useEffect(() => {
     apiFetch<{ demo_mode?: boolean }>('/api/v1/health')
       .then((res) => {
-        if (res && res.demo_mode) {
-          setIsDemo(true);
-          setEmail('admin@openlocalcrm.local');
-          setPassword('demo123');
+        if (res && res.demo_mode === false) {
+          setIsDemo(false);
+          setEmail('');
+          setPassword('');
         }
       })
       .catch(() => {});

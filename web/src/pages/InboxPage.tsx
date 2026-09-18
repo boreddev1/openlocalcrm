@@ -115,10 +115,11 @@ export const InboxPage: React.FC = () => {
     'msg-3': ['Wärmepumpe'],
   });
 
-  const { data: messages = [], isLoading } = useQuery<any[]>({
+  const { data: rawMessages = [], isLoading } = useQuery<any[]>({
     queryKey: ['emails'],
     queryFn: () => apiFetch('/api/v1/emails/messages'),
   });
+  const messages = Array.isArray(rawMessages) ? rawMessages : [];
 
   const availableTags = [
     { id: 'PV-Interessent', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },

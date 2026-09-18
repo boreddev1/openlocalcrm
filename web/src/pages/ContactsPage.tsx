@@ -58,6 +58,7 @@ export const ContactsPage: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contacts'] });
       setDeletingContact(null);
+      setMergeInfo(null);
     },
   });
 

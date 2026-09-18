@@ -16,11 +16,12 @@ export const Header: React.FC<HeaderProps> = ({ onMenuToggle, onOpenSearch }) =>
   const queryClient = useQueryClient();
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
 
-  const { data: notifications = [] } = useQuery<any[]>({
+  const { data: rawNotifications = [] } = useQuery<any[]>({
     queryKey: ['notifications'],
     queryFn: () => apiFetch('/api/v1/notifications/unread'),
     refetchInterval: 15000,
   });
+  const notifications = Array.isArray(rawNotifications) ? rawNotifications : [];
 
   const markAllReadMutation = useMutation({
     mutationFn: () => apiFetch('/api/v1/notifications/read-all', { method: 'POST' }),

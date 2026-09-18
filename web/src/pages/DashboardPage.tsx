@@ -5,20 +5,23 @@ import { Users, Building2, KanbanSquare, CheckSquare, ArrowUpRight, Plus } from 
 import { Link } from 'react-router-dom';
 
 export const DashboardPage: React.FC = () => {
-  const { data: contacts = [] } = useQuery<any[]>({
+  const { data: rawContacts = [] } = useQuery<any[]>({
     queryKey: ['contacts'],
     queryFn: () => apiFetch('/api/v1/contacts?limit=5'),
   });
+  const contacts = Array.isArray(rawContacts) ? rawContacts : [];
 
-  const { data: todos = [] } = useQuery<any[]>({
+  const { data: rawTodos = [] } = useQuery<any[]>({
     queryKey: ['todos'],
     queryFn: () => apiFetch('/api/v1/todos?limit=5'),
   });
+  const todos = Array.isArray(rawTodos) ? rawTodos : [];
 
-  const { data: deals = [] } = useQuery<any[]>({
+  const { data: rawDeals = [] } = useQuery<any[]>({
     queryKey: ['deals'],
     queryFn: () => apiFetch('/api/v1/deals'),
   });
+  const deals = Array.isArray(rawDeals) ? rawDeals : [];
 
   const metrics = [
     { title: 'Aktive Kontakte', value: contacts.length > 0 ? `${contacts.length}+` : '3+', icon: Users, change: '+12% diesen Monat' },

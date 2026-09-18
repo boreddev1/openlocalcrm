@@ -239,7 +239,7 @@ export const DealsPage: React.FC = () => {
                       stageDeals.map((deal) => (
                         <div
                           key={deal.id}
-                          id={deal.id}
+                          id={deal.id?.startsWith('d-') ? deal.id : `d-${deal.id}`}
                           className="bg-slate-950 border border-slate-800 hover:border-slate-700 p-4 rounded-xl shadow-sm transition-all space-y-3 group"
                         >
                           <div className="flex items-start justify-between gap-2">

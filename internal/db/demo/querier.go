@@ -109,6 +109,19 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 		UpdatedAt:    nowTimestamptz(),
 	}
 
+	closerID := parseUUID("22222222-2222-2222-2222-222222222223")
+	q.users[uuidToStr(closerID)] = db.User{
+		ID:           closerID,
+		Email:        "laura@openlocalcrm.local",
+		PasswordHash: hash,
+		FirstName:    "Laura",
+		LastName:     "Closerin",
+		Role:         "BENUTZER",
+		Status:       "ACTIVE",
+		CreatedAt:    nowTimestamptz(),
+		UpdatedAt:    nowTimestamptz(),
+	}
+
 	// Companies
 	comp1ID := parseUUID("33333333-3333-3333-3333-333333333331")
 	comp2ID := parseUUID("33333333-3333-3333-3333-333333333332")
@@ -128,12 +141,12 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 	q.companies[uuidToStr(comp2ID)] = db.Company{
 		ID:             comp2ID,
 		Name:           "Bäckerei Schmidt e.K.",
-		Domain:         strToText("schmidt-back.de"),
-		Phone:          strToText("+49 731 223344"),
-		Email:          strToText("kontakt@schmidt-back.de"),
-		AddressStreet:  strToText("Marktplatz 4"),
-		AddressZip:     strToText("89073"),
-		AddressCity:    strToText("Ulm"),
+		Domain:         strToText("baeckerei-schmidt.de"),
+		Phone:          strToText("+49 69 555020"),
+		Email:          strToText("kontakt@baeckerei-schmidt.de"),
+		AddressStreet:  strToText("Hauptstraße 45"),
+		AddressZip:     strToText("60311"),
+		AddressCity:    strToText("Frankfurt am Main"),
 		AddressCountry: strToText("Deutschland"),
 		CreatedAt:      nowTimestamptz(),
 		UpdatedAt:      nowTimestamptz(),
@@ -145,10 +158,10 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 	q.contacts[uuidToStr(cont1ID)] = db.Contact{
 		ID:                cont1ID,
 		CompanyID:         comp1ID,
-		FirstName:         "Florian",
+		FirstName:         "Dr. Michael",
 		LastName:          "Weber",
-		Email:             strToText("f.weber@weber-maschinenbau.de"),
-		Phone:             strToText("+49 711 555019"),
+		Email:             strToText("weber@energie-dach.de"),
+		Phone:             strToText("+49 170 8899221"),
 		Position:          strToText("Geschäftsführer"),
 		LeadSource:        strToText("Messe Intersolar"),
 		AddressStreet:     strToText("Industriestraße 14"),
@@ -907,7 +920,8 @@ func (q *InMemoryQuerier) ListAllNotifications(ctx context.Context, arg db.ListA
 
 	var list []db.Notification
 	for _, n := range q.notifications {
-		if n.UserID.Valid && arg.UserID.Valid && n.UserID.Bytes == arg.UserID.Bytes {
+		matchesUser := !arg.UserID.Valid || !n.UserID.Valid || (n.UserID.Valid && n.UserID.Bytes == arg.UserID.Bytes)
+		if matchesUser {
 			list = append(list, n)
 		}
 	}
@@ -926,7 +940,8 @@ func (q *InMemoryQuerier) ListUnreadNotifications(ctx context.Context, arg db.Li
 
 	var list []db.Notification
 	for _, n := range q.notifications {
-		if n.UserID.Valid && arg.UserID.Valid && n.UserID.Bytes == arg.UserID.Bytes && !n.IsRead {
+		matchesUser := !arg.UserID.Valid || !n.UserID.Valid || (n.UserID.Valid && n.UserID.Bytes == arg.UserID.Bytes)
+		if matchesUser && !n.IsRead {
 			list = append(list, n)
 		}
 	}
@@ -944,7 +959,8 @@ func (q *InMemoryQuerier) MarkAllNotificationsAsRead(ctx context.Context, userID
 	defer q.mu.Unlock()
 
 	for idStr, n := range q.notifications {
-		if n.UserID.Valid && userID.Valid && n.UserID.Bytes == userID.Bytes {
+		matchesUser := !userID.Valid || !n.UserID.Valid || (n.UserID.Valid && n.UserID.Bytes == userID.Bytes)
+		if matchesUser {
 			n.IsRead = true
 			q.notifications[idStr] = n
 		}

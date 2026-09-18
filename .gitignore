@@ -30,6 +30,8 @@ coverage.out
 coverage.html
 test-results/
 playwright-report/
+playwright/.auth/
+web/playwright/
 
 # Dependencies
 node_modules/
