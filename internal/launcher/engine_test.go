@@ -166,12 +166,24 @@ func TestParseDockerInspectJSON_AndExtractEnv(t *testing.T) {
 func TestConvertInspectToContainerInfo(t *testing.T) {
 	items := []DockerInspectItem{
 		{
-			Name:  "/crm-server",
-			State: struct { Status string `json:"Status"`; Health struct { Status string `json:"Status"` } `json:"Health"` }{ Status: "running", Health: struct { Status string `json:"Status"` }{ Status: "healthy" } },
+			Name: "/crm-server",
+			State: struct {
+				Status string `json:"Status"`
+				Health struct {
+					Status string `json:"Status"`
+				} `json:"Health"`
+			}{Status: "running", Health: struct {
+				Status string `json:"Status"`
+			}{Status: "healthy"}},
 		},
 		{
-			Name:  "/crm-db",
-			State: struct { Status string `json:"Status"`; Health struct { Status string `json:"Status"` } `json:"Health"` }{ Status: "exited" },
+			Name: "/crm-db",
+			State: struct {
+				Status string `json:"Status"`
+				Health struct {
+					Status string `json:"Status"`
+				} `json:"Health"`
+			}{Status: "exited"},
 		},
 	}
 
@@ -252,6 +264,3 @@ func TestResetAll(t *testing.T) {
 		t.Errorf("expected log messages during ResetAll")
 	}
 }
-
-
-

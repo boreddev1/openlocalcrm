@@ -94,4 +94,3 @@ func TestTriggerInstallFunctions_NonWindows(t *testing.T) {
 		t.Errorf("expected error running TriggerDockerInstall on non-windows platform")
 	}
 }
-

@@ -206,7 +206,7 @@ export const InboxPage: React.FC = () => {
     if (!selectedMessage) return;
     setIsGeneratingDraft(true);
     setTimeout(() => {
-      let draft = '';
+      let draft: string;
       
       // If prompt injection was attempted, AI safely ignores attacker's prompt
       if (currentSecurityAnalysis?.hasInjection) {

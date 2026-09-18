@@ -8,11 +8,11 @@ import (
 )
 
 type TriageResult struct {
-	Category   string `json:"category"`   // ANFRAGE, SUPPORT, RECHNUNG, REKLAMATION, SONSTIGES
-	Sentiment  string `json:"sentiment"`  // POSITIVE, NEUTRAL, NEGATIVE
-	Priority   string `json:"priority"`   // URGENT, HIGH, MEDIUM, LOW
-	Summary    string `json:"summary"`    // Concise summary in German
-	DraftReply string `json:"draft_reply"`// Suggested human-in-the-loop email response
+	Category   string `json:"category"`    // ANFRAGE, SUPPORT, RECHNUNG, REKLAMATION, SONSTIGES
+	Sentiment  string `json:"sentiment"`   // POSITIVE, NEUTRAL, NEGATIVE
+	Priority   string `json:"priority"`    // URGENT, HIGH, MEDIUM, LOW
+	Summary    string `json:"summary"`     // Concise summary in German
+	DraftReply string `json:"draft_reply"` // Suggested human-in-the-loop email response
 }
 
 // UnmarshalJSON supports case-insensitive and multi-language key variations from any LLM

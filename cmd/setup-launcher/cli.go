@@ -618,4 +618,3 @@ func handleVersionsList(baseDir string, out io.Writer) int {
 	fmt.Fprintln(out)
 	return 0
 }
-

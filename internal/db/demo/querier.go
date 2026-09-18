@@ -20,18 +20,18 @@ var (
 )
 
 type InMemoryQuerier struct {
-	mu            sync.RWMutex
-	users         map[string]db.User
-	companies     map[string]db.Company
-	contacts      map[string]db.Contact
-	deals         map[string]db.Deal
-	todos         map[string]db.Todo
-	notifications map[string]db.Notification
-	auditLogs     []db.AuditLog
-	emailAccounts map[string]db.EmailAccount
-	emailMessages map[string]db.EmailMessage
-	emailAttachs  map[string]db.EmailAttachment
-	refreshTokens map[string]db.RefreshToken
+	mu             sync.RWMutex
+	users          map[string]db.User
+	companies      map[string]db.Company
+	contacts       map[string]db.Contact
+	deals          map[string]db.Deal
+	todos          map[string]db.Todo
+	notifications  map[string]db.Notification
+	auditLogs      []db.AuditLog
+	emailAccounts  map[string]db.EmailAccount
+	emailMessages  map[string]db.EmailMessage
+	emailAttachs   map[string]db.EmailAttachment
+	refreshTokens  map[string]db.RefreshToken
 	appointments   map[string]db.Appointment
 	notes          map[string]db.Note
 	callActivities map[string]db.CallActivity

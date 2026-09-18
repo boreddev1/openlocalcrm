@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -e
+
+# ==============================================================================
+# OpenLocalCRM Pre-Push Hook
+# Runs fast local test suite & license compliance scan before pushing to remote
+# ==============================================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+echo -e "${BLUE}${BOLD}🚀 [Pre-Push] Führe finale Tests vor dem Push aus...${NC}"
+
+# 1. Run unit & integration tests
+echo -n "  • Führe Go Unit- und Integrationstests aus... "
+if go test -short ./... > /dev/null 2>&1; then
+    echo -e "${GREEN}OK${NC}"
+else
+    echo -e "${RED}FEHLER${NC}"
+    echo -e "${RED}❌ Go-Tests sind fehlgeschlagen! Bitte 'go test ./...' ausführen und Fehler beheben vor dem Push.${NC}"
+    exit 1
+fi
+
+# 2. Run license compliance
+echo -n "  • Prüfe Open-Source Lizenzkonformität... "
+if [ -f "./scripts/check-licenses.sh" ]; then
+    if ./scripts/check-licenses.sh > /dev/null 2>&1; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FEHLER${NC}"
+        echo -e "${RED}❌ Lizenz-Scan fehlgeschlagen!${NC}"
+        exit 1
+    fi
+fi
+
+echo -e "${GREEN}${BOLD}✅ Pre-Push-Validierung erfolgreich — Push wird fortgesetzt.${NC}"
+exit 0

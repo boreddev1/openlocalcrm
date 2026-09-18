@@ -29,15 +29,15 @@ type Workflow struct {
 }
 
 type WorkflowRun struct {
-	ID          string    `json:"id"`
-	WorkflowID  string    `json:"workflow_id"`
-	TargetID    string    `json:"target_id"`
-	TargetType  string    `json:"target_type"`
-	TargetName  string    `json:"target_name"`
-	Status      string    `json:"status"` // IN_PROGRESS, WAITING_APPROVAL, COMPLETED, CANCELLED
-	CurrentStep int       `json:"current_step"`
-	StartedAt   time.Time `json:"started_at"`
-	CompletedAt *time.Time`json:"completed_at,omitempty"`
+	ID          string     `json:"id"`
+	WorkflowID  string     `json:"workflow_id"`
+	TargetID    string     `json:"target_id"`
+	TargetType  string     `json:"target_type"`
+	TargetName  string     `json:"target_name"`
+	Status      string     `json:"status"` // IN_PROGRESS, WAITING_APPROVAL, COMPLETED, CANCELLED
+	CurrentStep int        `json:"current_step"`
+	StartedAt   time.Time  `json:"started_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 type Service struct {

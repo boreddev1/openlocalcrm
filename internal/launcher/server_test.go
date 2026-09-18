@@ -277,5 +277,3 @@ func TestServerVersionsEndpoint(t *testing.T) {
 		t.Errorf("expected versions response containing v0.9, got: %s", body)
 	}
 }
-
-

@@ -153,11 +153,11 @@ func (h *NoteHandler) Synthesize(w http.ResponseWriter, r *http.Request) {
 				"priority": "HIGH",
 			},
 			{
-				"id":       "act2",
-				"type":     "CREATE_DEAL",
-				"label":    "Deal anlegen: 25 kWp PV + 15 kWh Speicher (22.500 €)",
-				"value":    "22500.00",
-				"stage":    "OFFER_SENT",
+				"id":    "act2",
+				"type":  "CREATE_DEAL",
+				"label": "Deal anlegen: 25 kWp PV + 15 kWh Speicher (22.500 €)",
+				"value": "22500.00",
+				"stage": "OFFER_SENT",
 			},
 		},
 	}

@@ -75,8 +75,8 @@ type Updater struct {
 	cacheMu sync.RWMutex
 	cache   *cachedCheck
 
-	versionsMu     sync.RWMutex
-	versionsCache  *cachedVersions
+	versionsMu    sync.RWMutex
+	versionsCache *cachedVersions
 }
 
 func NewUpdater(baseDir string) *Updater {
@@ -155,7 +155,7 @@ func (u *Updater) CheckForUpdate(currentCommit string) (*UpdateCheckResult, erro
 	var ghCommit struct {
 		SHA    string `json:"sha"`
 		Commit struct {
-			Message string `json:"message"`
+			Message   string `json:"message"`
 			Committer struct {
 				Date string `json:"date"`
 			} `json:"committer"`
@@ -829,4 +829,3 @@ func (u *Updater) EnsureProjectFilesForVersion(ctx context.Context, version stri
 
 	return nil
 }
-

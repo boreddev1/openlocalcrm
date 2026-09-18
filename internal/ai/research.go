@@ -19,11 +19,11 @@ var (
 )
 
 type CompanyResearchResult struct {
-	Domain           string   `json:"domain"`
-	Title            string   `json:"title"`
-	MetaDescription  string   `json:"meta_description"`
-	Summary          string   `json:"summary"`
-	IndustryKeywords []string `json:"industry_keywords"`
+	Domain           string    `json:"domain"`
+	Title            string    `json:"title"`
+	MetaDescription  string    `json:"meta_description"`
+	Summary          string    `json:"summary"`
+	IndustryKeywords []string  `json:"industry_keywords"`
 	ResearchedAt     time.Time `json:"researched_at"`
 }
 

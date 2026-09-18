@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -e
+
+# ==============================================================================
+# OpenLocalCRM Conventional Commits Validator Hook
+# Ensures commit messages follow standard enterprise conventions
+# ==============================================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+COMMIT_MSG_FILE="$1"
+
+if [ ! -f "$COMMIT_MSG_FILE" ]; then
+    exit 0
+fi
+
+# Read the first line of the commit message
+FIRST_LINE=$(head -n 1 "$COMMIT_MSG_FILE" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+# Ignore merge commits, fixups, squash commits
+if [[ "$FIRST_LINE" =~ ^(Merge|fixup!|squash!) ]]; then
+    exit 0
+fi
+
+# Conventional commits pattern
+# Example: feat: add new feature
+# Example: fix(auth): resolve session timeout
+# Example: chore(deps)!: bump dependencies
+CONVENTIONAL_REGEX='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9_\.\/-]+\))?!?: .+$'
+
+if [[ ! "$FIRST_LINE" =~ $CONVENTIONAL_REGEX ]]; then
+    echo -e "${RED}${BOLD}❌ Ungültiges Commit-Nachrichten-Format!${NC}"
+    echo -e "${RED}Ihre Nachricht war: \"$FIRST_LINE\"${NC}\n"
+    echo -e "${YELLOW}Bitte verwenden Sie die Conventional-Commits-Konvention:${NC}"
+    echo -e "   ${BOLD}<type>(<optional scope>): <beschreibung>${NC}\n"
+    echo -e "Erlaubte Typen:"
+    echo -e "   • ${BOLD}feat${NC}:     Neues Feature oder Funktionalität"
+    echo -e "   • ${BOLD}fix${NC}:      Bugfix / Fehlerbehebung"
+    echo -e "   • ${BOLD}docs${NC}:     Dokumentationsänderungen"
+    echo -e "   • ${BOLD}refactor${NC}: Code-Umstrukturierung ohne Verhaltensänderung"
+    echo -e "   • ${BOLD}perf${NC}:     Performance-Optimierung"
+    echo -e "   • ${BOLD}test${NC}:     Hinzufügen oder Anpassen von Tests"
+    echo -e "   • ${BOLD}build${NC}:    Build-System oder externe Abhängigkeiten"
+    echo -e "   • ${BOLD}ci${NC}:       CI/CD-Konfiguration"
+    echo -e "   • ${BOLD}chore${NC}:    Wartungsarbeiten / Hilfsskripte"
+    echo -e "\n${GREEN}Beispiele:${NC}"
+    echo -e "   feat(calendar): support recurring appointments"
+    echo -e "   fix(auth): prevent unauthorized export access"
+    echo -e "   chore: update dependencies\n"
+    exit 1
+fi
+
+# Check first line length (recommend max 80 chars)
+MSG_LEN=${#FIRST_LINE}
+if [ "$MSG_LEN" -gt 100 ]; then
+    echo -e "${YELLOW}⚠️  Hinweis: Die Betreffzeile ist mit ${MSG_LEN} Zeichen etwas lang (empfohlen: max. 80).${NC}"
+fi
+
+exit 0

@@ -63,6 +63,20 @@ test: ## Run Go tests
 test-e2e: ## Run Playwright E2E tests
 	./scripts/run-e2e.sh
 
+fmt: ## Format Go source code with gofmt
+	gofmt -s -w .
+
+lint: ## Run Go static analysis, frontend ESLint and TypeScript checks
+	go vet ./...
+	cd web && pnpm lint && pnpm typecheck
+
+check: fmt lint check-licenses test ## Run full suite of local quality checks
+
+setup-hooks: ## Configure and enable enterprise Git pre-commit and pre-push hooks
+	git config core.hooksPath .githooks
+	chmod +x .githooks/*
+	@echo "✅ Pre-Commit & Pre-Push Hooks erfolgreich eingerichtet!"
+
 simulate: ## Run 10-minute visual live simulation in browser
 	cd web && pnpm exec playwright test e2e/live-simulation.spec.ts --headed
 

@@ -259,4 +259,3 @@ func (h *DealHandler) AttachSolarCalculation(w http.ResponseWriter, r *http.Requ
 		"calculation": calc,
 	})
 }
-

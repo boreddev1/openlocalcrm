@@ -276,6 +276,3 @@ func TestEnsureProjectFilesForVersion_SkipIfExists(t *testing.T) {
 		t.Errorf("expected log that files already exist, got %v", logs)
 	}
 }
-
-
-

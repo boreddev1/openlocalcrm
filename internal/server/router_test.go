@@ -112,4 +112,3 @@ func TestRBAC_AdminEndpointsProtection(t *testing.T) {
 		}
 	}
 }
-

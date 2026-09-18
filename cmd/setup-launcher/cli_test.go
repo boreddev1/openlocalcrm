@@ -70,4 +70,3 @@ func TestRunCLI_InstallHelpHasVersion(t *testing.T) {
 		t.Errorf("expected help output to mention --version / --tag flag, got:\n%s", output)
 	}
 }
-

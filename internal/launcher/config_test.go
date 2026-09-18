@@ -128,8 +128,8 @@ OLLAMA_MODEL=gpt-4o-mini
 func TestGenerateEnvContentWithExisting_PreservesCredentials(t *testing.T) {
 	tmp := t.TempDir()
 	existing := map[string]string{
-		"DB_PASSWORD":          "original-database-secret-42",
-		"CONNECTOR_API_TOKEN":  "original-connector-token-99",
+		"DB_PASSWORD":         "original-database-secret-42",
+		"CONNECTOR_API_TOKEN": "original-connector-token-99",
 		"INITIAL_ADMIN_EMAIL": "admin@domain.de",
 	}
 
@@ -222,6 +222,3 @@ func TestGenerateEnvContent_Version(t *testing.T) {
 		t.Errorf("expected ReadExistingConfig to read version v0.9, got %+v", loaded)
 	}
 }
-
-
-
