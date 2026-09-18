@@ -12,11 +12,11 @@ export const ReportsPage: React.FC = () => {
   const forecast = Array.isArray(reportData?.forecast)
     ? reportData.forecast
     : [
-    { month_name: 'Sep 2026', weighted_eur: 42500, committed_eur: 28000, deal_count: 4 },
-    { month_name: 'Okt 2026', weighted_eur: 58000, committed_eur: 35000, deal_count: 6 },
-    { month_name: 'Nov 2026', weighted_eur: 69000, committed_eur: 41000, deal_count: 7 },
-    { month_name: 'Dez 2026', weighted_eur: 84000, committed_eur: 52000, deal_count: 9 },
-  ];
+        { month_name: 'Sep 2026', weighted_eur: 42500, committed_eur: 28000, deal_count: 4 },
+        { month_name: 'Okt 2026', weighted_eur: 58000, committed_eur: 35000, deal_count: 6 },
+        { month_name: 'Nov 2026', weighted_eur: 69000, committed_eur: 41000, deal_count: 7 },
+        { month_name: 'Dez 2026', weighted_eur: 84000, committed_eur: 52000, deal_count: 9 },
+      ];
 
   const stats = reportData?.conversion_stats || {
     total_leads: 28,
