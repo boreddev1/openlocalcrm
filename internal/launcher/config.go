@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,6 +22,7 @@ type SetupConfig struct {
 	AIBaseURL     string `json:"ai_base_url"`
 	AIAPIKey      string `json:"ai_api_key"`
 	AIModel       string `json:"ai_model"`
+	Version       string `json:"version"`
 }
 
 func randomHex(bytes int) string {
@@ -80,6 +82,14 @@ func ReadExistingConfig(baseDir string) (*SetupConfig, bool) {
 		AIBaseURL:     envMap["AI_BASE_URL"],
 		AIAPIKey:      envMap["AI_API_KEY"],
 		AIModel:       envMap["OLLAMA_MODEL"],
+		Version:       envMap["OPENLOCALCRM_VERSION"],
+	}
+
+	if cfg.Version == "" {
+		cfg.Version = envMap["CRM_VERSION"]
+	}
+	if cfg.Version == "" {
+		cfg.Version = "v0.9"
 	}
 
 	if cfg.AdminEmail == "" {
@@ -132,8 +142,9 @@ func DetectExistingInstallation(ctx context.Context, baseDir string, engine *Eng
 					IsDemoMode:    strings.EqualFold(recovered["DEMO_MODE"], "true"),
 					AIProvider:    recovered["AI_PROVIDER"],
 					AIBaseURL:     recovered["OLLAMA_BASE_URL"],
-					AIModel:       recovered["OLLAMA_MODEL"],
 					AIAPIKey:      recovered["AI_API_KEY"],
+					AIModel:       recovered["OLLAMA_MODEL"],
+					Version:       recovered["OPENLOCALCRM_VERSION"],
 				}
 				if cfg.AdminEmail == "" {
 					cfg.AdminEmail = "admin@openlocalcrm.local"
@@ -195,6 +206,25 @@ func GenerateEnvContentWithExisting(cfg SetupConfig, existing map[string]string)
 		cfg.AdminPassword = randomHex(12)
 	}
 
+	version := cfg.Version
+	if version == "" {
+		if existing != nil && existing["OPENLOCALCRM_VERSION"] != "" {
+			version = existing["OPENLOCALCRM_VERSION"]
+		} else {
+			version = "v1.0.0"
+		}
+	}
+
+	var serverImage, workerImage string
+	if IsGHCRImageSupported(version) {
+		imageTag := version
+		if imageTag == "" || imageTag == "main" || imageTag == "master" {
+			imageTag = "latest"
+		}
+		serverImage = fmt.Sprintf("ghcr.io/boreddev1/openlocalcrm/server:%s", imageTag)
+		workerImage = fmt.Sprintf("ghcr.io/boreddev1/openlocalcrm/worker:%s", imageTag)
+	}
+
 	dbPassword := randomHex(16)
 	if existing != nil && existing["DB_PASSWORD"] != "" {
 		dbPassword = existing["DB_PASSWORD"]
@@ -224,6 +254,9 @@ func GenerateEnvContentWithExisting(cfg SetupConfig, existing map[string]string)
 		"DOMAIN=localhost",
 		fmt.Sprintf("PORT=%d", cfg.Port),
 		fmt.Sprintf("APP_PORT=%d", cfg.Port),
+		fmt.Sprintf("OPENLOCALCRM_VERSION=%s", version),
+		fmt.Sprintf("CRM_SERVER_IMAGE=%s", serverImage),
+		fmt.Sprintf("CRM_WORKER_IMAGE=%s", workerImage),
 		"LOG_LEVEL=info",
 		"",
 		"# Administrator Account",
@@ -285,4 +318,22 @@ func WriteConfigAndDirectoriesWithEnv(baseDir string, cfg SetupConfig, existing 
 
 	envPath := filepath.Join(baseDir, ".env")
 	return os.WriteFile(envPath, []byte(content), 0600)
+}
+
+// IsGHCRImageSupported returns true if the selected release version is >= v1.0 or edge (main/master/latest).
+// For older legacy releases (< v1.0, e.g. v0.9), it returns false so that images are built locally from source.
+func IsGHCRImageSupported(version string) bool {
+	v := strings.TrimSpace(strings.ToLower(version))
+	if v == "" || v == "main" || v == "master" || v == "latest" || v == "edge" {
+		return true
+	}
+	v = strings.TrimPrefix(v, "v")
+	parts := strings.Split(v, ".")
+	if len(parts) > 0 {
+		major, err := strconv.Atoi(parts[0])
+		if err == nil {
+			return major >= 1
+		}
+	}
+	return false
 }

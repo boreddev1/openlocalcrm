@@ -28,7 +28,9 @@ export const MapViewPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">D2D & Außendienst-Gebietskarte</h1>
-          <p className="text-sm text-slate-400">Übersicht aller Kunden, Adressen und Leads vor Ort</p>
+          <p className="text-sm text-slate-400">
+            Übersicht aller Kunden, Adressen und Leads vor Ort
+          </p>
         </div>
       </div>
 
@@ -46,18 +48,23 @@ export const MapViewPage: React.FC = () => {
           />
 
           {contacts.map((contact) => {
-            const lat = contact.latitude || (50.1109 + (Math.random() - 0.5) * 0.08);
-            const lng = contact.longitude || (8.6821 + (Math.random() - 0.5) * 0.08);
+            const lat = contact.latitude || 50.1109 + (Math.random() - 0.5) * 0.08;
+            const lng = contact.longitude || 8.6821 + (Math.random() - 0.5) * 0.08;
 
             return (
               <Marker key={contact.id} position={[lat, lng]}>
                 <Popup className="custom-popup">
                   <div className="p-1 space-y-1 text-slate-900">
-                    <div className="font-bold text-sm">{contact.first_name} {contact.last_name}</div>
-                    {contact.position && <div className="text-xs text-slate-600">{contact.position}</div>}
+                    <div className="font-bold text-sm">
+                      {contact.first_name} {contact.last_name}
+                    </div>
+                    {contact.position && (
+                      <div className="text-xs text-slate-600">{contact.position}</div>
+                    )}
                     {contact.address_street && (
                       <div className="text-xs flex items-center gap-1 text-slate-700">
-                        <MapPin className="w-3 h-3 text-emerald-600" /> {contact.address_street}, {contact.address_city}
+                        <MapPin className="w-3 h-3 text-emerald-600" /> {contact.address_street},{' '}
+                        {contact.address_city}
                       </div>
                     )}
                     {contact.phone && (

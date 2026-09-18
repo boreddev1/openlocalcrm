@@ -1,6 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, Pause, RotateCcw, Activity, ChevronDown, Sparkles, CheckCircle2, Eye } from 'lucide-react';
+import {
+  Play,
+  Pause,
+  RotateCcw,
+  Activity,
+  ChevronDown,
+  Sparkles,
+  CheckCircle2,
+  Eye,
+} from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../api/client';
 
@@ -41,8 +50,20 @@ export const SimulationWidget: React.FC = () => {
       run: async () => {
         if (autoNavigate) navigate('/inbox');
 
-        const leadNames = ['Dr. Michael Weber', 'Sabine Mustermann', 'Klaus Schmidt', 'Elena Bauer', 'Markus Hofmann'];
-        const domains = ['energie-dach.de', 'web.de', 'schmidt-solar.de', 'bauer-gmbh.de', 'hofmann-pv.de'];
+        const leadNames = [
+          'Dr. Michael Weber',
+          'Sabine Mustermann',
+          'Klaus Schmidt',
+          'Elena Bauer',
+          'Markus Hofmann',
+        ];
+        const domains = [
+          'energie-dach.de',
+          'web.de',
+          'schmidt-solar.de',
+          'bauer-gmbh.de',
+          'hofmann-pv.de',
+        ];
         const idx = Math.floor(Math.random() * leadNames.length);
         const name = leadNames[idx];
         const email = `${name.toLowerCase().replace(/[^a-z]/g, '.')}@${domains[idx]}`;
@@ -90,7 +111,8 @@ export const SimulationWidget: React.FC = () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               model: 'gemma4:12b',
-              prompt: 'Klassifiziere diesen Lead für eine Solaranlage in Frankfurt und formuliere eine kurze Begrüßung auf Deutsch: 30 kWp PV-Anfrage von Dr. Michael Weber.',
+              prompt:
+                'Klassifiziere diesen Lead für eine Solaranlage in Frankfurt und formuliere eine kurze Begrüßung auf Deutsch: 30 kWp PV-Anfrage von Dr. Michael Weber.',
               stream: false,
             }),
           });
@@ -103,14 +125,17 @@ export const SimulationWidget: React.FC = () => {
           }
         } catch {
           // Fallback zu Backend AI Triage
-          const triageRes = await apiFetch<{ category: string; summary: string }>('/api/v1/ai/triage', {
-            method: 'POST',
-            body: JSON.stringify({
-              sender: 'Dr. Michael Weber <weber@energie-dach.de>',
-              subject: 'Anfrage 30 kWp PV-Anlage',
-              body_text: 'Dachfläche 350 m², IBAN DE89370400440532013000, Bitte um Angebot.',
-            }),
-          });
+          const triageRes = await apiFetch<{ category: string; summary: string }>(
+            '/api/v1/ai/triage',
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                sender: 'Dr. Michael Weber <weber@energie-dach.de>',
+                subject: 'Anfrage 30 kWp PV-Anlage',
+                body_text: 'Dachfläche 350 m², IBAN DE89370400440532013000, Bitte um Angebot.',
+              }),
+            },
+          );
           aiSummary = triageRes.summary || aiSummary;
         }
 
@@ -188,7 +213,8 @@ export const SimulationWidget: React.FC = () => {
 
         const durations = [75, 142, 210, 340];
         const dur = durations[Math.floor(Math.random() * durations.length)];
-        const notes = 'Kunde hat Rückfragen zur Einspeisevergütung EEG 2026 geklärt. Vor-Ort-Termin für Freitag vereinbart.';
+        const notes =
+          'Kunde hat Rückfragen zur Einspeisevergütung EEG 2026 geklärt. Vor-Ort-Termin für Freitag vereinbart.';
 
         await apiFetch('/api/v1/telephony/calls', {
           method: 'POST',
@@ -278,7 +304,9 @@ export const SimulationWidget: React.FC = () => {
           onClick={() => setIsExpanded(true)}
           className="px-3.5 py-2 bg-slate-900/95 hover:bg-slate-850 text-slate-100 border border-slate-700/80 rounded-full shadow-2xl text-xs font-bold flex items-center gap-2 backdrop-blur-md transition-all hover:scale-105"
         >
-          <div className={`w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+          <div
+            className={`w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}
+          />
           <Activity className="w-3.5 h-3.5 text-emerald-400" />
           <span>Live-Simulation (10m)</span>
           {isRunning && (
@@ -296,7 +324,9 @@ export const SimulationWidget: React.FC = () => {
       {/* Header Bar */}
       <div className="p-3 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className={`w-2.5 h-2.5 rounded-full ${isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+          <div
+            className={`w-2.5 h-2.5 rounded-full ${isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}
+          />
           <span className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
             <Activity className="w-3.5 h-3.5 text-emerald-400" />
             Live-Vertriebs- & KI-Simulation
@@ -352,7 +382,9 @@ export const SimulationWidget: React.FC = () => {
                 key={s}
                 onClick={() => setSpeed(s)}
                 className={`px-2 py-0.5 rounded-lg transition-colors ${
-                  speed === s ? 'bg-emerald-600 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'
+                  speed === s
+                    ? 'bg-emerald-600 text-slate-950 font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 {s}x
@@ -370,7 +402,9 @@ export const SimulationWidget: React.FC = () => {
           <button
             onClick={() => setAutoNavigate(!autoNavigate)}
             className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-              autoNavigate ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'bg-slate-800 text-slate-500'
+              autoNavigate
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                : 'bg-slate-800 text-slate-500'
             }`}
           >
             {autoNavigate ? 'AN' : 'AUS'}
@@ -404,11 +438,22 @@ export const SimulationWidget: React.FC = () => {
               <Sparkles className="w-3 h-3 text-emerald-400" />
               Echtzeit Event-Stream (DB & KI)
             </span>
-            {isRunning && <span className="text-emerald-400 font-mono text-[9px] animate-pulse">LIVE AKTIV</span>}
+            {isRunning && (
+              <span className="text-emerald-400 font-mono text-[9px] animate-pulse">
+                LIVE AKTIV
+              </span>
+            )}
           </div>
           <div className="space-y-1 font-mono text-[11px] text-slate-300 leading-tight max-h-28 overflow-y-auto">
             {tickerLogs.map((log, idx) => (
-              <div key={idx} className={idx === 0 ? 'text-emerald-400 font-semibold flex items-start gap-1.5' : 'text-slate-400 opacity-80'}>
+              <div
+                key={idx}
+                className={
+                  idx === 0
+                    ? 'text-emerald-400 font-semibold flex items-start gap-1.5'
+                    : 'text-slate-400 opacity-80'
+                }
+              >
                 {idx === 0 && <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />}
                 <span>{log}</span>
               </div>

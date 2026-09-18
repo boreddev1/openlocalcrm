@@ -1,7 +1,24 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, getFieldText } from '../api/client';
-import { Plus, Search, Mail, MapPin, X, Download, ShieldCheck, Zap, PhoneCall, CopyCheck, Upload, Edit3, Trash2, Sparkles, AlertCircle, MessageSquare } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  Mail,
+  MapPin,
+  X,
+  Download,
+  ShieldCheck,
+  Zap,
+  PhoneCall,
+  CopyCheck,
+  Upload,
+  Edit3,
+  Trash2,
+  Sparkles,
+  AlertCircle,
+  MessageSquare,
+} from 'lucide-react';
 import { CallModal } from '../components/telephony/CallModal';
 import { CSVImportModal } from '../components/contacts/CSVImportModal';
 import { ActivityLogDrawer } from '../components/notes/ActivityLogDrawer';
@@ -30,10 +47,11 @@ export const ContactsPage: React.FC = () => {
   });
 
   const createMutation = useMutation({
-    mutationFn: (newContact: any) => apiFetch('/api/v1/contacts', {
-      method: 'POST',
-      body: JSON.stringify(newContact),
-    }),
+    mutationFn: (newContact: any) =>
+      apiFetch('/api/v1/contacts', {
+        method: 'POST',
+        body: JSON.stringify(newContact),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contacts'] });
       setIsModalOpen(false);
@@ -41,10 +59,11 @@ export const ContactsPage: React.FC = () => {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (contact: any) => apiFetch(`/api/v1/contacts/${contact.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(contact),
-    }),
+    mutationFn: (contact: any) =>
+      apiFetch(`/api/v1/contacts/${contact.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(contact),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contacts'] });
       setEditingContact(null);
@@ -52,12 +71,14 @@ export const ContactsPage: React.FC = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (contactId: string) => apiFetch(`/api/v1/contacts/${contactId}`, {
-      method: 'DELETE',
-    }),
+    mutationFn: (contactId: string) =>
+      apiFetch(`/api/v1/contacts/${contactId}`, {
+        method: 'DELETE',
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contacts'] });
       setDeletingContact(null);
+      setMergeInfo(null);
     },
   });
 
@@ -91,7 +112,9 @@ export const ContactsPage: React.FC = () => {
   const handleExportCSV = async () => {
     try {
       const csvData = await apiFetch<string>('/api/v1/export/contacts.csv');
-      const blob = new Blob([typeof csvData === 'string' ? csvData : JSON.stringify(csvData)], { type: 'text/csv;charset=utf-8;' });
+      const blob = new Blob([typeof csvData === 'string' ? csvData : JSON.stringify(csvData)], {
+        type: 'text/csv;charset=utf-8;',
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -113,11 +136,16 @@ export const ContactsPage: React.FC = () => {
     setIsResearching(true);
     setResearchResult(null);
 
-    const domain = contact.email?.includes('@') ? contact.email.split('@')[1] : 'energie-dach-frankfurt.de';
+    const domain = contact.email?.includes('@')
+      ? contact.email.split('@')[1]
+      : 'energie-dach-frankfurt.de';
     try {
       const res = await apiFetch<any>('/api/v1/ai/research/company', {
         method: 'POST',
-        body: JSON.stringify({ domain, company_name: contact.company_name || `${contact.last_name} Solar` }),
+        body: JSON.stringify({
+          domain,
+          company_name: contact.company_name || `${contact.last_name} Solar`,
+        }),
       });
       setResearchResult(res);
     } catch {
@@ -137,7 +165,9 @@ export const ContactsPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">Kontakte & Leads</h1>
-          <p className="text-sm text-slate-400">Verwalte Kundendaten, DSGVO/UWG-Einwilligungen und Energiedaten</p>
+          <p className="text-sm text-slate-400">
+            Verwalte Kundendaten, DSGVO/UWG-Einwilligungen und Energiedaten
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -209,36 +239,60 @@ export const ContactsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-800">
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500">Lade Kontakte...</td>
+                  <td colSpan={5} className="py-8 text-center text-slate-500">
+                    Lade Kontakte...
+                  </td>
                 </tr>
               ) : contacts.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-slate-500">Keine Kontakte gefunden.</td>
+                  <td colSpan={5} className="py-12 text-center text-slate-500">
+                    Keine Kontakte gefunden.
+                  </td>
                 </tr>
               ) : (
                 contacts.map((contact) => {
-                  const firstName = getFieldText(contact.first_name) || (typeof contact.first_name === 'string' ? contact.first_name : '');
-                  const lastName = getFieldText(contact.last_name) || (typeof contact.last_name === 'string' ? contact.last_name : '');
-                  const email = getFieldText(contact.email) || (typeof contact.email === 'string' ? contact.email : '');
-                  const phone = getFieldText(contact.phone) || (typeof contact.phone === 'string' ? contact.phone : '');
-                  const position = getFieldText(contact.position) || (typeof contact.position === 'string' ? contact.position : '');
-                  const street = getFieldText(contact.address_street) || (typeof contact.address_street === 'string' ? contact.address_street : '');
-                  const zip = getFieldText(contact.address_zip) || (typeof contact.address_zip === 'string' ? contact.address_zip : '');
-                  const city = getFieldText(contact.address_city) || (typeof contact.address_city === 'string' ? contact.address_city : '');
-                  const zaehler = getFieldText(contact.zaehlernummer) || (typeof contact.zaehlernummer === 'string' ? contact.zaehlernummer : '');
+                  const firstName =
+                    getFieldText(contact.first_name) ||
+                    (typeof contact.first_name === 'string' ? contact.first_name : '');
+                  const lastName =
+                    getFieldText(contact.last_name) ||
+                    (typeof contact.last_name === 'string' ? contact.last_name : '');
+                  const email =
+                    getFieldText(contact.email) ||
+                    (typeof contact.email === 'string' ? contact.email : '');
+                  const phone =
+                    getFieldText(contact.phone) ||
+                    (typeof contact.phone === 'string' ? contact.phone : '');
+                  const position =
+                    getFieldText(contact.position) ||
+                    (typeof contact.position === 'string' ? contact.position : '');
+                  const street =
+                    getFieldText(contact.address_street) ||
+                    (typeof contact.address_street === 'string' ? contact.address_street : '');
+                  const zip =
+                    getFieldText(contact.address_zip) ||
+                    (typeof contact.address_zip === 'string' ? contact.address_zip : '');
+                  const city =
+                    getFieldText(contact.address_city) ||
+                    (typeof contact.address_city === 'string' ? contact.address_city : '');
+                  const zaehler =
+                    getFieldText(contact.zaehlernummer) ||
+                    (typeof contact.zaehlernummer === 'string' ? contact.zaehlernummer : '');
 
                   return (
                     <tr key={contact.id} className="hover:bg-slate-800/40 transition-colors">
                       <td className="py-4 px-6">
                         <div className="font-semibold text-slate-100 flex items-center gap-2">
-                          <span>{firstName} {lastName}</span>
+                          <span>
+                            {firstName} {lastName}
+                          </span>
                           <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                            {contact.customer_type === 'PRIVATKUNDE' ? 'B2C Privat' : 'B2B Geschäft'}
+                            {contact.customer_type === 'PRIVATKUNDE'
+                              ? 'B2C Privat'
+                              : 'B2B Geschäft'}
                           </span>
                         </div>
-                        {position && (
-                          <div className="text-xs text-slate-400">{position}</div>
-                        )}
+                        {position && <div className="text-xs text-slate-400">{position}</div>}
                       </td>
 
                       <td className="py-4 px-6 space-y-1">
@@ -263,7 +317,9 @@ export const ContactsPage: React.FC = () => {
                           >
                             <PhoneCall className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
                             <span>{phone}</span>
-                            <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/10 border border-emerald-500/20 rounded text-emerald-400">Anrufen</span>
+                            <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/10 border border-emerald-500/20 rounded text-emerald-400">
+                              Anrufen
+                            </span>
                           </button>
                         )}
                         <div className="flex items-center gap-1.5 pt-1">
@@ -277,7 +333,10 @@ export const ContactsPage: React.FC = () => {
                         {city ? (
                           <div className="flex items-center gap-1.5">
                             <MapPin className="w-3.5 h-3.5 text-slate-500" />
-                            <span>{street ? `${street}, ` : ''}{zip} {city}</span>
+                            <span>
+                              {street ? `${street}, ` : ''}
+                              {zip} {city}
+                            </span>
                           </div>
                         ) : (
                           <span className="text-slate-600">—</span>
@@ -290,14 +349,21 @@ export const ContactsPage: React.FC = () => {
                             <Zap className="w-3.5 h-3.5" /> {zaehler}
                           </div>
                         ) : (
-                          <span className="text-slate-600 font-mono text-[11px]">Kein Zähler hinterlegt</span>
+                          <span className="text-slate-600 font-mono text-[11px]">
+                            Kein Zähler hinterlegt
+                          </span>
                         )}
                       </td>
 
                       <td className="py-4 px-6 text-right space-x-1.5 whitespace-nowrap">
                         <button
                           type="button"
-                          onClick={() => setActiveNotesContact({ id: contact.id, name: `${firstName} ${lastName}` })}
+                          onClick={() =>
+                            setActiveNotesContact({
+                              id: contact.id,
+                              name: `${firstName} ${lastName}`,
+                            })
+                          }
                           className="p-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 rounded-lg text-xs transition-colors inline-flex items-center gap-1"
                           title="Notizen & Aktivitätslog anzeigen (§3.4)"
                           aria-label="Notizen"
@@ -307,7 +373,14 @@ export const ContactsPage: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleTriggerResearch({ ...contact, first_name: firstName, last_name: lastName, email })}
+                          onClick={() =>
+                            handleTriggerResearch({
+                              ...contact,
+                              first_name: firstName,
+                              last_name: lastName,
+                              email,
+                            })
+                          }
                           className="p-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 rounded-lg text-xs transition-colors inline-flex items-center gap-1"
                           title="Gemma 12B Firmen-Recherche starten (§5.4)"
                           aria-label="KI-Recherche"
@@ -317,18 +390,20 @@ export const ContactsPage: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setEditingContact({
-                            ...contact,
-                            first_name: firstName,
-                            last_name: lastName,
-                            email,
-                            phone,
-                            position,
-                            address_street: street,
-                            address_zip: zip,
-                            address_city: city,
-                            zaehlernummer: zaehler,
-                          })}
+                          onClick={() =>
+                            setEditingContact({
+                              ...contact,
+                              first_name: firstName,
+                              last_name: lastName,
+                              email,
+                              phone,
+                              position,
+                              address_street: street,
+                              address_zip: zip,
+                              address_city: city,
+                              zaehlernummer: zaehler,
+                            })
+                          }
                           className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-colors inline-flex items-center gap-1"
                           title="Kontakt bearbeiten"
                           aria-label="Bearbeiten"
@@ -338,7 +413,13 @@ export const ContactsPage: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setDeletingContact({ ...contact, first_name: firstName, last_name: lastName })}
+                          onClick={() =>
+                            setDeletingContact({
+                              ...contact,
+                              first_name: firstName,
+                              last_name: lastName,
+                            })
+                          }
                           className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg text-xs transition-colors inline-flex items-center gap-1"
                           title="Kontakt löschen"
                           aria-label="Löschen"
@@ -388,7 +469,10 @@ export const ContactsPage: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="font-bold text-slate-100 text-lg">Neuen Kontakt anlegen</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -407,7 +491,9 @@ export const ContactsPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Nachname *</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Nachname *
+                  </label>
                   <input
                     required
                     type="text"
@@ -443,7 +529,9 @@ export const ContactsPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Position / Rolle im Unternehmen</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Position / Rolle im Unternehmen
+                </label>
                 <input
                   type="text"
                   placeholder="z.B. Geschäftsführer"
@@ -455,7 +543,9 @@ export const ContactsPage: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-1">
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Straße & Nr.</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Straße & Nr.
+                  </label>
                   <input
                     type="text"
                     placeholder="Musterstraße 1"
@@ -487,7 +577,9 @@ export const ContactsPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Zählernummer (Strom/Gas)</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Zählernummer (Strom/Gas)
+                </label>
                 <input
                   type="text"
                   placeholder="z.B. 1EMH0012345678"
@@ -508,7 +600,9 @@ export const ContactsPage: React.FC = () => {
                     <input
                       type="checkbox"
                       checked={formData.consent_email}
-                      onChange={(e) => setFormData({ ...formData, consent_email: e.target.checked })}
+                      onChange={(e) =>
+                        setFormData({ ...formData, consent_email: e.target.checked })
+                      }
                       className="rounded text-emerald-500 bg-slate-900 border-slate-700"
                     />
                     <span>E-Mail Opt-in</span>
@@ -517,7 +611,9 @@ export const ContactsPage: React.FC = () => {
                     <input
                       type="checkbox"
                       checked={formData.consent_phone}
-                      onChange={(e) => setFormData({ ...formData, consent_phone: e.target.checked })}
+                      onChange={(e) =>
+                        setFormData({ ...formData, consent_phone: e.target.checked })
+                      }
                       className="rounded text-emerald-500 bg-slate-900 border-slate-700"
                     />
                     <span>Telefon Opt-in</span>
@@ -555,7 +651,10 @@ export const ContactsPage: React.FC = () => {
                 <Edit3 className="w-5 h-5 text-emerald-400" />
                 <span>Kontakt bearbeiten</span>
               </h3>
-              <button onClick={() => setEditingContact(null)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setEditingContact(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -568,17 +667,23 @@ export const ContactsPage: React.FC = () => {
                     required
                     type="text"
                     value={editingContact.first_name || ''}
-                    onChange={(e) => setEditingContact({ ...editingContact, first_name: e.target.value })}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, first_name: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Nachname *</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Nachname *
+                  </label>
                   <input
                     required
                     type="text"
                     value={editingContact.last_name || ''}
-                    onChange={(e) => setEditingContact({ ...editingContact, last_name: e.target.value })}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, last_name: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -590,7 +695,9 @@ export const ContactsPage: React.FC = () => {
                   <input
                     type="email"
                     value={editingContact.email || ''}
-                    onChange={(e) => setEditingContact({ ...editingContact, email: e.target.value })}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, email: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -599,7 +706,9 @@ export const ContactsPage: React.FC = () => {
                   <input
                     type="text"
                     value={editingContact.phone || ''}
-                    onChange={(e) => setEditingContact({ ...editingContact, phone: e.target.value })}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, phone: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -607,19 +716,27 @@ export const ContactsPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Position / Rolle</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Position / Rolle
+                  </label>
                   <input
                     type="text"
                     value={editingContact.position || ''}
-                    onChange={(e) => setEditingContact({ ...editingContact, position: e.target.value })}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, position: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Kundentyp (§3.1)</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Kundentyp (§3.1)
+                  </label>
                   <select
                     value={editingContact.customer_type || 'GESCHAEFTSKUNDE'}
-                    onChange={(e) => setEditingContact({ ...editingContact, customer_type: e.target.value })}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, customer_type: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   >
                     <option value="GESCHAEFTSKUNDE">B2B Geschäftskunde</option>
@@ -631,11 +748,15 @@ export const ContactsPage: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-1">
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Straße & Nr.</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Straße & Nr.
+                  </label>
                   <input
                     type="text"
                     value={editingContact.address_street || ''}
-                    onChange={(e) => setEditingContact({ ...editingContact, address_street: e.target.value })}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, address_street: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -644,7 +765,9 @@ export const ContactsPage: React.FC = () => {
                   <input
                     type="text"
                     value={editingContact.address_zip || ''}
-                    onChange={(e) => setEditingContact({ ...editingContact, address_zip: e.target.value })}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, address_zip: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -653,18 +776,24 @@ export const ContactsPage: React.FC = () => {
                   <input
                     type="text"
                     value={editingContact.address_city || ''}
-                    onChange={(e) => setEditingContact({ ...editingContact, address_city: e.target.value })}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, address_city: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Zählernummer (Strom/Gas)</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Zählernummer (Strom/Gas)
+                </label>
                 <input
                   type="text"
                   value={editingContact.zaehlernummer || ''}
-                  onChange={(e) => setEditingContact({ ...editingContact, zaehlernummer: e.target.value })}
+                  onChange={(e) =>
+                    setEditingContact({ ...editingContact, zaehlernummer: e.target.value })
+                  }
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
                 />
               </div>
@@ -699,7 +828,12 @@ export const ContactsPage: React.FC = () => {
               <h3 className="font-bold text-slate-100 text-base">Kontakt wirklich löschen?</h3>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Möchten Sie den Kontakt <strong className="text-slate-100">{deletingContact.first_name} {deletingContact.last_name}</strong> unwiderruflich aus dem CRM entfernen? Alle zugehörigen Verknüpfungen werden DSGVO-konform gelöscht (§9.3).
+              Möchten Sie den Kontakt{' '}
+              <strong className="text-slate-100">
+                {deletingContact.first_name} {deletingContact.last_name}
+              </strong>{' '}
+              unwiderruflich aus dem CRM entfernen? Alle zugehörigen Verknüpfungen werden
+              DSGVO-konform gelöscht (§9.3).
             </p>
             <div className="flex justify-end gap-3 pt-3">
               <button
@@ -731,7 +865,10 @@ export const ContactsPage: React.FC = () => {
                   Gemma 12B Recherche: {researchModal.first_name} {researchModal.last_name}
                 </h3>
               </div>
-              <button onClick={() => setResearchModal(null)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setResearchModal(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -739,24 +876,35 @@ export const ContactsPage: React.FC = () => {
             {isResearching ? (
               <div className="py-8 text-center space-y-3">
                 <Sparkles className="w-8 h-8 text-purple-400 animate-spin mx-auto" />
-                <p className="text-xs text-slate-300">Gemma 12B ruft Webseite ab und analysiert Kerngeschäft & Nutzenversprechen...</p>
+                <p className="text-xs text-slate-300">
+                  Gemma 12B ruft Webseite ab und analysiert Kerngeschäft & Nutzenversprechen...
+                </p>
               </div>
             ) : researchResult ? (
               <div className="space-y-3 text-xs">
                 <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
-                  <span className="text-[10px] text-slate-500 font-semibold uppercase">Seitentitel & Domain</span>
-                  <div className="text-slate-200 font-bold">{researchResult.site_title || 'Website Recherche'}</div>
+                  <span className="text-[10px] text-slate-500 font-semibold uppercase">
+                    Seitentitel & Domain
+                  </span>
+                  <div className="text-slate-200 font-bold">
+                    {researchResult.site_title || 'Website Recherche'}
+                  </div>
                 </div>
 
                 <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
-                  <span className="text-[10px] text-slate-500 font-semibold uppercase">KI-Zusammenfassung</span>
+                  <span className="text-[10px] text-slate-500 font-semibold uppercase">
+                    KI-Zusammenfassung
+                  </span>
                   <p className="text-slate-300 leading-relaxed">{researchResult.summary}</p>
                 </div>
 
                 {researchResult.industry_tags && (
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {researchResult.industry_tags.map((t: string, idx: number) => (
-                      <span key={idx} className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] font-mono">
+                      <span
+                        key={idx}
+                        className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] font-mono"
+                      >
                         {t}
                       </span>
                     ))}
@@ -767,7 +915,9 @@ export const ContactsPage: React.FC = () => {
                   <button
                     onClick={() => {
                       setResearchModal(null);
-                      setMergeInfo(`Recherche-Ergebnis für ${researchModal.first_name} ${researchModal.last_name} als CRM-Notiz gespeichert!`);
+                      setMergeInfo(
+                        `Recherche-Ergebnis für ${researchModal.first_name} ${researchModal.last_name} als CRM-Notiz gespeichert!`,
+                      );
                       setTimeout(() => setMergeInfo(null), 5000);
                     }}
                     className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition-colors"

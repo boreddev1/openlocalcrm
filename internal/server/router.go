@@ -113,7 +113,7 @@ func NewRouter(cfg Config) http.Handler {
 		companySvc := company.NewService(cfg.DB, auditSvc)
 		dealSvc := deal.NewService(cfg.DB, auditSvc)
 		todoSvc := todo.NewService(cfg.DB, auditSvc)
-		noteSvc := note.NewService(cfg.SSEHub)
+		noteSvc := note.NewService(cfg.DB, cfg.SSEHub)
 		emailSvc := email.NewService(cfg.DB, auditSvc, cfg.Storage, cfg.SSEHub)
 		notificationSvc := notification.NewService(cfg.DB, cfg.SSEHub)
 		exportSvc := export.NewService(cfg.DB, contactSvc)
@@ -140,7 +140,7 @@ func NewRouter(cfg Config) http.Handler {
 		todoH = handlers.NewTodoHandler(todoSvc)
 		noteH = handlers.NewNoteHandler(noteSvc, aiGateway)
 		emailH = handlers.NewEmailHandler(emailSvc)
-		aiH = handlers.NewAIHandler(triageSvc, chatSvc, researchSvc, obsSvc, aiGateway)
+		aiH = handlers.NewAIHandler(triageSvc, chatSvc, researchSvc, obsSvc, aiGateway, cfg.DB)
 		connectorH = handlers.NewConnectorHandler(connectorEngine)
 		notificationH = handlers.NewNotificationHandler(notificationSvc)
 		exportH = handlers.NewExportHandler(exportSvc)
@@ -187,6 +187,7 @@ func NewRouter(cfg Config) http.Handler {
 			// Protected User Management (Admin team endpoints)
 			if userH != nil {
 				protected.Route("/users", func(ur chi.Router) {
+					ur.Use(auth.RequireRole("ADMIN"))
 					ur.Get("/", userH.List)
 					ur.Post("/invite", userH.Invite)
 					ur.Put("/{id}/role", userH.UpdateRole)
@@ -197,6 +198,7 @@ func NewRouter(cfg Config) http.Handler {
 			// Protected Backup Endpoints (Drill & Export)
 			if backupH != nil {
 				protected.Route("/backup", func(br chi.Router) {
+					br.Use(auth.RequireRole("ADMIN"))
 					br.Post("/drill", backupH.Drill)
 					br.Get("/export", backupH.Export)
 				})
@@ -229,6 +231,7 @@ func NewRouter(cfg Config) http.Handler {
 					dr.Get("/{id}", dealH.Get)
 					dr.Put("/{id}", dealH.Update)
 					dr.Delete("/{id}", dealH.Delete)
+					dr.Post("/{id}/solar-calculation", dealH.AttachSolarCalculation)
 				})
 			}
 
@@ -266,16 +269,25 @@ func NewRouter(cfg Config) http.Handler {
 					air.Post("/chat", aiH.Chat)
 					air.Post("/research/company", aiH.ResearchCompany)
 					air.Get("/observability", aiH.GetObservability)
+					air.Post("/parse-bill", aiH.ParseBill)
+					air.Get("/kb", aiH.ListKB)
+					air.Post("/kb", aiH.CreateKB)
+					air.Delete("/kb/{id}", aiH.DeleteKB)
+					air.Get("/research/jobs", aiH.ListResearchJobs)
+					air.Post("/research/jobs", aiH.CreateResearchJob)
 					if noteH != nil {
 						air.Post("/synthesize-notes", noteH.Synthesize)
 					}
 				})
 			}
 
-			appointmentSvc := appointment.NewService(cfg.SSEHub)
-			telephonySvc := telephony.NewService(cfg.SSEHub)
+			calcH := handlers.NewCalculatorHandler()
+			protected.Post("/calculator/solar", calcH.CalculateSolar)
+
+			appointmentSvc := appointment.NewService(cfg.DB, cfg.SSEHub)
+			telephonySvc := telephony.NewService(cfg.DB, cfg.SSEHub)
 			reportsSvc := reports.NewService()
-			automationSvc := automation.NewService()
+			automationSvc := automation.NewService(cfg.DB)
 
 			appointmentH := handlers.NewAppointmentHandler(appointmentSvc)
 			telephonyH := handlers.NewTelephonyHandler(telephonySvc)
@@ -286,6 +298,9 @@ func NewRouter(cfg Config) http.Handler {
 				protected.Route("/appointments", func(appr chi.Router) {
 					appr.Get("/", appointmentH.List)
 					appr.Post("/", appointmentH.Create)
+					appr.Put("/{id}", appointmentH.Update)
+					appr.Delete("/{id}", appointmentH.Delete)
+					appr.Post("/{id}/push-external", appointmentH.PushExternal)
 					appr.Get("/{id}/ics", appointmentH.DownloadICS)
 				})
 			}
@@ -305,8 +320,8 @@ func NewRouter(cfg Config) http.Handler {
 			if automationH != nil {
 				protected.Route("/automations", func(autr chi.Router) {
 					autr.Get("/", automationH.ListWorkflows)
-					autr.Post("/", automationH.CreateWorkflow)
 					autr.Get("/runs", automationH.ListRuns)
+					autr.With(auth.RequireRole("ADMIN")).Post("/", automationH.CreateWorkflow)
 				})
 			}
 
@@ -319,8 +334,11 @@ func NewRouter(cfg Config) http.Handler {
 			}
 
 			if exportH != nil {
-				protected.Get("/export/contacts.csv", exportH.ExportContactsCSV)
-				protected.Post("/import/contacts", exportH.ImportContactsCSV)
+				protected.Group(func(adminOnly chi.Router) {
+					adminOnly.Use(auth.RequireRole("ADMIN"))
+					adminOnly.Get("/export/contacts.csv", exportH.ExportContactsCSV)
+					adminOnly.Post("/import/contacts", exportH.ImportContactsCSV)
+				})
 			}
 		})
 	})

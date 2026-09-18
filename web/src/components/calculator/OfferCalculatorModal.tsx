@@ -14,7 +14,7 @@ import {
   ThumbsUp,
   Star,
   Wrench,
-  Percent
+  Percent,
 } from 'lucide-react';
 
 interface OfferCalculatorModalProps {
@@ -50,7 +50,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
   const [electricityInflation, setElectricityInflation] = useState(2.5); // % p.a.
   const [manualDiscountEuro, setManualDiscountEuro] = useState(0);
   const [additionalServicesEuro, setAdditionalServicesEuro] = useState(0);
-  const [additionalServicesNotes, setAdditionalServicesNotes] = useState('Inkl. Gerüst & Zählerschrank-Anschluss');
+  const [additionalServicesNotes, setAdditionalServicesNotes] = useState(
+    'Inkl. Gerüst & Zählerschrank-Anschluss',
+  );
   const [customPriceOverride, setCustomPriceOverride] = useState<number | null>(null);
 
   // Calculation State
@@ -85,13 +87,14 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
       });
 
       // Apply manual adjustments (Discount, Additional services, Price Override)
-      const baseSystemCost = (kwp * 1050) + (storageKwh * 650);
-      const finalPrice = customPriceOverride !== null
-        ? customPriceOverride
-        : baseSystemCost + additionalServicesEuro - manualDiscountEuro;
+      const baseSystemCost = kwp * 1050 + storageKwh * 650;
+      const finalPrice =
+        customPriceOverride !== null
+          ? customPriceOverride
+          : baseSystemCost + additionalServicesEuro - manualDiscountEuro;
 
-      const directSavings = (res.directSavingsEuro || (res.yearlySavingsEuro * 0.8));
-      const feedInIncome = (res.yearlyGenerationKwh - (consumption * 0.68)) * feedInRate;
+      const directSavings = res.directSavingsEuro || res.yearlySavingsEuro * 0.8;
+      const feedInIncome = (res.yearlyGenerationKwh - consumption * 0.68) * feedInRate;
       const totalYearlySavings = Math.round(directSavings + Math.max(0, feedInIncome));
       const paybackPeriodYears = Number((finalPrice / Math.max(1, totalYearlySavings)).toFixed(1));
       const twentyYearSavings = Math.round(totalYearlySavings * 20 - finalPrice);
@@ -164,7 +167,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
     });
 
     queryClient.invalidateQueries({ queryKey: ['deals'] });
-    setFeedbackBanner('Angebot erfolgreich mit individuellen Anpassungen als Deal in der Pipeline angelegt!');
+    setFeedbackBanner(
+      'Angebot erfolgreich mit individuellen Anpassungen als Deal in der Pipeline angelegt!',
+    );
     setTimeout(() => {
       onClose();
     }, 1500);
@@ -184,7 +189,8 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                 KI-Dokumentenextraktion & Manuell anpassbarer Angebotsrechner (§5.2 / §5.6 / §6.3)
               </h2>
               <p className="text-xs text-slate-400">
-                OCR-Extraktion mit Gemma 12B ➔ Deterministischer Rechner ➔ Volle manuelle Anpassungskontrolle für Vertriebler
+                OCR-Extraktion mit Gemma 12B ➔ Deterministischer Rechner ➔ Volle manuelle
+                Anpassungskontrolle für Vertriebler
               </p>
             </div>
           </div>
@@ -262,7 +268,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Kundenname / Objekt</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Kundenname / Objekt
+                    </label>
                     <input
                       type="text"
                       value={customerName}
@@ -271,7 +279,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Zählernummer</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Zählernummer
+                    </label>
                     <input
                       type="text"
                       placeholder="1EMH..."
@@ -284,7 +294,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Jahresstromverbrauch (kWh/a)</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Jahresstromverbrauch (kWh/a)
+                    </label>
                     <input
                       type="number"
                       value={consumption}
@@ -293,7 +305,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Aktueller Strompreis (€/kWh)</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Aktueller Strompreis (€/kWh)
+                    </label>
                     <input
                       type="number"
                       step="0.01"
@@ -306,7 +320,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Nutzbare Dachfläche (m²)</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Nutzbare Dachfläche (m²)
+                    </label>
                     <input
                       type="number"
                       value={roofArea}
@@ -315,7 +331,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Dachausrichtung / Neigung</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Dachausrichtung / Neigung
+                    </label>
                     <input
                       type="text"
                       value={roofOrientation}
@@ -337,7 +355,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">PV-Modultyp</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      PV-Modultyp
+                    </label>
                     <select
                       value={moduleType}
                       onChange={(e) => setModuleType(e.target.value)}
@@ -349,7 +369,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Anzahl Solarmodule</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Anzahl Solarmodule
+                    </label>
                     <input
                       type="number"
                       value={moduleCount}
@@ -360,24 +382,36 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Wechselrichter & Hybrid-System</label>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Wechselrichter & Hybrid-System
+                  </label>
                   <select
                     value={inverterBrand}
                     onChange={(e) => setInverterBrand(e.target.value)}
                     className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                   >
-                    <option value="Fronius Symo GEN24 + BYD HVS">Fronius Symo GEN24 + BYD HVS</option>
-                    <option value="SMA Sunny Tripower + SMA Home Storage">SMA Sunny Tripower + SMA Home Storage</option>
+                    <option value="Fronius Symo GEN24 + BYD HVS">
+                      Fronius Symo GEN24 + BYD HVS
+                    </option>
+                    <option value="SMA Sunny Tripower + SMA Home Storage">
+                      SMA Sunny Tripower + SMA Home Storage
+                    </option>
                     <option value="Huawei SUN2000 + LUNA2000">Huawei SUN2000 + LUNA2000</option>
-                    <option value="SolarEdge Home Hub + Energy Bank">SolarEdge Home Hub + Energy Bank</option>
+                    <option value="SolarEdge Home Hub + Energy Bank">
+                      SolarEdge Home Hub + Energy Bank
+                    </option>
                   </select>
                 </div>
 
                 {/* Fine-Tuning Sliders */}
                 <div className="space-y-1 pt-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-300 font-medium flex items-center gap-1"><Sun className="w-3.5 h-3.5 text-amber-400" /> PV-Gesamtleistung:</span>
-                    <span className="font-bold text-amber-400">{kwp} kWp ({moduleCount} Module)</span>
+                    <span className="text-slate-300 font-medium flex items-center gap-1">
+                      <Sun className="w-3.5 h-3.5 text-amber-400" /> PV-Gesamtleistung:
+                    </span>
+                    <span className="font-bold text-amber-400">
+                      {kwp} kWp ({moduleCount} Module)
+                    </span>
                   </div>
                   <input
                     type="range"
@@ -392,7 +426,10 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
 
                 <div className="space-y-1 pt-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-300 font-medium flex items-center gap-1"><Battery className="w-3.5 h-3.5 text-emerald-400" /> Batteriespeicherkapazität:</span>
+                    <span className="text-slate-300 font-medium flex items-center gap-1">
+                      <Battery className="w-3.5 h-3.5 text-emerald-400" />{' '}
+                      Batteriespeicherkapazität:
+                    </span>
                     <span className="font-bold text-emerald-400">{storageKwh} kWh</span>
                   </div>
                   <input
@@ -418,7 +455,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Manueller Rabatt (€)</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Manueller Rabatt (€)
+                    </label>
                     <input
                       type="number"
                       placeholder="0"
@@ -428,7 +467,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Zusatzleistungen (€)</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Zusatzleistungen (€)
+                    </label>
                     <input
                       type="number"
                       placeholder="0"
@@ -440,7 +481,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Beschreibung der Zusatzleistungen</label>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Beschreibung der Zusatzleistungen
+                  </label>
                   <input
                     type="text"
                     value={additionalServicesNotes}
@@ -451,7 +494,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
 
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">EEG-Einspeisevergütung (€/kWh)</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      EEG-Einspeisevergütung (€/kWh)
+                    </label>
                     <input
                       type="number"
                       step="0.001"
@@ -461,7 +506,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Erwartete Strompreissteigerung (% p.a.)</label>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Erwartete Strompreissteigerung (% p.a.)
+                    </label>
                     <input
                       type="number"
                       step="0.1"
@@ -480,7 +527,9 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                     type="number"
                     placeholder="Leer lassen für automatische Kalkulation..."
                     value={customPriceOverride !== null ? customPriceOverride : ''}
-                    onChange={(e) => setCustomPriceOverride(e.target.value ? Number(e.target.value) : null)}
+                    onChange={(e) =>
+                      setCustomPriceOverride(e.target.value ? Number(e.target.value) : null)
+                    }
                     className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -509,36 +558,51 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
                     <div className="text-[11px] text-slate-400 font-medium">Autarkiegrad</div>
-                    <div className="text-xl font-bold text-emerald-400 mt-0.5">{calcResult.autarkyRatePercent}%</div>
+                    <div className="text-xl font-bold text-emerald-400 mt-0.5">
+                      {calcResult.autarkyRatePercent}%
+                    </div>
                   </div>
                   <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
                     <div className="text-[11px] text-slate-400 font-medium">Eigenverbrauch</div>
-                    <div className="text-xl font-bold text-blue-400 mt-0.5">{calcResult.selfConsumptionRatePercent}%</div>
+                    <div className="text-xl font-bold text-blue-400 mt-0.5">
+                      {calcResult.selfConsumptionRatePercent}%
+                    </div>
                   </div>
                   <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
                     <div className="text-[11px] text-slate-400 font-medium">Jahresertrag</div>
-                    <div className="text-xl font-bold text-amber-400 mt-0.5">{calcResult.yearlyGenerationKwh.toLocaleString('de-DE')} kWh/a</div>
+                    <div className="text-xl font-bold text-amber-400 mt-0.5">
+                      {calcResult.yearlyGenerationKwh.toLocaleString('de-DE')} kWh/a
+                    </div>
                   </div>
                   <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
                     <div className="text-[11px] text-slate-400 font-medium">Ersparnis pro Jahr</div>
-                    <div className="text-xl font-bold text-emerald-400 mt-0.5">{calcResult.yearlySavingsEuro.toLocaleString('de-DE')} €/a</div>
+                    <div className="text-xl font-bold text-emerald-400 mt-0.5">
+                      {calcResult.yearlySavingsEuro.toLocaleString('de-DE')} €/a
+                    </div>
                   </div>
                   <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
                     <div className="text-[11px] text-slate-400 font-medium">Amortisationszeit</div>
-                    <div className="text-xl font-bold text-purple-400 mt-0.5">{calcResult.paybackPeriodYears} Jahre</div>
+                    <div className="text-xl font-bold text-purple-400 mt-0.5">
+                      {calcResult.paybackPeriodYears} Jahre
+                    </div>
                   </div>
                   <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
                     <div className="text-[11px] text-slate-400 font-medium">20-Jahre Ersparnis</div>
-                    <div className="text-xl font-bold text-emerald-400 mt-0.5">{calcResult.twentyYearSavingsEuro.toLocaleString('de-DE')} €</div>
+                    <div className="text-xl font-bold text-emerald-400 mt-0.5">
+                      {calcResult.twentyYearSavingsEuro.toLocaleString('de-DE')} €
+                    </div>
                   </div>
                 </div>
 
                 {/* Offer Pricing Summary */}
                 <div className="p-4 bg-emerald-950/20 border border-emerald-500/30 rounded-xl flex items-center justify-between">
                   <div>
-                    <span className="text-xs text-slate-300 font-semibold block">Kalkulierter Endpreis für Kunden:</span>
+                    <span className="text-xs text-slate-300 font-semibold block">
+                      Kalkulierter Endpreis für Kunden:
+                    </span>
                     <span className="text-[11px] text-emerald-400">
-                      Gemäß § 12 Abs. 3 UStG (0% MwSt) {manualDiscountEuro > 0 && `· Inkl. ${manualDiscountEuro} € Rabatt`}
+                      Gemäß § 12 Abs. 3 UStG (0% MwSt){' '}
+                      {manualDiscountEuro > 0 && `· Inkl. ${manualDiscountEuro} € Rabatt`}
                     </span>
                   </div>
                   <div className="text-2xl font-bold text-emerald-400">
@@ -591,7 +655,10 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                     onChange={(e) => setIsApproved(e.target.checked)}
                     className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
                   />
-                  <label htmlFor="approvalCheckbox" className="text-xs text-slate-300 font-medium cursor-pointer">
+                  <label
+                    htmlFor="approvalCheckbox"
+                    className="text-xs text-slate-300 font-medium cursor-pointer"
+                  >
                     Ergebnis als plausibel & fachlich korrekt freigegeben
                   </label>
                 </div>

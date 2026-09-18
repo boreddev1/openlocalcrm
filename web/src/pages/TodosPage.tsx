@@ -1,7 +1,23 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../api/client';
-import { Plus, CheckCircle2, Circle, X, Edit3, Trash2, Calendar, AlertCircle, Search, UserCheck, RefreshCw, Sparkles, Tag, Clock, Ban } from 'lucide-react';
+import {
+  Plus,
+  CheckCircle2,
+  Circle,
+  X,
+  Edit3,
+  Trash2,
+  Calendar,
+  AlertCircle,
+  Search,
+  UserCheck,
+  RefreshCw,
+  Sparkles,
+  Tag,
+  Clock,
+  Ban,
+} from 'lucide-react';
 
 const PRODUCT_SEGMENTS = [
   'PV-Anlage',
@@ -25,7 +41,9 @@ export const TodosPage: React.FC = () => {
   const [postponeTodo, setPostponeTodo] = useState<any | null>(null);
   const [postponeDate, setPostponeDate] = useState<string>('');
   const [cancelTodo, setCancelTodo] = useState<any | null>(null);
-  const [cancelReason, setCancelReason] = useState<string>('Kunde hat aktuell keinen Bedarf / verschoben');
+  const [cancelReason, setCancelReason] = useState<string>(
+    'Kunde hat aktuell keinen Bedarf / verschoben',
+  );
   const [cancelNotes, setCancelNotes] = useState<string>('');
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
 
@@ -109,7 +127,8 @@ export const TodosPage: React.FC = () => {
     updateMutation.mutate({
       ...postponeTodo,
       due_date: newDueDate,
-      description: `${postponeTodo.description || ''}\n[Verschoben um ${days} Tage auf ${newDueDate}]`.trim(),
+      description:
+        `${postponeTodo.description || ''}\n[Verschoben um ${days} Tage auf ${newDueDate}]`.trim(),
     });
   };
 
@@ -131,7 +150,8 @@ export const TodosPage: React.FC = () => {
       status: 'CANCELLED',
       cancellation_reason: cancelReason,
       cancellation_notes: cancelNotes,
-      description: `${cancelTodo.description || ''}\n[Abgebrochen/Übersprungen: ${cancelReason} - ${cancelNotes}]`.trim(),
+      description:
+        `${cancelTodo.description || ''}\n[Abgebrochen/Übersprungen: ${cancelReason} - ${cancelNotes}]`.trim(),
     });
   };
 
@@ -191,14 +211,19 @@ export const TodosPage: React.FC = () => {
     const matchesCategory =
       filterCategory === 'ALL' ||
       t.category === filterCategory ||
-      (filterCategory === 'CROSS_SELLING' && (t.category === 'CROSS_SELLING' || t.category === 'WIEDERVORLAGE'));
+      (filterCategory === 'CROSS_SELLING' &&
+        (t.category === 'CROSS_SELLING' || t.category === 'WIEDERVORLAGE'));
 
     return matchesSearch && matchesStatus && matchesCategory;
   });
 
   const pendingCount = todos.filter((t) => t.status === 'OPEN' || !t.status).length;
-  const crossSellingCount = todos.filter((t) => t.category === 'CROSS_SELLING' || t.category === 'WIEDERVORLAGE').length;
-  const cancelledCount = todos.filter((t) => t.status === 'CANCELLED' || t.status === 'SKIPPED').length;
+  const crossSellingCount = todos.filter(
+    (t) => t.category === 'CROSS_SELLING' || t.category === 'WIEDERVORLAGE',
+  ).length;
+  const cancelledCount = todos.filter(
+    (t) => t.status === 'CANCELLED' || t.status === 'SKIPPED',
+  ).length;
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -210,7 +235,8 @@ export const TodosPage: React.FC = () => {
             Aufgaben, SLA & Cross-Selling Wiedervorlagen (§3.5)
           </h1>
           <p className="text-sm text-slate-400">
-            Fristen-Überwachung, Verschieben auf Folgetage, Überspringen/Abbrechen mit Notiz & Cross-Selling
+            Fristen-Überwachung, Verschieben auf Folgetage, Überspringen/Abbrechen mit Notiz &
+            Cross-Selling
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -276,14 +302,18 @@ export const TodosPage: React.FC = () => {
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between">
           <div>
             <div className="text-xs text-purple-400">Wiedervorlagen & Cross-Sell</div>
-            <div className="text-xl font-bold text-purple-300 mt-0.5">{crossSellingCount} Einträge</div>
+            <div className="text-xl font-bold text-purple-300 mt-0.5">
+              {crossSellingCount} Einträge
+            </div>
           </div>
           <Sparkles className="w-7 h-7 text-purple-400/80" />
         </div>
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between">
           <div>
             <div className="text-xs text-rose-400">Abgebrochen / Übersprungen</div>
-            <div className="text-xl font-bold text-rose-400 mt-0.5">{cancelledCount} archiviert</div>
+            <div className="text-xl font-bold text-rose-400 mt-0.5">
+              {cancelledCount} archiviert
+            </div>
           </div>
           <Ban className="w-7 h-7 text-rose-400/80" />
         </div>
@@ -372,7 +402,9 @@ export const TodosPage: React.FC = () => {
 
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className={`text-sm font-semibold ${isCompleted ? 'text-slate-500 line-through' : isCancelled ? 'text-rose-400/80 line-through' : 'text-slate-200'}`}>
+                      <h4
+                        className={`text-sm font-semibold ${isCompleted ? 'text-slate-500 line-through' : isCancelled ? 'text-rose-400/80 line-through' : 'text-slate-200'}`}
+                      >
                         {todo.title}
                       </h4>
                       {isCancelled && (
@@ -381,8 +413,14 @@ export const TodosPage: React.FC = () => {
                         </span>
                       )}
                       {todo.category && !isCancelled && (
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold uppercase tracking-wider ${getCategoryBadge(todo.category)}`}>
-                          {todo.category === 'CROSS_SELLING' ? '🔄 Cross-Selling' : todo.category === 'WIEDERVORLAGE' ? '⏰ Wiedervorlage' : '📋 Aufgabe'}
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full border font-bold uppercase tracking-wider ${getCategoryBadge(todo.category)}`}
+                        >
+                          {todo.category === 'CROSS_SELLING'
+                            ? '🔄 Cross-Selling'
+                            : todo.category === 'WIEDERVORLAGE'
+                              ? '⏰ Wiedervorlage'
+                              : '📋 Aufgabe'}
                         </span>
                       )}
                       {todo.product_segment && (
@@ -394,7 +432,9 @@ export const TodosPage: React.FC = () => {
                     </div>
 
                     {todo.description && (
-                      <p className={`text-xs ${isCompleted || isCancelled ? 'text-slate-600' : 'text-slate-400'} whitespace-pre-line`}>
+                      <p
+                        className={`text-xs ${isCompleted || isCancelled ? 'text-slate-600' : 'text-slate-400'} whitespace-pre-line`}
+                      >
                         {todo.description}
                       </p>
                     )}
@@ -410,7 +450,9 @@ export const TodosPage: React.FC = () => {
                           <Calendar className="w-3 h-3 text-amber-400" /> Fällig: {todo.due_date}
                         </span>
                       )}
-                      <span className={`px-1.5 py-0.2 rounded border font-semibold text-[10px] ${getPriorityBadge(todo.priority)}`}>
+                      <span
+                        className={`px-1.5 py-0.2 rounded border font-semibold text-[10px] ${getPriorityBadge(todo.priority)}`}
+                      >
                         {todo.priority}
                       </span>
                     </div>
@@ -478,18 +520,24 @@ export const TodosPage: React.FC = () => {
                 <Clock className="w-5 h-5 text-amber-400" />
                 Aufgabe verschieben
               </h3>
-              <button onClick={() => setPostponeTodo(null)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setPostponeTodo(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <p className="text-xs text-slate-300">
-              Wann soll <strong className="text-slate-100">"{postponeTodo.title}"</strong> erneut vorgelegt werden?
+              Wann soll <strong className="text-slate-100">"{postponeTodo.title}"</strong> erneut
+              vorgelegt werden?
             </p>
 
             {/* Quick 1-Click Postpone Presets */}
             <div className="space-y-1.5">
-              <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">Schnellauswahl:</span>
+              <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">
+                Schnellauswahl:
+              </span>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -523,9 +571,14 @@ export const TodosPage: React.FC = () => {
             </div>
 
             {/* Custom Date Form */}
-            <form onSubmit={handleCustomPostpone} className="space-y-3 pt-2 border-t border-slate-800">
+            <form
+              onSubmit={handleCustomPostpone}
+              className="space-y-3 pt-2 border-t border-slate-800"
+            >
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Oder genaues Datum wählen:</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Oder genaues Datum wählen:
+                </label>
                 <input
                   type="date"
                   required
@@ -565,33 +618,49 @@ export const TodosPage: React.FC = () => {
                 <Ban className="w-5 h-5 text-rose-400" />
                 Aufgabe abbrechen / überspringen
               </h3>
-              <button onClick={() => setCancelTodo(null)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setCancelTodo(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <p className="text-xs text-slate-300">
-              Bitte hinterlegen Sie eine Begründung für das Überspringen von <strong className="text-slate-100">"{cancelTodo.title}"</strong>:
+              Bitte hinterlegen Sie eine Begründung für das Überspringen von{' '}
+              <strong className="text-slate-100">"{cancelTodo.title}"</strong>:
             </p>
 
             <form onSubmit={handleCancelSubmit} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Grund für Abbruch / Skip *</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Grund für Abbruch / Skip *
+                </label>
                 <select
                   value={cancelReason}
                   onChange={(e) => setCancelReason(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-rose-500"
                 >
-                  <option value="Kunde aktuell kein Bedarf / verschoben">Kunde aktuell kein Bedarf / verschoben</option>
-                  <option value="Bereits durch anderes Angebot / Projekt gelöst">Bereits durch anderes Angebot gelöst</option>
-                  <option value="Kunde disqualifiziert / Kein Budget / Nicht erreichbar">Kunde disqualifiziert / Nicht erreichbar</option>
-                  <option value="Wettbewerber gewählt / Angebot verloren">Wettbewerber gewählt / Angebot verloren</option>
+                  <option value="Kunde aktuell kein Bedarf / verschoben">
+                    Kunde aktuell kein Bedarf / verschoben
+                  </option>
+                  <option value="Bereits durch anderes Angebot / Projekt gelöst">
+                    Bereits durch anderes Angebot gelöst
+                  </option>
+                  <option value="Kunde disqualifiziert / Kein Budget / Nicht erreichbar">
+                    Kunde disqualifiziert / Nicht erreichbar
+                  </option>
+                  <option value="Wettbewerber gewählt / Angebot verloren">
+                    Wettbewerber gewählt / Angebot verloren
+                  </option>
                   <option value="Sonstiger Grund">Sonstiger Grund</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Interne Notiz / Details</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Interne Notiz / Details
+                </label>
                 <textarea
                   rows={2}
                   placeholder="z.B. Kunde teilte im Telefonat mit, dass Projekt auf 2027 verschoben wird..."
@@ -633,7 +702,10 @@ export const TodosPage: React.FC = () => {
                   ? 'Wiedervorlage / Cross-Selling anlegen (§3.5)'
                   : 'Neue Aufgabe anlegen (§3.5)'}
               </h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -646,28 +718,52 @@ export const TodosPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={() => setResubmissionDays(14, '§ 355 BGB Widerrufsfrist abgelaufen - Montage freigeben', 'PV-Anlage')}
+                  onClick={() =>
+                    setResubmissionDays(
+                      14,
+                      '§ 355 BGB Widerrufsfrist abgelaufen - Montage freigeben',
+                      'PV-Anlage',
+                    )
+                  }
                   className="p-1.5 bg-slate-900 hover:bg-purple-900/30 border border-slate-800 hover:border-purple-500/40 rounded-lg text-left text-[11px] text-slate-300 transition-colors"
                 >
                   <span className="font-bold text-amber-400">14 Tage</span> (Widerrufsablauf § 355)
                 </button>
                 <button
                   type="button"
-                  onClick={() => setResubmissionDays(90, 'Wiedervorlage: Batteriespeicher-Nachrüstung anbieten', 'Stromspeicher')}
+                  onClick={() =>
+                    setResubmissionDays(
+                      90,
+                      'Wiedervorlage: Batteriespeicher-Nachrüstung anbieten',
+                      'Stromspeicher',
+                    )
+                  }
                   className="p-1.5 bg-slate-900 hover:bg-purple-900/30 border border-slate-800 hover:border-purple-500/40 rounded-lg text-left text-[11px] text-slate-300 transition-colors"
                 >
                   <span className="font-bold text-purple-400">3 Monate</span> (Speicher Cross-Sell)
                 </button>
                 <button
                   type="button"
-                  onClick={() => setResubmissionDays(180, 'Wiedervorlage: Wärmepumpen-Kopplung prüfen', 'Wärmepumpe')}
+                  onClick={() =>
+                    setResubmissionDays(
+                      180,
+                      'Wiedervorlage: Wärmepumpen-Kopplung prüfen',
+                      'Wärmepumpe',
+                    )
+                  }
                   className="p-1.5 bg-slate-900 hover:bg-purple-900/30 border border-slate-800 hover:border-purple-500/40 rounded-lg text-left text-[11px] text-slate-300 transition-colors"
                 >
                   <span className="font-bold text-cyan-400">6 Monate</span> (Wärmepumpe)
                 </button>
                 <button
                   type="button"
-                  onClick={() => setResubmissionDays(365, 'Jahres-Check: PV-Ertrag & Wartungsvertrag anbieten', 'Wartungsvertrag / Service')}
+                  onClick={() =>
+                    setResubmissionDays(
+                      365,
+                      'Jahres-Check: PV-Ertrag & Wartungsvertrag anbieten',
+                      'Wartungsvertrag / Service',
+                    )
+                  }
                   className="p-1.5 bg-slate-900 hover:bg-purple-900/30 border border-slate-800 hover:border-purple-500/40 rounded-lg text-left text-[11px] text-slate-300 transition-colors"
                 >
                   <span className="font-bold text-emerald-400">1 Jahr</span> (Jahreswartung)
@@ -677,7 +773,9 @@ export const TodosPage: React.FC = () => {
 
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Titel / Betreff *</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Titel / Betreff *
+                </label>
                 <input
                   type="text"
                   required
@@ -690,7 +788,9 @@ export const TodosPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Kunde / Kontakt</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Kunde / Kontakt
+                  </label>
                   <input
                     type="text"
                     placeholder="z.B. Sabine Mustermann"
@@ -700,21 +800,27 @@ export const TodosPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Produktsparte</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Produktsparte
+                  </label>
                   <select
                     value={formData.product_segment}
                     onChange={(e) => setFormData({ ...formData, product_segment: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                   >
                     {PRODUCT_SEGMENTS.map((prod) => (
-                      <option key={prod} value={prod}>{prod}</option>
+                      <option key={prod} value={prod}>
+                        {prod}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Beschreibung / Gesprächsleitfaden</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Beschreibung / Gesprächsleitfaden
+                </label>
                 <textarea
                   rows={2}
                   placeholder="Notizen zum nächsten Gespräch, Zählerstand, Einwände..."
@@ -726,7 +832,9 @@ export const TodosPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Wiedervorlage am (Fälligkeit)</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Wiedervorlage am (Fälligkeit)
+                  </label>
                   <input
                     type="date"
                     required
@@ -736,7 +844,9 @@ export const TodosPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Priorität</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Priorität
+                  </label>
                   <select
                     value={formData.priority}
                     onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
@@ -776,8 +886,13 @@ export const TodosPage: React.FC = () => {
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="font-bold text-slate-100 text-lg">Aufgabe / Wiedervorlage bearbeiten</h3>
-              <button onClick={() => setEditingTodo(null)} className="text-slate-400 hover:text-slate-200">
+              <h3 className="font-bold text-slate-100 text-lg">
+                Aufgabe / Wiedervorlage bearbeiten
+              </h3>
+              <button
+                onClick={() => setEditingTodo(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -800,26 +915,36 @@ export const TodosPage: React.FC = () => {
                   <input
                     type="text"
                     value={editingTodo.contact_name || ''}
-                    onChange={(e) => setEditingTodo({ ...editingTodo, contact_name: e.target.value })}
+                    onChange={(e) =>
+                      setEditingTodo({ ...editingTodo, contact_name: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Produktsparte</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Produktsparte
+                  </label>
                   <select
                     value={editingTodo.product_segment || 'Stromspeicher'}
-                    onChange={(e) => setEditingTodo({ ...editingTodo, product_segment: e.target.value })}
+                    onChange={(e) =>
+                      setEditingTodo({ ...editingTodo, product_segment: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                   >
                     {PRODUCT_SEGMENTS.map((prod) => (
-                      <option key={prod} value={prod}>{prod}</option>
+                      <option key={prod} value={prod}>
+                        {prod}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Beschreibung</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Beschreibung
+                </label>
                 <textarea
                   rows={2}
                   value={editingTodo.description || ''}
@@ -830,7 +955,9 @@ export const TodosPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Fälligkeit</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Fälligkeit
+                  </label>
                   <input
                     type="date"
                     required
@@ -840,7 +967,9 @@ export const TodosPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Priorität</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Priorität
+                  </label>
                   <select
                     value={editingTodo.priority}
                     onChange={(e) => setEditingTodo({ ...editingTodo, priority: e.target.value })}
@@ -884,7 +1013,8 @@ export const TodosPage: React.FC = () => {
               <h3 className="font-bold text-slate-100 text-lg">Aufgabe wirklich löschen?</h3>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Möchten Sie den Eintrag <strong className="text-slate-100">"{deletingTodo.title}"</strong> endgültig löschen?
+              Möchten Sie den Eintrag{' '}
+              <strong className="text-slate-100">"{deletingTodo.title}"</strong> endgültig löschen?
             </p>
             <div className="flex justify-end gap-3 pt-2">
               <button

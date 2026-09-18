@@ -72,6 +72,8 @@ func ExecuteCommand(args []string, baseDir string, out io.Writer) (bool, int) {
 		return true, handleDown(baseDir, out)
 	case "update":
 		return true, handleUpdate(baseDir, out)
+	case "versions":
+		return true, handleVersionsList(baseDir, out)
 	case "backup":
 		return true, handleBackup(args[1:], baseDir, out)
 	case "reset":
@@ -109,6 +111,7 @@ BEFEHLE:
   restart                           CRM-Container neu starten
   down                              Container stoppen und Netzwerk freigeben
   update                            CRM-Dateien & Container auf neueste Version aktualisieren
+  versions                          Verfügbare Release-Tags und Versionen anzeigen
   backup [create|list|restore FILE] Datenbank-Sicherungen erstellen, anzeigen oder einspielen
   reset [-f, --force]               Vollständiger Factory Reset (Datenbank, Volumes, .env löschen)
   admin password EMAIL NEUES_PW     Administrator-Passwort in PostgreSQL zurücksetzen
@@ -116,6 +119,8 @@ BEFEHLE:
   --version, -v                     Version anzeigen
 
 INSTALLATIONS-OPTIONEN:
+  --version, --tag TAG              Zu installierende Version / Release-Tag (Standard: v0.9)
+  --list-versions                   Alle verfügbaren Release-Tags von GitHub anzeigen
   --port PORT                       Web-Port festlegen (Standard: 80, Ausweich: 8080)
   --admin-email EMAIL               E-Mail-Adresse für das Admin-Konto (Standard: admin@openlocalcrm.local)
   --admin-password PASSWORT         Initiales Passwort (wird automatisch generiert falls weggelassen)
@@ -256,7 +261,22 @@ func handleInstall(args []string, baseDir string, out io.Writer) int {
 			cfg.AIAPIKey = args[i]
 		case strings.HasPrefix(arg, "--ai-key="):
 			cfg.AIAPIKey = strings.TrimPrefix(arg, "--ai-key=")
+		case arg == "--list-versions" || arg == "--versions":
+			return handleVersionsList(baseDir, out)
+		case (arg == "--version" || arg == "--tag" || arg == "--release") && i+1 < len(args):
+			i++
+			cfg.Version = args[i]
+		case strings.HasPrefix(arg, "--version="):
+			cfg.Version = strings.TrimPrefix(arg, "--version=")
+		case strings.HasPrefix(arg, "--tag="):
+			cfg.Version = strings.TrimPrefix(arg, "--tag=")
+		case strings.HasPrefix(arg, "--release="):
+			cfg.Version = strings.TrimPrefix(arg, "--release=")
 		}
+	}
+
+	if cfg.Version == "" {
+		cfg.Version = "v1.0.0"
 	}
 
 	if cfg.AdminPassword == "" {
@@ -279,10 +299,17 @@ func handleInstall(args []string, baseDir string, out io.Writer) int {
 	fmt.Fprintln(out, "  OpenLocalCRM — Installation & Bereitstellung")
 	fmt.Fprintln(out, "==============================================================================")
 	fmt.Fprintf(out, "Zielverzeichnis: %s\n", baseDir)
+	fmt.Fprintf(out, "Version:         %s\n", cfg.Version)
 	fmt.Fprintf(out, "Web-Port:        %d\n", cfg.Port)
 	fmt.Fprintf(out, "Admin-Konto:     %s\n", cfg.AdminEmail)
 	fmt.Fprintf(out, "KI-Anbindung:    %s\n", cfg.AIProvider)
 	fmt.Fprintln(out, "------------------------------------------------------------------------------")
+
+	// Ensure project files exist for selected version if missing
+	updater := launcher.NewUpdater(baseDir)
+	if err := updater.EnsureProjectFilesForVersion(context.Background(), cfg.Version, false, nil); err != nil {
+		fmt.Fprintf(out, "⚠️  Hinweis zur Projektdateien-Bereitstellung: %v\n", err)
+	}
 
 	// Write docker-compose, caddyfile, .env
 	if err := launcher.EnsureComposeAndCaddyFiles(baseDir); err != nil {
@@ -556,5 +583,38 @@ func handleAdmin(args []string, baseDir string, out io.Writer) int {
 	}
 
 	fmt.Fprintf(out, "✅ Passwort für '%s' erfolgreich aktualisiert.\n", email)
+	return 0
+}
+
+func handleVersionsList(baseDir string, out io.Writer) int {
+	updater := launcher.NewUpdater(baseDir)
+	resp := updater.GetAvailableVersions(context.Background())
+
+	fmt.Fprintln(out, "==============================================================================")
+	fmt.Fprintln(out, "  OpenLocalCRM — Verfügbare Versionen & Release-Tags")
+	fmt.Fprintln(out, "==============================================================================")
+	w := tabwriter.NewWriter(out, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "TAG / ZWEIG\tSTATUS\tCOMMIT")
+	fmt.Fprintln(w, "-----------\t------\t------")
+	for _, v := range resp.Versions {
+		status := ""
+		if v.IsLatest {
+			status = "Neueste / Empfohlen"
+		} else if v.Tag == "main" {
+			status = "Edge / Entwicklungszweig"
+		} else {
+			status = "Release"
+		}
+		if v.Tag == resp.CurrentVersion {
+			status += " (installiert)"
+		}
+		commit := v.Commit
+		if commit == "" {
+			commit = "-"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\n", v.Tag, status, commit)
+	}
+	_ = w.Flush()
+	fmt.Fprintln(out)
 	return 0
 }

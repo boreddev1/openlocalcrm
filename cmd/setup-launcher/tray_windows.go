@@ -12,9 +12,9 @@ import (
 )
 
 var (
-	shell32          = syscall.NewLazyDLL("shell32.dll")
-	user32           = syscall.NewLazyDLL("user32.dll")
-	kernel32         = syscall.NewLazyDLL("kernel32.dll")
+	shell32             = syscall.NewLazyDLL("shell32.dll")
+	user32              = syscall.NewLazyDLL("user32.dll")
+	kernel32            = syscall.NewLazyDLL("kernel32.dll")
 	procShellNotifyIcon = shell32.NewProc("Shell_NotifyIconW")
 	procDefWindowProc   = user32.NewProc("DefWindowProcW")
 	procRegisterClass   = user32.NewProc("RegisterClassExW")
@@ -36,8 +36,8 @@ const (
 	NIF_ICON    = 0x00000002
 	NIF_TIP     = 0x00000004
 
-	WM_USER     = 0x0400
-	WM_TRAYICON = WM_USER + 1
+	WM_USER          = 0x0400
+	WM_TRAYICON      = WM_USER + 1
 	WM_LBUTTONDBLCLK = 0x0203
 	WM_RBUTTONUP     = 0x0205
 	WM_DESTROY       = 0x0002
@@ -112,10 +112,10 @@ func runTray(ctx context.Context, serverURL string) {
 	iconHandle, _, _ := procLoadIcon.Call(0, uintptr(IDI_APPLICATION))
 
 	wc := WNDCLASSEX{
-		CbSize:      uint32(unsafe.Sizeof(WNDCLASSEX{})),
-		LpfnWndProc: syscall.NewCallback(wndProc),
+		CbSize:        uint32(unsafe.Sizeof(WNDCLASSEX{})),
+		LpfnWndProc:   syscall.NewCallback(wndProc),
 		LpszClassName: className,
-		HIcon:       iconHandle,
+		HIcon:         iconHandle,
 	}
 
 	procRegisterClass.Call(uintptr(unsafe.Pointer(&wc)))

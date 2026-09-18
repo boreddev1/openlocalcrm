@@ -1,0 +1,41 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - bodyclose
+    - misspell
+    - unconvert
+
+linters-settings:
+  govet:
+    enable:
+      - nilness
+      - shadow
+  gosec:
+    excludes:
+      - G104 # Audit errors not checked (already caught by errcheck)
+      - G204 # Subprocess launched with variable (needed in setup-launcher/updater)
+      - G304 # File path provided as taint input (storage and backups require dynamic paths)
+  misspell:
+    locale: US
+
+issues:
+  exclude-dirs:
+    - web
+    - data
+    - backups
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck

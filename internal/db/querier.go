@@ -12,8 +12,14 @@ import (
 
 type Querier interface {
 	CountUsers(ctx context.Context) (int64, error)
+	// internal/db/queries/ai_research_jobs.sql
+	CreateAIResearchJob(ctx context.Context, arg CreateAIResearchJobParams) (AiResearchJob, error)
+	// internal/db/queries/appointments.sql
+	CreateAppointment(ctx context.Context, arg CreateAppointmentParams) (Appointment, error)
 	// internal/db/queries/audit.sql
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
+	// internal/db/queries/call_activities.sql
+	CreateCallActivity(ctx context.Context, arg CreateCallActivityParams) (CallActivity, error)
 	// internal/db/queries/companies.sql
 	CreateCompany(ctx context.Context, arg CreateCompanyParams) (Company, error)
 	// internal/db/queries/contacts.sql
@@ -24,6 +30,10 @@ type Querier interface {
 	CreateEmailAccount(ctx context.Context, arg CreateEmailAccountParams) (EmailAccount, error)
 	CreateEmailAttachment(ctx context.Context, arg CreateEmailAttachmentParams) (EmailAttachment, error)
 	CreateEmailMessage(ctx context.Context, arg CreateEmailMessageParams) (EmailMessage, error)
+	// internal/db/queries/knowledge_base.sql
+	CreateKBArticle(ctx context.Context, arg CreateKBArticleParams) (KnowledgeBaseArticle, error)
+	// internal/db/queries/notes.sql
+	CreateNote(ctx context.Context, arg CreateNoteParams) (Note, error)
 	// internal/db/queries/notifications.sql
 	CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notification, error)
 	// internal/db/queries/sessions.sql
@@ -32,23 +42,37 @@ type Querier interface {
 	CreateTodo(ctx context.Context, arg CreateTodoParams) (Todo, error)
 	// internal/db/queries/users.sql
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// internal/db/queries/workflows.sql
+	CreateWorkflow(ctx context.Context, arg CreateWorkflowParams) (Workflow, error)
+	CreateWorkflowRun(ctx context.Context, arg CreateWorkflowRunParams) (WorkflowRun, error)
+	DeleteAppointment(ctx context.Context, id pgtype.UUID) error
 	DeleteCompany(ctx context.Context, id pgtype.UUID) error
 	DeleteContact(ctx context.Context, id pgtype.UUID) error
 	DeleteDeal(ctx context.Context, id pgtype.UUID) error
+	DeleteKBArticle(ctx context.Context, id pgtype.UUID) error
+	DeleteNote(ctx context.Context, id pgtype.UUID) error
 	DeleteRefreshToken(ctx context.Context, tokenHash string) error
 	DeleteTodo(ctx context.Context, id pgtype.UUID) error
 	DeleteUserRefreshTokens(ctx context.Context, userID pgtype.UUID) error
+	GetAIResearchJobByID(ctx context.Context, id pgtype.UUID) (AiResearchJob, error)
+	GetAppointmentByID(ctx context.Context, id pgtype.UUID) (Appointment, error)
 	GetCompanyByID(ctx context.Context, id pgtype.UUID) (Company, error)
 	GetContactByID(ctx context.Context, id pgtype.UUID) (Contact, error)
 	GetDealByID(ctx context.Context, id pgtype.UUID) (Deal, error)
 	GetEmailAccountByID(ctx context.Context, id pgtype.UUID) (EmailAccount, error)
 	GetEmailMessageByID(ctx context.Context, id pgtype.UUID) (EmailMessage, error)
+	GetKBArticleByID(ctx context.Context, id pgtype.UUID) (KnowledgeBaseArticle, error)
+	GetNoteByID(ctx context.Context, id pgtype.UUID) (Note, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetTodoByID(ctx context.Context, id pgtype.UUID) (Todo, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	GetWorkflowByID(ctx context.Context, id string) (Workflow, error)
+	ListAIResearchJobs(ctx context.Context) ([]AiResearchJob, error)
 	ListAllNotifications(ctx context.Context, arg ListAllNotificationsParams) ([]Notification, error)
+	ListAppointments(ctx context.Context) ([]Appointment, error)
 	ListAuditLogsByEntity(ctx context.Context, arg ListAuditLogsByEntityParams) ([]AuditLog, error)
+	ListCallActivitiesByContact(ctx context.Context, contactID pgtype.UUID) ([]CallActivity, error)
 	ListCompanies(ctx context.Context, arg ListCompaniesParams) ([]Company, error)
 	ListContacts(ctx context.Context, arg ListContactsParams) ([]Contact, error)
 	ListContactsByCompany(ctx context.Context, companyID pgtype.UUID) ([]Contact, error)
@@ -58,21 +82,31 @@ type Querier interface {
 	ListEmailAttachmentsByMessage(ctx context.Context, messageID pgtype.UUID) ([]EmailAttachment, error)
 	ListEmailMessages(ctx context.Context, arg ListEmailMessagesParams) ([]EmailMessage, error)
 	ListEmailMessagesByThread(ctx context.Context, threadID string) ([]EmailMessage, error)
+	ListKBArticles(ctx context.Context) ([]KnowledgeBaseArticle, error)
+	ListNotes(ctx context.Context) ([]Note, error)
+	ListNotesByEntity(ctx context.Context, arg ListNotesByEntityParams) ([]Note, error)
 	ListRecentAuditLogs(ctx context.Context, arg ListRecentAuditLogsParams) ([]AuditLog, error)
+	ListRecentCallActivities(ctx context.Context, limit int32) ([]CallActivity, error)
 	ListTodos(ctx context.Context, arg ListTodosParams) ([]Todo, error)
 	ListTodosByAssignee(ctx context.Context, assignedTo pgtype.UUID) ([]Todo, error)
 	ListUnreadNotifications(ctx context.Context, arg ListUnreadNotificationsParams) ([]Notification, error)
 	ListUsers(ctx context.Context) ([]User, error)
+	ListWorkflowRuns(ctx context.Context) ([]WorkflowRun, error)
+	ListWorkflows(ctx context.Context) ([]Workflow, error)
 	MarkAllNotificationsAsRead(ctx context.Context, userID pgtype.UUID) error
 	MarkEmailMessageRead(ctx context.Context, id pgtype.UUID) error
 	MarkNotificationAsRead(ctx context.Context, id pgtype.UUID) error
 	SearchCompanies(ctx context.Context, arg SearchCompaniesParams) ([]Company, error)
 	SearchContacts(ctx context.Context, arg SearchContactsParams) ([]Contact, error)
+	UpdateAIResearchJobStatus(ctx context.Context, arg UpdateAIResearchJobStatusParams) (AiResearchJob, error)
+	UpdateAppointment(ctx context.Context, arg UpdateAppointmentParams) (Appointment, error)
+	UpdateAppointmentPushStatus(ctx context.Context, arg UpdateAppointmentPushStatusParams) (Appointment, error)
 	UpdateCompany(ctx context.Context, arg UpdateCompanyParams) (Company, error)
 	UpdateContact(ctx context.Context, arg UpdateContactParams) (Contact, error)
 	UpdateDeal(ctx context.Context, arg UpdateDealParams) (Deal, error)
 	UpdateDealStage(ctx context.Context, arg UpdateDealStageParams) (Deal, error)
 	UpdateEmailAccountLastSynced(ctx context.Context, arg UpdateEmailAccountLastSyncedParams) error
+	UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, error)
 	UpdateTodo(ctx context.Context, arg UpdateTodoParams) (Todo, error)
 	UpdateTodoStatus(ctx context.Context, arg UpdateTodoStatusParams) (Todo, error)
 	UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error
@@ -80,6 +114,7 @@ type Querier interface {
 	UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) error
 	UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) error
 	UpdateUserTOTP(ctx context.Context, arg UpdateUserTOTPParams) error
+	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) (WorkflowRun, error)
 }
 
 var _ Querier = (*Queries)(nil)

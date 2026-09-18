@@ -120,6 +120,19 @@
           <p class="helper-text">Standard: 80 (oder 8080 falls 80 durch Windows IIS belegt ist)</p>
         </div>
 
+        <div class="form-group">
+          <label for="install-version">Zu installierende Version (Release)</label>
+          <div class="input-row">
+            <select id="install-version" style="flex: 1;" onchange="updateVersionHelperText()">
+              <option value="v1.0.0">v1.0.0 (Neueste Version / Empfohlen)</option>
+              <option value="v0.9">v0.9 (Legacy Release)</option>
+              <option value="main">main (Edge / Entwicklungszweig)</option>
+            </select>
+            <button type="button" class="btn btn-secondary" onclick="loadAvailableVersions()" title="Versionen von GitHub neu laden">🔄</button>
+          </div>
+          <p class="helper-text" id="version-helper-text">⚡ Schnelle Bereitstellung: Vorkompilierte GitHub Container Images (GHCR) verfügbar.</p>
+        </div>
+
         <!-- ACCORDION: DATABASE RESTORE / IMPORT -->
         <div class="accordion-box" style="margin: 1.5rem 0;">
           <details>

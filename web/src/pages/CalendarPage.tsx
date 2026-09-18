@@ -20,14 +20,30 @@ import {
   Lock,
   Globe,
   Eye,
-  EyeOff
+  EyeOff,
 } from 'lucide-react';
 
 const APPOINTMENT_TYPES = [
-  { id: 'meeting', label: 'Meeting / Vor-Ort-Beratung', color: 'bg-purple-500/10 text-purple-400 border-purple-500/30' },
-  { id: 'call', label: 'Telefontermin (Click-to-Call)', color: 'bg-blue-500/10 text-blue-400 border-blue-500/30' },
-  { id: 'email_reminder', label: 'E-Mail Follow-up Erinnerung', color: 'bg-amber-500/10 text-amber-400 border-amber-500/30' },
-  { id: 'deadline', label: 'Frist / Einreichungs-Deadline', color: 'bg-rose-500/10 text-rose-400 border-rose-500/30' },
+  {
+    id: 'meeting',
+    label: 'Meeting / Vor-Ort-Beratung',
+    color: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
+  },
+  {
+    id: 'call',
+    label: 'Telefontermin (Click-to-Call)',
+    color: 'bg-blue-500/10 text-blue-400 border-blue-500/30',
+  },
+  {
+    id: 'email_reminder',
+    label: 'E-Mail Follow-up Erinnerung',
+    color: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
+  },
+  {
+    id: 'deadline',
+    label: 'Frist / Einreichungs-Deadline',
+    color: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
+  },
 ];
 
 const REMINDER_OPTIONS = [
@@ -117,7 +133,9 @@ export const CalendarPage: React.FC = () => {
       }),
     onSuccess: (_, app) => {
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
-      setFeedbackBanner(`Termin "${app.title}" erfolgreich in Ihren Microsoft 365 & Google Kalender übertragen!`);
+      setFeedbackBanner(
+        `Termin "${app.title}" erfolgreich in Ihren Microsoft 365 & Google Kalender übertragen!`,
+      );
       setTimeout(() => setFeedbackBanner(null), 4000);
     },
   });
@@ -126,7 +144,9 @@ export const CalendarPage: React.FC = () => {
     setIsSyncing(true);
     setTimeout(() => {
       setIsSyncing(false);
-      setFeedbackBanner('Microsoft 365 & Google Kalender synchronisiert (30 Tage zurück / 60 Tage voraus)');
+      setFeedbackBanner(
+        'Microsoft 365 & Google Kalender synchronisiert (30 Tage zurück / 60 Tage voraus)',
+      );
       setTimeout(() => setFeedbackBanner(null), 4000);
     }, 800);
   };
@@ -135,8 +155,12 @@ export const CalendarPage: React.FC = () => {
     e.preventDefault();
     createMutation.mutate({
       ...formData,
-      start_time: formData.start_time ? new Date(formData.start_time).toISOString() : new Date().toISOString(),
-      end_time: formData.end_time ? new Date(formData.end_time).toISOString() : new Date(Date.now() + 3600000).toISOString(),
+      start_time: formData.start_time
+        ? new Date(formData.start_time).toISOString()
+        : new Date().toISOString(),
+      end_time: formData.end_time
+        ? new Date(formData.end_time).toISOString()
+        : new Date(Date.now() + 3600000).toISOString(),
     });
   };
 
@@ -158,7 +182,9 @@ export const CalendarPage: React.FC = () => {
   };
 
   const handleSendInviteEmail = (app: any) => {
-    setFeedbackBanner(`ICS-Kalendereinladung erfolgreich an ${app.contact_email || 'Kunden'} gesendet!`);
+    setFeedbackBanner(
+      `ICS-Kalendereinladung erfolgreich an ${app.contact_email || 'Kunden'} gesendet!`,
+    );
     setInviteModalApp(null);
     setTimeout(() => setFeedbackBanner(null), 4000);
   };
@@ -181,7 +207,8 @@ export const CalendarPage: React.FC = () => {
             Termine, Kalender & M365 / Google Sync (§3.6)
           </h1>
           <p className="text-sm text-slate-400">
-            Vor-Ort-Beratungen, Closer-Termine, M365/Google OAuth-Sync & RFC 5545 ICS-Kalendereinladungen
+            Vor-Ort-Beratungen, Closer-Termine, M365/Google OAuth-Sync & RFC 5545
+            ICS-Kalendereinladungen
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -228,8 +255,14 @@ export const CalendarPage: React.FC = () => {
             onClick={() => setShowExternal(!showExternal)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer"
           >
-            {showExternal ? <Eye className="w-3.5 h-3.5 text-emerald-400" /> : <EyeOff className="w-3.5 h-3.5 text-slate-400" />}
-            <span>{showExternal ? 'Externe Termine sichtbar' : 'Externe Termine ausgeblendet'}</span>
+            {showExternal ? (
+              <Eye className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+            )}
+            <span>
+              {showExternal ? 'Externe Termine sichtbar' : 'Externe Termine ausgeblendet'}
+            </span>
           </button>
 
           <button
@@ -256,17 +289,25 @@ export const CalendarPage: React.FC = () => {
         {isLoading ? (
           <div className="col-span-full py-12 text-center text-slate-500">Lade Termine...</div>
         ) : filteredAppointments.length === 0 ? (
-          <div className="col-span-full py-12 text-center text-slate-500">Keine anstehenden Termine eingetragen.</div>
+          <div className="col-span-full py-12 text-center text-slate-500">
+            Keine anstehenden Termine eingetragen.
+          </div>
         ) : (
           filteredAppointments.map((app) => {
-            const typeConfig = APPOINTMENT_TYPES.find((t) => t.id === app.type) || APPOINTMENT_TYPES[0];
+            const typeConfig =
+              APPOINTMENT_TYPES.find((t) => t.id === app.type) || APPOINTMENT_TYPES[0];
 
             return (
-              <div key={app.id} className={`bg-slate-900 border ${app.is_external ? 'border-purple-500/40 bg-slate-900/90' : 'border-slate-800'} rounded-2xl p-5 shadow-sm space-y-4 hover:border-slate-700 transition-colors flex flex-col justify-between group`}>
+              <div
+                key={app.id}
+                className={`bg-slate-900 border ${app.is_external ? 'border-purple-500/40 bg-slate-900/90' : 'border-slate-800'} rounded-2xl p-5 shadow-sm space-y-4 hover:border-slate-700 transition-colors flex flex-col justify-between group`}
+              >
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2.5">
-                      <div className={`w-9 h-9 rounded-xl ${app.is_external ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'} flex items-center justify-center shrink-0`}>
+                      <div
+                        className={`w-9 h-9 rounded-xl ${app.is_external ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'} flex items-center justify-center shrink-0`}
+                      >
                         {app.provider === 'microsoft' ? (
                           <Globe className="w-5 h-5 text-blue-400" />
                         ) : app.provider === 'google' ? (
@@ -280,8 +321,14 @@ export const CalendarPage: React.FC = () => {
                       <div>
                         <h3 className="font-bold text-sm text-slate-100">{app.title}</h3>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${typeConfig.color}`}>
-                            {app.provider === 'microsoft' ? 'Microsoft 365 Sync' : app.provider === 'google' ? 'Google Calendar Sync' : typeConfig.label}
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${typeConfig.color}`}
+                          >
+                            {app.provider === 'microsoft'
+                              ? 'Microsoft 365 Sync'
+                              : app.provider === 'google'
+                                ? 'Google Calendar Sync'
+                                : typeConfig.label}
                           </span>
                           {app.is_private && (
                             <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-mono flex items-center gap-1">
@@ -317,13 +364,23 @@ export const CalendarPage: React.FC = () => {
                   <div className="space-y-2 text-xs text-slate-300">
                     <div className="flex items-center gap-2 text-slate-400">
                       <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{new Date(app.start_time).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} Uhr</span>
+                      <span>
+                        {new Date(app.start_time).toLocaleString('de-DE', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}{' '}
+                        Uhr
+                      </span>
                     </div>
 
                     {app.contact_name && (
                       <div className="flex items-center gap-2 text-slate-400">
                         <User className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                        <span>{app.contact_name} {app.company_name && `(${app.company_name})`}</span>
+                        <span>
+                          {app.contact_name} {app.company_name && `(${app.company_name})`}
+                        </span>
                       </div>
                     )}
 
@@ -404,16 +461,32 @@ export const CalendarPage: React.FC = () => {
                 <Mail className="w-5 h-5 text-purple-400" />
                 <span>ICS-Kalendereinladung versenden (§3.6)</span>
               </h3>
-              <button onClick={() => setInviteModalApp(null)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setInviteModalApp(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Möchten Sie eine offizielle Terminbestätigung inklusive <strong className="text-slate-100">RFC 5545 .ics Kalenderanhang</strong> an die Adresse <strong className="text-purple-300">{inviteModalApp.contact_email || 'sabine.mustermann@example.de'}</strong> senden?
+              Möchten Sie eine offizielle Terminbestätigung inklusive{' '}
+              <strong className="text-slate-100">RFC 5545 .ics Kalenderanhang</strong> an die
+              Adresse{' '}
+              <strong className="text-purple-300">
+                {inviteModalApp.contact_email || 'sabine.mustermann@example.de'}
+              </strong>{' '}
+              senden?
             </p>
             <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs space-y-1">
-              <div className="text-slate-400">Termin: <span className="text-slate-200 font-semibold">{inviteModalApp.title}</span></div>
-              <div className="text-slate-400">Zeitpunkt: <span className="text-emerald-400">{new Date(inviteModalApp.start_time).toLocaleString('de-DE')} Uhr</span></div>
+              <div className="text-slate-400">
+                Termin: <span className="text-slate-200 font-semibold">{inviteModalApp.title}</span>
+              </div>
+              <div className="text-slate-400">
+                Zeitpunkt:{' '}
+                <span className="text-emerald-400">
+                  {new Date(inviteModalApp.start_time).toLocaleString('de-DE')} Uhr
+                </span>
+              </div>
             </div>
             <div className="flex justify-end gap-3 pt-3">
               <button
@@ -440,27 +513,36 @@ export const CalendarPage: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="font-bold text-slate-100 text-lg">Neuen Termin anlegen (§3.6)</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Termin-Typ (§3.6)</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Termin-Typ (§3.6)
+                </label>
                 <select
                   value={formData.type}
                   onChange={(e) => setFormData({ ...formData, type: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                 >
                   {APPOINTMENT_TYPES.map((t) => (
-                    <option key={t.id} value={t.id}>{t.label}</option>
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Titel / Anlass *</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Titel / Anlass *
+                </label>
                 <input
                   required
                   type="text"
@@ -473,7 +555,9 @@ export const CalendarPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Kontaktperson</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Kontaktperson
+                  </label>
                   <input
                     type="text"
                     value={formData.contact_name}
@@ -482,7 +566,9 @@ export const CalendarPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">E-Mail für Einladung</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    E-Mail für Einladung
+                  </label>
                   <input
                     type="email"
                     value={formData.contact_email}
@@ -515,14 +601,18 @@ export const CalendarPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Erinnerung (§3.6)</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Erinnerung (§3.6)
+                  </label>
                   <select
                     value={formData.reminder}
                     onChange={(e) => setFormData({ ...formData, reminder: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   >
                     {REMINDER_OPTIONS.map((r) => (
-                      <option key={r.id} value={r.id}>{r.label}</option>
+                      <option key={r.id} value={r.id}>
+                        {r.label}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -578,7 +668,10 @@ export const CalendarPage: React.FC = () => {
                 <Edit3 className="w-5 h-5 text-emerald-400" />
                 <span>Termin bearbeiten</span>
               </h3>
-              <button onClick={() => setEditingApp(null)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setEditingApp(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -645,7 +738,8 @@ export const CalendarPage: React.FC = () => {
               <h3 className="font-bold text-slate-100 text-base">Termin wirklich löschen?</h3>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Möchten Sie den Termin <strong className="text-slate-100">{deletingApp.title}</strong> unwiderruflich aus dem Kalender entfernen?
+              Möchten Sie den Termin <strong className="text-slate-100">{deletingApp.title}</strong>{' '}
+              unwiderruflich aus dem Kalender entfernen?
             </p>
             <div className="flex justify-end gap-3 pt-3">
               <button

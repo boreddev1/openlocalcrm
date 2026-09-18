@@ -128,8 +128,8 @@ OLLAMA_MODEL=gpt-4o-mini
 func TestGenerateEnvContentWithExisting_PreservesCredentials(t *testing.T) {
 	tmp := t.TempDir()
 	existing := map[string]string{
-		"DB_PASSWORD":          "original-database-secret-42",
-		"CONNECTOR_API_TOKEN":  "original-connector-token-99",
+		"DB_PASSWORD":         "original-database-secret-42",
+		"CONNECTOR_API_TOKEN": "original-connector-token-99",
 		"INITIAL_ADMIN_EMAIL": "admin@domain.de",
 	}
 
@@ -200,4 +200,88 @@ func TestWriteConfigAndDirectoriesWithEnv(t *testing.T) {
 	}
 }
 
+func TestGenerateEnvContent_Version(t *testing.T) {
+	cfg := SetupConfig{
+		Port:       80,
+		AdminEmail: "admin@openlocalcrm.local",
+		Version:    "v0.9",
+	}
 
+	content, err := GenerateEnvContent(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(content, "OPENLOCALCRM_VERSION=v0.9") {
+		t.Errorf("expected OPENLOCALCRM_VERSION=v0.9 in env content, got:\n%s", content)
+	}
+
+	tmp := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tmp, ".env"), []byte(content), 0600)
+	loaded, ok := ReadExistingConfig(tmp)
+	if !ok || loaded.Version != "v0.9" {
+		t.Errorf("expected ReadExistingConfig to read version v0.9, got %+v", loaded)
+	}
+}
+
+func TestIsGHCRImageSupported(t *testing.T) {
+	tests := []struct {
+		version  string
+		expected bool
+	}{
+		{"v1.0.0", true},
+		{"v1.0", true},
+		{"v1.2.3", true},
+		{"v2.0", true},
+		{"main", true},
+		{"latest", true},
+		{"edge", true},
+		{"", true},
+		{"v0.9", false},
+		{"v0.8.5", false},
+		{"0.9", false},
+		{"v0.1", false},
+	}
+
+	for _, tt := range tests {
+		got := IsGHCRImageSupported(tt.version)
+		if got != tt.expected {
+			t.Errorf("IsGHCRImageSupported(%q) = %v; want %v", tt.version, got, tt.expected)
+		}
+	}
+}
+
+func TestGenerateEnvContent_GHCRImages(t *testing.T) {
+	// 1. Release >= v1.0 should use pre-built GHCR images
+	cfgV1 := SetupConfig{
+		Port:       80,
+		AdminEmail: "admin@openlocalcrm.local",
+		Version:    "v1.0.0",
+	}
+	contentV1, err := GenerateEnvContent(cfgV1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(contentV1, "CRM_SERVER_IMAGE=ghcr.io/boreddev1/openlocalcrm/server:v1.0.0") {
+		t.Errorf("expected GHCR server image for v1.0.0 in env content, got:\n%s", contentV1)
+	}
+	if !strings.Contains(contentV1, "CRM_WORKER_IMAGE=ghcr.io/boreddev1/openlocalcrm/worker:v1.0.0") {
+		t.Errorf("expected GHCR worker image for v1.0.0 in env content, got:\n%s", contentV1)
+	}
+
+	// 2. Legacy Release < v1.0 (e.g. v0.9) must NOT use GHCR images (empty for local build)
+	cfgV09 := SetupConfig{
+		Port:       80,
+		AdminEmail: "admin@openlocalcrm.local",
+		Version:    "v0.9",
+	}
+	contentV09, err := GenerateEnvContent(cfgV09)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(contentV09, "CRM_SERVER_IMAGE=\n") {
+		t.Errorf("expected empty CRM_SERVER_IMAGE for legacy v0.9 in env content, got:\n%s", contentV09)
+	}
+	if !strings.Contains(contentV09, "CRM_WORKER_IMAGE=\n") {
+		t.Errorf("expected empty CRM_WORKER_IMAGE for legacy v0.9 in env content, got:\n%s", contentV09)
+	}
+}

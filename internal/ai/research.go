@@ -19,11 +19,11 @@ var (
 )
 
 type CompanyResearchResult struct {
-	Domain           string   `json:"domain"`
-	Title            string   `json:"title"`
-	MetaDescription  string   `json:"meta_description"`
-	Summary          string   `json:"summary"`
-	IndustryKeywords []string `json:"industry_keywords"`
+	Domain           string    `json:"domain"`
+	Title            string    `json:"title"`
+	MetaDescription  string    `json:"meta_description"`
+	Summary          string    `json:"summary"`
+	IndustryKeywords []string  `json:"industry_keywords"`
 	ResearchedAt     time.Time `json:"researched_at"`
 }
 
@@ -75,14 +75,14 @@ func NewResearchService(gateway *Gateway, obsSvc *ObservabilityService) *Researc
 					return nil, ErrSSRFBlocked
 				}
 			}
-			dialer := &net.Dialer{Timeout: 5 * time.Second}
+			dialer := &net.Dialer{Timeout: 500 * time.Millisecond}
 			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
 		},
 	}
 
 	httpClient := &http.Client{
 		Transport: transport,
-		Timeout:   10 * time.Second,
+		Timeout:   1 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return errors.New("stopped after 5 redirects")
@@ -187,7 +187,10 @@ func (s *ResearchService) scrapeWebsite(ctx context.Context, targetURL string) (
 		return "", "", ""
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	scrapeCtx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(scrapeCtx, "GET", u.String(), nil)
 	if err != nil {
 		return "", "", ""
 	}

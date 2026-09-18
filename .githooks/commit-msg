@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -e
+
+# ==============================================================================
+# OpenLocalCRM Robust Conventional Commits Validator Hook
+# Handles comments, templates, merge/squash/fixup commits and multi-line messages.
+# ==============================================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+COMMIT_MSG_FILE="$1"
+
+if [ ! -f "$COMMIT_MSG_FILE" ]; then
+    exit 0
+fi
+
+# Filter out comment lines starting with '#' and extract the first non-empty line
+FIRST_LINE=$(grep -v '^[[:space:]]*#' "$COMMIT_MSG_FILE" | grep -v '^[[:space:]]*$' | head -n 1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)
+
+if [ -z "$FIRST_LINE" ]; then
+    echo -e "${RED}${BOLD}❌ Leere Commit-Nachricht erkannt!${NC}"
+    exit 1
+fi
+
+# Ignore merge commits, fixups, squash commits, cherry-picks
+if [[ "$FIRST_LINE" =~ ^(Merge|fixup!|squash!|Revert) ]]; then
+    exit 0
+fi
+
+# Conventional commits regex pattern
+# Example: feat: add new feature
+# Example: fix(auth): resolve session timeout
+# Example: chore(deps)!: bump dependencies
+# Example: release: v1.0.0 production release
+CONVENTIONAL_REGEX='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|release)(\([a-zA-Z0-9_\.\/-]+\))?!?: .+$'
+
+if [[ ! "$FIRST_LINE" =~ $CONVENTIONAL_REGEX ]]; then
+    echo -e "\n${RED}${BOLD}❌ Ungültiges Commit-Nachrichten-Format!${NC}"
+    echo -e "${RED}Erkannte Betreffzeile: \"$FIRST_LINE\"${NC}\n"
+    echo -e "${YELLOW}Bitte verwenden Sie die Conventional-Commits-Konvention:${NC}"
+    echo -e "   ${BOLD}<type>(<optionaler scope>): <beschreibung>${NC}\n"
+    echo -e "Erlaubte Typen:"
+    echo -e "   • ${BOLD}feat${NC}:     Neues Feature oder Funktionalität"
+    echo -e "   • ${BOLD}fix${NC}:      Bugfix / Fehlerbehebung"
+    echo -e "   • ${BOLD}docs${NC}:     Dokumentationsänderungen"
+    echo -e "   • ${BOLD}refactor${NC}: Code-Umstrukturierung ohne Verhaltensänderung"
+    echo -e "   • ${BOLD}perf${NC}:     Performance-Optimierung"
+    echo -e "   • ${BOLD}test${NC}:     Hinzufügen oder Anpassen von Tests"
+    echo -e "   • ${BOLD}build${NC}:    Build-System oder externe Abhängigkeiten"
+    echo -e "   • ${BOLD}ci${NC}:       CI/CD-Konfiguration"
+    echo -e "   • ${BOLD}chore${NC}:    Wartungsarbeiten / Hilfsskripte"
+    echo -e "   • ${BOLD}release${NC}:  Produkt-Releases & Version-Tags"
+    echo -e "\n${GREEN}Gültige Beispiele:${NC}"
+    echo -e "   feat(calendar): support recurring appointments"
+    echo -e "   fix(auth): prevent unauthorized export access"
+    echo -e "   chore: update dependencies\n"
+    exit 1
+fi
+
+MSG_LEN=${#FIRST_LINE}
+if [ "$MSG_LEN" -gt 100 ]; then
+    echo -e "${YELLOW}⚠️  Hinweis: Die Betreffzeile ist mit ${MSG_LEN} Zeichen etwas lang (empfohlen: max. 80).${NC}"
+fi
+
+exit 0

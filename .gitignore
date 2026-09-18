@@ -26,10 +26,13 @@
 *.dylib
 
 # Test artifacts
+coverage/
 coverage.out
 coverage.html
 test-results/
 playwright-report/
+playwright/.auth/
+web/playwright/
 
 # Dependencies
 node_modules/
@@ -59,3 +62,7 @@ user-errors/
 .idea/
 .vscode/
 *.swp
+
+# Superpowers and Planning Artifacts
+.superpowers/
+docs/superpowers/
