@@ -2,8 +2,8 @@
 set -e
 
 # ==============================================================================
-# OpenLocalCRM Conventional Commits Validator Hook
-# Ensures commit messages follow standard enterprise conventions
+# OpenLocalCRM Robust Conventional Commits Validator Hook
+# Handles comments, templates, merge/squash/fixup commits and multi-line messages.
 # ==============================================================================
 
 RED='\033[0;31m'
@@ -18,25 +18,30 @@ if [ ! -f "$COMMIT_MSG_FILE" ]; then
     exit 0
 fi
 
-# Read the first line of the commit message
-FIRST_LINE=$(head -n 1 "$COMMIT_MSG_FILE" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+# Filter out comment lines starting with '#' and extract the first non-empty line
+FIRST_LINE=$(grep -v '^[[:space:]]*#' "$COMMIT_MSG_FILE" | grep -v '^[[:space:]]*$' | head -n 1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)
 
-# Ignore merge commits, fixups, squash commits
-if [[ "$FIRST_LINE" =~ ^(Merge|fixup!|squash!) ]]; then
+if [ -z "$FIRST_LINE" ]; then
+    echo -e "${RED}${BOLD}❌ Leere Commit-Nachricht erkannt!${NC}"
+    exit 1
+fi
+
+# Ignore merge commits, fixups, squash commits, cherry-picks
+if [[ "$FIRST_LINE" =~ ^(Merge|fixup!|squash!|Revert) ]]; then
     exit 0
 fi
 
-# Conventional commits pattern
+# Conventional commits regex pattern
 # Example: feat: add new feature
 # Example: fix(auth): resolve session timeout
 # Example: chore(deps)!: bump dependencies
 CONVENTIONAL_REGEX='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9_\.\/-]+\))?!?: .+$'
 
 if [[ ! "$FIRST_LINE" =~ $CONVENTIONAL_REGEX ]]; then
-    echo -e "${RED}${BOLD}❌ Ungültiges Commit-Nachrichten-Format!${NC}"
-    echo -e "${RED}Ihre Nachricht war: \"$FIRST_LINE\"${NC}\n"
+    echo -e "\n${RED}${BOLD}❌ Ungültiges Commit-Nachrichten-Format!${NC}"
+    echo -e "${RED}Erkannte Betreffzeile: \"$FIRST_LINE\"${NC}\n"
     echo -e "${YELLOW}Bitte verwenden Sie die Conventional-Commits-Konvention:${NC}"
-    echo -e "   ${BOLD}<type>(<optional scope>): <beschreibung>${NC}\n"
+    echo -e "   ${BOLD}<type>(<optionaler scope>): <beschreibung>${NC}\n"
     echo -e "Erlaubte Typen:"
     echo -e "   • ${BOLD}feat${NC}:     Neues Feature oder Funktionalität"
     echo -e "   • ${BOLD}fix${NC}:      Bugfix / Fehlerbehebung"
@@ -47,14 +52,13 @@ if [[ ! "$FIRST_LINE" =~ $CONVENTIONAL_REGEX ]]; then
     echo -e "   • ${BOLD}build${NC}:    Build-System oder externe Abhängigkeiten"
     echo -e "   • ${BOLD}ci${NC}:       CI/CD-Konfiguration"
     echo -e "   • ${BOLD}chore${NC}:    Wartungsarbeiten / Hilfsskripte"
-    echo -e "\n${GREEN}Beispiele:${NC}"
+    echo -e "\n${GREEN}Gültige Beispiele:${NC}"
     echo -e "   feat(calendar): support recurring appointments"
     echo -e "   fix(auth): prevent unauthorized export access"
     echo -e "   chore: update dependencies\n"
     exit 1
 fi
 
-# Check first line length (recommend max 80 chars)
 MSG_LEN=${#FIRST_LINE}
 if [ "$MSG_LEN" -gt 100 ]; then
     echo -e "${YELLOW}⚠️  Hinweis: Die Betreffzeile ist mit ${MSG_LEN} Zeichen etwas lang (empfohlen: max. 80).${NC}"

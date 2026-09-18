@@ -70,7 +70,7 @@ lint: ## Run Go static analysis, frontend ESLint and TypeScript checks
 	go vet ./...
 	cd web && pnpm lint && pnpm typecheck
 
-check: fmt lint check-licenses test ## Run full suite of local quality checks
+check: setup-hooks fmt lint check-licenses test ## Run full suite of local quality checks
 
 setup-hooks: ## Configure and enable enterprise Git pre-commit and pre-push hooks
 	git config core.hooksPath .githooks
