@@ -56,6 +56,7 @@ func NewServerWithUpdater(baseDir string, engine *Engine, updater *Updater, onRe
 	mux.HandleFunc("/api/admin/reset-password", s.handleResetAdminPassword)
 	mux.HandleFunc("/api/install/", s.handleInstall)
 	mux.HandleFunc("/api/logs", s.handleLogs)
+	mux.HandleFunc("/api/versions", s.handleVersions)
 	mux.HandleFunc("/api/update/check", s.handleUpdateCheck)
 	mux.HandleFunc("/api/update/execute", s.handleUpdateExecute)
 
@@ -167,6 +168,13 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer close(logChan)
+
+		if s.updater != nil {
+			if err := s.updater.EnsureProjectFilesForVersion(context.Background(), cfg.Version, false, logChan); err != nil {
+				s.appendLog(fmt.Sprintf("[Warnung] Projektdateien-Bereitstellung: %v", err))
+			}
+		}
+
 		s.appendLog("[Setup] Starte Docker Compose Stack...")
 		log.Println("[Setup] Starting docker compose up -d...")
 
@@ -492,6 +500,21 @@ func (s *Server) handleResetAdminPassword(w http.ResponseWriter, r *http.Request
 		"success": true,
 		"message": fmt.Sprintf("Passwort für %s erfolgreich aktualisiert!", req.Email),
 	})
+}
+
+func (s *Server) handleVersions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.updater == nil {
+		s.updater = NewUpdater(s.baseDir)
+	}
+
+	resp := s.updater.GetAvailableVersions(r.Context())
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {

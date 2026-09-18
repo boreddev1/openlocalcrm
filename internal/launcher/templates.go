@@ -27,6 +27,7 @@ services:
       - crm-net
 
   server:
+    image: ${CRM_SERVER_IMAGE:-crm-server:local}
     build:
       context: .
       dockerfile: Dockerfile.server
@@ -56,6 +57,7 @@ services:
       - crm-net
 
   worker:
+    image: ${CRM_WORKER_IMAGE:-crm-worker:local}
     build:
       context: .
       dockerfile: Dockerfile.worker

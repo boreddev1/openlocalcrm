@@ -16,7 +16,9 @@ interface CallModalProps {
 export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLogged }) => {
   const [seconds, setSeconds] = useState(0);
   const [isActive, setIsActive] = useState(true);
-  const [disposition, setDisposition] = useState<'REACHED' | 'NO_ANSWER' | 'BUSY' | 'WRONG_NUMBER'>('REACHED');
+  const [disposition, setDisposition] = useState<'REACHED' | 'NO_ANSWER' | 'BUSY' | 'WRONG_NUMBER'>(
+    'REACHED',
+  );
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
@@ -83,7 +85,9 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
                   Click-to-Call Telefonie (§7.1a)
                 </span>
               </div>
-              <div className="text-xs text-slate-400 font-mono">{contact.phone || 'Keine Nummer'}</div>
+              <div className="text-xs text-slate-400 font-mono">
+                {contact.phone || 'Keine Nummer'}
+              </div>
             </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-200">
@@ -96,7 +100,9 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-emerald-400" />
             <span className="text-xs text-slate-400">Gesprächsdauer:</span>
-            <span className="text-base font-bold font-mono text-slate-100">{formatTimer(seconds)}</span>
+            <span className="text-base font-bold font-mono text-slate-100">
+              {formatTimer(seconds)}
+            </span>
           </div>
 
           <button
@@ -116,7 +122,9 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
         {/* Form */}
         <form onSubmit={handleSave} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">Gesprächs-Ergebnis</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+              Gesprächs-Ergebnis
+            </label>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
               {[
                 { key: 'REACHED', label: 'Erreicht' },
@@ -141,7 +149,9 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Gesprächsnotiz / Zusammenfassung</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">
+              Gesprächsnotiz / Zusammenfassung
+            </label>
             <textarea
               rows={3}
               placeholder="Notizen zum Telefonat festhalten..."

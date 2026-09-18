@@ -1,19 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Search, 
-  Users, 
-  Building2, 
-  KanbanSquare, 
-  Calendar, 
-  CheckSquare, 
-  Zap, 
-  Mail, 
-  Sparkles, 
-  BarChart3, 
-  Settings, 
+import {
+  Search,
+  Users,
+  Building2,
+  KanbanSquare,
+  Calendar,
+  CheckSquare,
+  Zap,
+  Mail,
+  Sparkles,
+  BarChart3,
+  Settings,
   MapPin,
-  X
+  X,
 } from 'lucide-react';
 
 interface CommandPaletteProps {
@@ -47,28 +47,58 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     { label: 'Firmen & B2B', path: '/companies', icon: Building2, category: 'CRM Kern' },
     { label: 'Termine & Kalender', path: '/calendar', icon: Calendar, category: 'CRM Kern' },
     { label: 'Aufgaben / Todos', path: '/todos', icon: CheckSquare, category: 'CRM Kern' },
-    { label: 'Automatisierung & Workflows', path: '/automations', icon: Zap, category: 'Automatisierung' },
+    {
+      label: 'Automatisierung & Workflows',
+      path: '/automations',
+      icon: Zap,
+      category: 'Automatisierung',
+    },
     { label: 'E-Mail Inbox & Tagging', path: '/inbox', icon: Mail, category: 'Kommunikation' },
     { label: 'KI-Copilot & Research', path: '/agent', icon: Sparkles, category: 'KI & Agent' },
     { label: 'D2D / Gebietskarte', path: '/map', icon: MapPin, category: 'Feldvertrieb' },
-    { label: 'Vertriebs-Report & Forecast', path: '/reports', icon: BarChart3, category: 'Reporting' },
-    { label: 'Systemeinstellungen & 2FA', path: '/settings', icon: Settings, category: 'Administration' },
+    {
+      label: 'Vertriebs-Report & Forecast',
+      path: '/reports',
+      icon: BarChart3,
+      category: 'Reporting',
+    },
+    {
+      label: 'Systemeinstellungen & 2FA',
+      path: '/settings',
+      icon: Settings,
+      category: 'Administration',
+    },
   ];
 
   const searchResults = [
     { label: 'Dr. Michael Weber (Kontakt)', path: '/contacts', icon: Users, category: 'Kontakte' },
     { label: 'Sabine Mustermann (Kontakt)', path: '/contacts', icon: Users, category: 'Kontakte' },
-    { label: 'Energie Südwest GmbH (Firma)', path: '/companies', icon: Building2, category: 'Firmen' },
-    { label: '30 kWp Gewerbedach Solaranlage (Deal)', path: '/deals', icon: KanbanSquare, category: 'Deals' },
-    { label: 'Wärmepumpe & 15 kWp PV (Deal)', path: '/deals', icon: KanbanSquare, category: 'Deals' },
+    {
+      label: 'Energie Südwest GmbH (Firma)',
+      path: '/companies',
+      icon: Building2,
+      category: 'Firmen',
+    },
+    {
+      label: '30 kWp Gewerbedach Solaranlage (Deal)',
+      path: '/deals',
+      icon: KanbanSquare,
+      category: 'Deals',
+    },
+    {
+      label: 'Wärmepumpe & 15 kWp PV (Deal)',
+      path: '/deals',
+      icon: KanbanSquare,
+      category: 'Deals',
+    },
   ];
 
   const filteredLinks = quickLinks.filter((item) =>
-    item.label.toLowerCase().includes(query.toLowerCase())
+    item.label.toLowerCase().includes(query.toLowerCase()),
   );
 
   const filteredResults = searchResults.filter((item) =>
-    item.label.toLowerCase().includes(query.toLowerCase())
+    item.label.toLowerCase().includes(query.toLowerCase()),
   );
 
   const handleSelect = (path: string) => {
@@ -99,7 +129,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         <div className="max-h-96 overflow-y-auto p-2 space-y-3 divide-y divide-slate-800/60">
           {query.trim().length > 0 && filteredResults.length > 0 && (
             <div className="space-y-1">
-              <span className="text-[10px] font-bold uppercase text-slate-500 px-3 tracking-wider">Suchtreffer</span>
+              <span className="text-[10px] font-bold uppercase text-slate-500 px-3 tracking-wider">
+                Suchtreffer
+              </span>
               {filteredResults.map((item) => {
                 const Icon = item.icon;
                 return (
@@ -120,7 +152,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
           )}
 
           <div className="space-y-1 pt-2">
-            <span className="text-[10px] font-bold uppercase text-slate-500 px-3 tracking-wider">Navigation & Module</span>
+            <span className="text-[10px] font-bold uppercase text-slate-500 px-3 tracking-wider">
+              Navigation & Module
+            </span>
             {filteredLinks.map((item) => {
               const Icon = item.icon;
               return (
@@ -142,8 +176,22 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
 
         {/* Footer Shortcut hints */}
         <div className="p-3 bg-slate-950 border-t border-slate-800 text-[11px] text-slate-500 flex items-center justify-between px-4">
-          <span>Drücken Sie <kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-300 font-mono">ESC</kbd> zum Schließen</span>
-          <span><kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-300 font-mono">⌘K</kbd> / <kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-300 font-mono">Ctrl+K</kbd></span>
+          <span>
+            Drücken Sie{' '}
+            <kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-300 font-mono">
+              ESC
+            </kbd>{' '}
+            zum Schließen
+          </span>
+          <span>
+            <kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-300 font-mono">
+              ⌘K
+            </kbd>{' '}
+            /{' '}
+            <kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-300 font-mono">
+              Ctrl+K
+            </kbd>
+          </span>
         </div>
       </div>
     </div>

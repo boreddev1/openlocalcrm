@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/email"
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 type EmailHandler struct {
@@ -30,6 +31,9 @@ func (h *EmailHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to list email messages"}`, http.StatusInternalServerError)
 		return
 	}
+	if messages == nil {
+		messages = make([]db.EmailMessage, 0)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(messages)
@@ -46,6 +50,9 @@ func (h *EmailHandler) GetThread(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, `{"error":"failed to fetch thread"}`, http.StatusInternalServerError)
 		return
+	}
+	if messages == nil {
+		messages = make([]db.EmailMessage, 0)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/notification"
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 type NotificationHandler struct {
@@ -22,6 +23,9 @@ func (h *NotificationHandler) ListUnread(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		http.Error(w, `{"error":"failed to fetch notifications"}`, http.StatusInternalServerError)
 		return
+	}
+	if items == nil {
+		items = make([]db.Notification, 0)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

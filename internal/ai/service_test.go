@@ -58,14 +58,65 @@ func TestGemma12BEmailTriage(t *testing.T) {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || (len(s) > len(substr) && stringIndex(s, substr) >= 0))
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || (len(s) > 0 && len(substr) > 0 && searchSubstring(s, substr)))
 }
 
-func stringIndex(s, substr string) int {
+func searchSubstring(s, substr string) bool {
 	for i := 0; i+len(substr) <= len(s); i++ {
 		if s[i:i+len(substr)] == substr {
-			return i
+			return true
 		}
 	}
-	return -1
+	return false
+}
+
+func TestObservabilityService(t *testing.T) {
+	ctx := context.Background()
+	obs := ai.NewObservabilityService()
+
+	obs.Record(ctx, ai.AIAuditLog{
+		ID:                 "log-1",
+		InteractionType:    "TRIAGE",
+		ModelName:          "gemma2:12b",
+		Provider:           "Ollama",
+		LatencyMs:          120,
+		PIIFilterTriggered: true,
+		PIIRedactionsCount: 1,
+	})
+
+	logs := obs.GetRecentLogs(10)
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+
+	stats := obs.GetStats()
+	if stats.TotalInteractions != 1 {
+		t.Fatalf("expected 1 interaction, got %d", stats.TotalInteractions)
+	}
+	if stats.TotalPIIBlocked != 1 {
+		t.Fatalf("expected 1 PII blocked, got %d", stats.TotalPIIBlocked)
+	}
+}
+
+func TestCopilotChatService(t *testing.T) {
+	ctx := context.Background()
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaModel:     "gemma2:12b",
+	})
+	obs := ai.NewObservabilityService()
+	chatSvc := ai.NewChatService(gw, obs)
+
+	resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
+		Messages: []ai.ChatMessage{
+			{Role: "user", Content: "Was ist der aktuelle Status von Dr. Weber?"},
+		},
+		Context: "Deals Pipeline: 5 open deals",
+	})
+	if err != nil {
+		t.Fatalf("expected successful chat response, got: %v", err)
+	}
+	if resp.Reply == "" {
+		t.Fatalf("expected non-empty copilot response")
+	}
 }

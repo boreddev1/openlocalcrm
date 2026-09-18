@@ -1,7 +1,25 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, getFieldText } from '../api/client';
-import { Plus, Globe, Phone, Mail, MapPin, X, Search, Sparkles, Building2, Edit3, Trash2, Users, DollarSign, FileText, AlertCircle, CheckCircle2, MessageSquare } from 'lucide-react';
+import {
+  Plus,
+  Globe,
+  Phone,
+  Mail,
+  MapPin,
+  X,
+  Search,
+  Sparkles,
+  Building2,
+  Edit3,
+  Trash2,
+  Users,
+  DollarSign,
+  FileText,
+  AlertCircle,
+  CheckCircle2,
+  MessageSquare,
+} from 'lucide-react';
 import { ActivityLogDrawer } from '../components/notes/ActivityLogDrawer';
 
 export const CompaniesPage: React.FC = () => {
@@ -25,10 +43,11 @@ export const CompaniesPage: React.FC = () => {
   });
 
   const createMutation = useMutation({
-    mutationFn: (newComp: any) => apiFetch('/api/v1/companies', {
-      method: 'POST',
-      body: JSON.stringify(newComp),
-    }),
+    mutationFn: (newComp: any) =>
+      apiFetch('/api/v1/companies', {
+        method: 'POST',
+        body: JSON.stringify(newComp),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['companies'] });
       setIsModalOpen(false);
@@ -38,10 +57,11 @@ export const CompaniesPage: React.FC = () => {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (comp: any) => apiFetch(`/api/v1/companies/${comp.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(comp),
-    }),
+    mutationFn: (comp: any) =>
+      apiFetch(`/api/v1/companies/${comp.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(comp),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['companies'] });
       setEditingCompany(null);
@@ -51,9 +71,10 @@ export const CompaniesPage: React.FC = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (compId: string) => apiFetch(`/api/v1/companies/${compId}`, {
-      method: 'DELETE',
-    }),
+    mutationFn: (compId: string) =>
+      apiFetch(`/api/v1/companies/${compId}`, {
+        method: 'DELETE',
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['companies'] });
       setDeletingCompany(null);
@@ -94,7 +115,9 @@ export const CompaniesPage: React.FC = () => {
     setIsResearching(true);
     setResearchResult(null);
 
-    const domain = comp.domain || (comp.email?.includes('@') ? comp.email.split('@')[1] : 'energie-dach-frankfurt.de');
+    const domain =
+      comp.domain ||
+      (comp.email?.includes('@') ? comp.email.split('@')[1] : 'energie-dach-frankfurt.de');
     try {
       const res = await apiFetch<any>('/api/v1/ai/research/company', {
         method: 'POST',
@@ -104,7 +127,8 @@ export const CompaniesPage: React.FC = () => {
     } catch {
       setResearchResult({
         site_title: `${comp.name} — Web-Recherche`,
-        summary: 'Führender Fachbetrieb für Solarenergie, Aufdach-Anlagen und Speicherlösungen in Hessen.',
+        summary:
+          'Führender Fachbetrieb für Solarenergie, Aufdach-Anlagen und Speicherlösungen in Hessen.',
         industry_tags: ['#PV', '#Photovoltaik', '#Gewerbekunden', '#B2B'],
         value_proposition: 'Komplettlösungen von der Beratung über Montage bis zur Einspeisung.',
       });
@@ -133,7 +157,9 @@ export const CompaniesPage: React.FC = () => {
             <Building2 className="w-6 h-6 text-emerald-400" />
             Firmen & Accounts (§3.2)
           </h1>
-          <p className="text-sm text-slate-400">Unternehmensdaten, Lifecycle-Phasen, Handelsregister & KI-Web-Recherche</p>
+          <p className="text-sm text-slate-400">
+            Unternehmensdaten, Lifecycle-Phasen, Handelsregister & KI-Web-Recherche
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -189,7 +215,9 @@ export const CompaniesPage: React.FC = () => {
         {isLoading ? (
           <div className="col-span-full py-12 text-center text-slate-500">Lade Firmen...</div>
         ) : filteredCompanies.length === 0 ? (
-          <div className="col-span-full py-12 text-center text-slate-500">Keine Firmen gefunden.</div>
+          <div className="col-span-full py-12 text-center text-slate-500">
+            Keine Firmen gefunden.
+          </div>
         ) : (
           filteredCompanies.map((comp) => {
             const name = comp.name;
@@ -202,8 +230,8 @@ export const CompaniesPage: React.FC = () => {
             const status = comp.lifecycle_status || 'LEAD';
 
             return (
-              <div 
-                key={comp.id} 
+              <div
+                key={comp.id}
                 className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4 hover:border-slate-700 transition-all flex flex-col justify-between"
               >
                 <div className="space-y-3">
@@ -246,16 +274,22 @@ export const CompaniesPage: React.FC = () => {
                     )}
                     {city && (
                       <div className="flex items-center gap-2">
-                        <MapPin className="w-3.5 h-3.5 text-slate-500" /> {street ? `${street}, ` : ''}{zip} {city}
+                        <MapPin className="w-3.5 h-3.5 text-slate-500" />{' '}
+                        {street ? `${street}, ` : ''}
+                        {zip} {city}
                       </div>
                     )}
                     {(comp.employee_count || comp.annual_revenue) && (
                       <div className="flex items-center gap-4 text-[11px] text-slate-400 pt-1">
                         {comp.employee_count && (
-                          <span className="flex items-center gap-1"><Users className="w-3 h-3 text-slate-500" /> {comp.employee_count} MA</span>
+                          <span className="flex items-center gap-1">
+                            <Users className="w-3 h-3 text-slate-500" /> {comp.employee_count} MA
+                          </span>
                         )}
                         {comp.annual_revenue && (
-                          <span className="flex items-center gap-1"><DollarSign className="w-3 h-3 text-slate-500" /> {comp.annual_revenue}</span>
+                          <span className="flex items-center gap-1">
+                            <DollarSign className="w-3 h-3 text-slate-500" /> {comp.annual_revenue}
+                          </span>
                         )}
                       </div>
                     )}
@@ -288,17 +322,19 @@ export const CompaniesPage: React.FC = () => {
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => setEditingCompany({
-                        ...comp,
-                        name,
-                        domain,
-                        phone,
-                        email,
-                        address_street: street,
-                        address_zip: zip,
-                        address_city: city,
-                        lifecycle_status: status,
-                      })}
+                      onClick={() =>
+                        setEditingCompany({
+                          ...comp,
+                          name,
+                          domain,
+                          phone,
+                          email,
+                          address_street: street,
+                          address_zip: zip,
+                          address_city: city,
+                          lifecycle_status: status,
+                        })
+                      }
                       className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-colors"
                       title="Firma bearbeiten"
                       aria-label="Bearbeiten"
@@ -338,7 +374,10 @@ export const CompaniesPage: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="font-bold text-slate-100 text-lg">Neue Firma anlegen (§3.2)</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -346,7 +385,9 @@ export const CompaniesPage: React.FC = () => {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Firmenname *</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Firmenname *
+                  </label>
                   <input
                     required
                     type="text"
@@ -357,7 +398,9 @@ export const CompaniesPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Rechtsform</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Rechtsform
+                  </label>
                   <select
                     value={formData.legal_form}
                     onChange={(e) => setFormData({ ...formData, legal_form: e.target.value })}
@@ -375,7 +418,9 @@ export const CompaniesPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Domain / Website</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Domain / Website
+                  </label>
                   <input
                     type="text"
                     placeholder="energie-suedwest.de"
@@ -408,7 +453,9 @@ export const CompaniesPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Lifecycle-Status (§3.2)</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Lifecycle-Status (§3.2)
+                  </label>
                   <select
                     value={formData.lifecycle_status}
                     onChange={(e) => setFormData({ ...formData, lifecycle_status: e.target.value })}
@@ -488,7 +535,10 @@ export const CompaniesPage: React.FC = () => {
                 <Edit3 className="w-5 h-5 text-emerald-400" />
                 <span>Firma bearbeiten</span>
               </h3>
-              <button onClick={() => setEditingCompany(null)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setEditingCompany(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -496,7 +546,9 @@ export const CompaniesPage: React.FC = () => {
             <form onSubmit={handleUpdate} className="space-y-4">
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Firmenname *</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Firmenname *
+                  </label>
                   <input
                     required
                     type="text"
@@ -506,10 +558,14 @@ export const CompaniesPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Rechtsform</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Rechtsform
+                  </label>
                   <select
                     value={editingCompany.legal_form || 'GmbH'}
-                    onChange={(e) => setEditingCompany({ ...editingCompany, legal_form: e.target.value })}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, legal_form: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   >
                     <option value="GmbH">GmbH</option>
@@ -528,7 +584,9 @@ export const CompaniesPage: React.FC = () => {
                   <input
                     type="text"
                     value={editingCompany.domain || ''}
-                    onChange={(e) => setEditingCompany({ ...editingCompany, domain: e.target.value })}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, domain: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -537,7 +595,9 @@ export const CompaniesPage: React.FC = () => {
                   <input
                     type="text"
                     value={editingCompany.phone || ''}
-                    onChange={(e) => setEditingCompany({ ...editingCompany, phone: e.target.value })}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, phone: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -549,15 +609,21 @@ export const CompaniesPage: React.FC = () => {
                   <input
                     type="text"
                     value={editingCompany.industry || ''}
-                    onChange={(e) => setEditingCompany({ ...editingCompany, industry: e.target.value })}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, industry: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Lifecycle-Status (§3.2)</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Lifecycle-Status (§3.2)
+                  </label>
                   <select
                     value={editingCompany.lifecycle_status || 'LEAD'}
-                    onChange={(e) => setEditingCompany({ ...editingCompany, lifecycle_status: e.target.value })}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, lifecycle_status: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   >
                     <option value="LEAD">Lead (Neu)</option>
@@ -577,7 +643,9 @@ export const CompaniesPage: React.FC = () => {
                   <input
                     type="text"
                     value={editingCompany.address_street || ''}
-                    onChange={(e) => setEditingCompany({ ...editingCompany, address_street: e.target.value })}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, address_street: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -586,7 +654,9 @@ export const CompaniesPage: React.FC = () => {
                   <input
                     type="text"
                     value={editingCompany.address_zip || ''}
-                    onChange={(e) => setEditingCompany({ ...editingCompany, address_zip: e.target.value })}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, address_zip: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -595,7 +665,9 @@ export const CompaniesPage: React.FC = () => {
                   <input
                     type="text"
                     value={editingCompany.address_city || ''}
-                    onChange={(e) => setEditingCompany({ ...editingCompany, address_city: e.target.value })}
+                    onChange={(e) =>
+                      setEditingCompany({ ...editingCompany, address_city: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -631,7 +703,9 @@ export const CompaniesPage: React.FC = () => {
               <h3 className="font-bold text-slate-100 text-base">Firma wirklich löschen?</h3>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Möchten Sie die Firma <strong className="text-slate-100">{deletingCompany.name}</strong> unwiderruflich löschen? Alle Verknüpfungen werden DSGVO-konform bereinigt (§9.3).
+              Möchten Sie die Firma{' '}
+              <strong className="text-slate-100">{deletingCompany.name}</strong> unwiderruflich
+              löschen? Alle Verknüpfungen werden DSGVO-konform bereinigt (§9.3).
             </p>
             <div className="flex justify-end gap-3 pt-3">
               <button
@@ -663,7 +737,10 @@ export const CompaniesPage: React.FC = () => {
                   Gemma 12B Recherche: {researchModal.name}
                 </h3>
               </div>
-              <button onClick={() => setResearchModal(null)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setResearchModal(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -671,23 +748,33 @@ export const CompaniesPage: React.FC = () => {
             {isResearching ? (
               <div className="py-8 text-center space-y-3">
                 <Sparkles className="w-8 h-8 text-purple-400 animate-spin mx-auto" />
-                <p className="text-xs text-slate-300">Gemma 12B durchsucht Website, extrahiert Nutzenversprechen & Branchen-Tags...</p>
+                <p className="text-xs text-slate-300">
+                  Gemma 12B durchsucht Website, extrahiert Nutzenversprechen & Branchen-Tags...
+                </p>
               </div>
             ) : researchResult ? (
               <div className="space-y-3 text-xs">
                 <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
-                  <span className="text-[10px] text-slate-500 font-semibold uppercase">Seitentitel & Domain</span>
-                  <div className="text-slate-200 font-bold">{researchResult.site_title || researchModal.name}</div>
+                  <span className="text-[10px] text-slate-500 font-semibold uppercase">
+                    Seitentitel & Domain
+                  </span>
+                  <div className="text-slate-200 font-bold">
+                    {researchResult.site_title || researchModal.name}
+                  </div>
                 </div>
 
                 <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
-                  <span className="text-[10px] text-slate-500 font-semibold uppercase">KI-Zusammenfassung & Angebot</span>
+                  <span className="text-[10px] text-slate-500 font-semibold uppercase">
+                    KI-Zusammenfassung & Angebot
+                  </span>
                   <p className="text-slate-300 leading-relaxed">{researchResult.summary}</p>
                 </div>
 
                 {researchResult.value_proposition && (
                   <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
-                    <span className="text-[10px] text-slate-500 font-semibold uppercase">Nutzenversprechen (Pitch)</span>
+                    <span className="text-[10px] text-slate-500 font-semibold uppercase">
+                      Nutzenversprechen (Pitch)
+                    </span>
                     <p className="text-slate-300">{researchResult.value_proposition}</p>
                   </div>
                 )}
@@ -695,7 +782,10 @@ export const CompaniesPage: React.FC = () => {
                 {researchResult.industry_tags && (
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {researchResult.industry_tags.map((t: string, idx: number) => (
-                      <span key={idx} className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] font-mono">
+                      <span
+                        key={idx}
+                        className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] font-mono"
+                      >
                         {t}
                       </span>
                     ))}
@@ -706,7 +796,9 @@ export const CompaniesPage: React.FC = () => {
                   <button
                     onClick={() => {
                       setResearchModal(null);
-                      setFeedbackBanner(`Recherche-Ergebnis für ${researchModal.name} als Account-Notiz gespeichert!`);
+                      setFeedbackBanner(
+                        `Recherche-Ergebnis für ${researchModal.name} als Account-Notiz gespeichert!`,
+                      );
                       setTimeout(() => setFeedbackBanner(null), 5000);
                     }}
                     className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition-colors"

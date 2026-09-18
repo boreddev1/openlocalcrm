@@ -40,11 +40,14 @@ export class ErrorBoundary extends Component<Props, State> {
   private handleCopyDetails = () => {
     const { error, errorInfo } = this.state;
     const text = `OpenLocalCRM Error Report\n-------------------------\nTime: ${new Date().toISOString()}\nURL: ${window.location.href}\nError: ${error?.message || 'Unknown'}\nStack: ${error?.stack || 'N/A'}\nComponent Stack: ${errorInfo?.componentStack || 'N/A'}`;
-    
-    navigator.clipboard.writeText(text).then(() => {
-      this.setState({ copied: true });
-      setTimeout(() => this.setState({ copied: false }), 2500);
-    }).catch(() => {});
+
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        this.setState({ copied: true });
+        setTimeout(() => this.setState({ copied: false }), 2500);
+      })
+      .catch(() => {});
   };
 
   public render() {
@@ -59,8 +62,12 @@ export class ErrorBoundary extends Component<Props, State> {
                 <AlertTriangle className="w-6 h-6" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-slate-100">Ein unerwarteter Fehler ist aufgetreten</h1>
-                <p className="text-sm text-slate-400">OpenLocalCRM hat die Benutzeroberfläche isoliert.</p>
+                <h1 className="text-xl font-bold text-slate-100">
+                  Ein unerwarteter Fehler ist aufgetreten
+                </h1>
+                <p className="text-sm text-slate-400">
+                  OpenLocalCRM hat die Benutzeroberfläche isoliert.
+                </p>
               </div>
             </div>
 
@@ -91,7 +98,11 @@ export class ErrorBoundary extends Component<Props, State> {
                 onClick={this.handleCopyDetails}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-300 font-medium text-sm transition-colors border border-slate-700/60 ml-auto"
               >
-                {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                {copied ? (
+                  <Check className="w-4 h-4 text-emerald-400" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
                 {copied ? 'Kopiert!' : 'Diagnose kopieren'}
               </button>
             </div>

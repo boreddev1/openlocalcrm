@@ -15,7 +15,7 @@ import (
 
 func TestNoteHandlerEndpoints(t *testing.T) {
 	hub := sse.NewHub()
-	svc := note.NewService(hub)
+	svc := note.NewService(nil, hub)
 	h := handlers.NewNoteHandler(svc, nil)
 
 	r := chi.NewRouter()

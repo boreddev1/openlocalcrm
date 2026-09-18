@@ -3,7 +3,7 @@ name: Build & Publish Container Images to GHCR
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*.*.*' ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 env:
@@ -43,13 +43,13 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.SERVER_IMAGE }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
             type=ref,event=tag
             type=sha,format=short
 
       # Build and push Server Image
       - name: Build & Push Server Container
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.server
@@ -67,13 +67,13 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.WORKER_IMAGE }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
             type=ref,event=tag
             type=sha,format=short
 
       # Build and push Worker Image
       - name: Build & Push Worker Container
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.worker
@@ -96,10 +96,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Go 1.22
-        uses: actions/setup-go@v5
+      - name: Set up Go
+        uses: actions/setup-go@v7
         with:
-          go-version: '1.22'
+          go-version-file: 'go.mod'
 
       - name: Set up Node.js & pnpm
         uses: actions/setup-node@v4
@@ -107,7 +107,7 @@ jobs:
           node-version: 20
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: latest
 
@@ -117,23 +117,41 @@ jobs:
       - name: Compile Multi-Platform Standalone Binaries
         run: |
           mkdir -p dist-bin
-          # Linux AMD64
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o dist-bin/crm-server-linux-amd64 ./cmd/server
-          # Linux ARM64
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o dist-bin/crm-server-linux-arm64 ./cmd/server
-          # macOS ARM64 (Apple Silicon)
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o dist-bin/crm-server-darwin-arm64 ./cmd/server
-          # macOS AMD64 (Intel)
-          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-w -s" -o dist-bin/crm-server-darwin-amd64 ./cmd/server
-          # Windows AMD64 Launcher
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-w -s -H=windowsgui -X github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildCommit=${{ github.sha }} -X github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildDate=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o dist-bin/openlocalcrm-setup.exe ./cmd/setup-launcher
+          LAUNCHER_LDFLAGS="-w -s -X github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildCommit=${{ github.sha }} -X github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildDate=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          # 1. Launcher: Windows AMD64 GUI (silent) & Debug (console)
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="${LAUNCHER_LDFLAGS} -H=windowsgui" -o dist-bin/openlocalcrm-setup.exe ./cmd/setup-launcher
+          cp dist-bin/openlocalcrm-setup.exe dist-bin/openlocalcrm-setup-windows-amd64.exe
           cp dist-bin/openlocalcrm-setup.exe dist-bin/mavalio-setup.exe
-          # Windows AMD64 Launcher Debug
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-w -s -X github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildCommit=${{ github.sha }} -X github.com/openlocalcrm/openlocalcrm/internal/launcher.BuildDate=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -o dist-bin/openlocalcrm-setup-debug.exe ./cmd/setup-launcher
+
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="${LAUNCHER_LDFLAGS}" -o dist-bin/openlocalcrm-setup-debug.exe ./cmd/setup-launcher
           cp dist-bin/openlocalcrm-setup-debug.exe dist-bin/mavalio-setup-debug.exe
 
+          # 2. Launcher: macOS (Apple Silicon & Intel)
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="${LAUNCHER_LDFLAGS}" -o dist-bin/openlocalcrm-setup-darwin-arm64 ./cmd/setup-launcher
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="${LAUNCHER_LDFLAGS}" -o dist-bin/openlocalcrm-setup-darwin-amd64 ./cmd/setup-launcher
+
+          # 3. Launcher: Linux (x86_64 & ARM64)
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="${LAUNCHER_LDFLAGS}" -o dist-bin/openlocalcrm-setup-linux-amd64 ./cmd/setup-launcher
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="${LAUNCHER_LDFLAGS}" -o dist-bin/openlocalcrm-setup-linux-arm64 ./cmd/setup-launcher
+
+          # 4. Standalone Server Binaries (Linux & macOS)
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o dist-bin/crm-server-linux-amd64 ./cmd/server
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o dist-bin/crm-server-linux-arm64 ./cmd/server
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o dist-bin/crm-server-darwin-arm64 ./cmd/server
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-w -s" -o dist-bin/crm-server-darwin-amd64 ./cmd/server
+
+          # 5. Standalone Worker Binaries (Linux & macOS)
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o dist-bin/crm-worker-linux-amd64 ./cmd/worker
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o dist-bin/crm-worker-linux-arm64 ./cmd/worker
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o dist-bin/crm-worker-darwin-arm64 ./cmd/worker
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-w -s" -o dist-bin/crm-worker-darwin-amd64 ./cmd/worker
+
+          # 6. Generate SHA256 checksums
+          (cd dist-bin && sha256sum * > checksums.txt)
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist-bin/*

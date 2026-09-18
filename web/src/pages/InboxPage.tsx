@@ -16,7 +16,7 @@ import {
   Clock,
   CheckCircle2,
   Brain,
-  Flame
+  Flame,
 } from 'lucide-react';
 
 // --- Prompt Injection Defense Engine (§19.3) ---
@@ -39,21 +39,26 @@ export function analyzePromptInjection(text: string) {
   // Sanitize text by neutralizing injection markers
   let sanitized = text;
   if (hasInjection) {
-    sanitized = text.replace(/(ignore\s+(all\s+)?(previous|prior)\s+instructions|system\s+prompt|dump\s+database|override\s+rules)/gi, '⚠️ [SECURITY FILTER: Malicious instruction neutralized]');
+    sanitized = text.replace(
+      /(ignore\s+(all\s+)?(previous|prior)\s+instructions|system\s+prompt|dump\s+database|override\s+rules)/gi,
+      '⚠️ [SECURITY FILTER: Malicious instruction neutralized]',
+    );
   }
 
   return {
     hasInjection,
     threatCount: matched.length,
     sanitizedText: sanitized,
-    threatDetails: hasInjection ? 'Verdacht auf Prompt-Injection-Angriff (Befehle isoliert & neutralisiert)' : null,
+    threatDetails: hasInjection
+      ? 'Verdacht auf Prompt-Injection-Angriff (Befehle isoliert & neutralisiert)'
+      : null,
   };
 }
 
 // --- Urgency & SLA Deadline Analyzer (§4.3) ---
 export function analyzeUrgencyAndSLA(subject: string, body: string) {
   const fullText = `${subject} ${body}`.toLowerCase();
-  
+
   const urgentKeywords = [
     'dringend',
     'eilig',
@@ -65,7 +70,7 @@ export function analyzeUrgencyAndSLA(subject: string, body: string) {
     'schaden',
     'bis morgen',
     'schnell',
-    'abgelaufen'
+    'abgelaufen',
   ];
 
   const isUrgent = urgentKeywords.some((kw) => fullText.includes(kw));
@@ -85,7 +90,9 @@ export function analyzeUrgencyAndSLA(subject: string, body: string) {
     reason = 'Technischer Notfall / Störungsmeldung (SLA: < 4h)';
   } else if (isUrgent || deadline) {
     slaHours = 8;
-    reason = deadline ? `Fristgebundene Anfrage bis ${deadline} (SLA: < 8h)` : 'Dringender Handlungsbedarf (SLA: < 8h)';
+    reason = deadline
+      ? `Fristgebundene Anfrage bis ${deadline} (SLA: < 8h)`
+      : 'Dringender Handlungsbedarf (SLA: < 8h)';
   }
 
   return {
@@ -115,10 +122,11 @@ export const InboxPage: React.FC = () => {
     'msg-3': ['Wärmepumpe'],
   });
 
-  const { data: messages = [], isLoading } = useQuery<any[]>({
+  const { data: rawMessages = [], isLoading } = useQuery<any[]>({
     queryKey: ['emails'],
     queryFn: () => apiFetch('/api/v1/emails/messages'),
   });
+  const messages = Array.isArray(rawMessages) ? rawMessages : [];
 
   const availableTags = [
     { id: 'PV-Interessent', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
@@ -140,7 +148,10 @@ export const InboxPage: React.FC = () => {
 
       // Auto-tagging based on content & urgency analysis
       if (newMsg && newMsg.id) {
-        const urgency = analyzeUrgencyAndSLA(newMsg.subject || '', newMsg.body_text?.String || newMsg.body_text || '');
+        const urgency = analyzeUrgencyAndSLA(
+          newMsg.subject || '',
+          newMsg.body_text?.String || newMsg.body_text || '',
+        );
         if (urgency.isUrgent) {
           setEmailTags((prev) => ({
             ...prev,
@@ -149,7 +160,9 @@ export const InboxPage: React.FC = () => {
         }
       }
 
-      setFeedbackBanner('Eingehende E-Mail erfolgreich simuliert, analysiert & per Gemma 12B klassifiziert!');
+      setFeedbackBanner(
+        'Eingehende E-Mail erfolgreich simuliert, analysiert & per Gemma 12B klassifiziert!',
+      );
       setTimeout(() => setFeedbackBanner(null), 4000);
     },
   });
@@ -158,7 +171,8 @@ export const InboxPage: React.FC = () => {
     sender_name: 'Dr. Michael Weber',
     sender_email: 'weber@energie-dach.de',
     subject: 'Angebotserstellung PV-Anlage 30 kWp Halle',
-    body_text: 'Sehr geehrtes Team, bitte senden Sie uns ein unverbindliches Angebot für unsere Lagerhalle in Frankfurt inkl. 20 kWh Batteriespeicher.',
+    body_text:
+      'Sehr geehrtes Team, bitte senden Sie uns ein unverbindliches Angebot für unsere Lagerhalle in Frankfurt inkl. 20 kWh Batteriespeicher.',
   });
 
   const handleDemoIngest = (e: React.FormEvent) => {
@@ -205,8 +219,8 @@ export const InboxPage: React.FC = () => {
     if (!selectedMessage) return;
     setIsGeneratingDraft(true);
     setTimeout(() => {
-      let draft = '';
-      
+      let draft: string;
+
       // If prompt injection was attempted, AI safely ignores attacker's prompt
       if (currentSecurityAnalysis?.hasInjection) {
         draft = `Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Nachricht. Ihre Mitteilung wurde empfangen und an unsere zuständige Fachabteilung weitergeleitet.\n\nMit freundlichen Grüßen,\nIhr OpenLocalCRM Kundenservice`;
@@ -219,7 +233,9 @@ export const InboxPage: React.FC = () => {
       }
       setReplyText(draft);
       setIsGeneratingDraft(false);
-      setFeedbackBanner('Gemma 12B: Antwortentwurf erfolgreich generiert (Human-in-the-Loop Prüfung erforderlich)!');
+      setFeedbackBanner(
+        'Gemma 12B: Antwortentwurf erfolgreich generiert (Human-in-the-Loop Prüfung erforderlich)!',
+      );
       setTimeout(() => setFeedbackBanner(null), 4000);
     }, 600);
   };
@@ -248,7 +264,8 @@ export const InboxPage: React.FC = () => {
             E-Mail Inbox, Dringlichkeits-SLA & Prompt-Armor (§4.1–§4.5 / §19.3)
           </h1>
           <p className="text-sm text-slate-400">
-            Zentraler Posteingang mit automatischer Frist- & Dringlichkeitserkennung, Prompt-Injection-Schutz und Gemma 12B Triage
+            Zentraler Posteingang mit automatischer Frist- & Dringlichkeitserkennung,
+            Prompt-Injection-Schutz und Gemma 12B Triage
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -320,9 +337,15 @@ export const InboxPage: React.FC = () => {
             ) : (
               filteredMessages.map((msg) => {
                 const isSelected = selectedMessage?.id === msg.id;
-                const msgTags = emailTags[msg.id] || (msg.id.includes('1') ? ['PV-Interessent'] : []);
-                const urgency = analyzeUrgencyAndSLA(msg.subject || '', msg.body_text?.String || msg.body_text || '');
-                const security = analyzePromptInjection(msg.body_text?.String || msg.body_text || '');
+                const msgTags =
+                  emailTags[msg.id] || (msg.id.includes('1') ? ['PV-Interessent'] : []);
+                const urgency = analyzeUrgencyAndSLA(
+                  msg.subject || '',
+                  msg.body_text?.String || msg.body_text || '',
+                );
+                const security = analyzePromptInjection(
+                  msg.body_text?.String || msg.body_text || '',
+                );
 
                 return (
                   <div
@@ -350,7 +373,10 @@ export const InboxPage: React.FC = () => {
                           </span>
                         )}
                         <span className="text-[10px] text-slate-500">
-                          {new Date(msg.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(msg.received_at).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </span>
                       </div>
                     </div>
@@ -392,7 +418,9 @@ export const InboxPage: React.FC = () => {
                     <span>Prompt-Injection-Angriff abgewehrt & isoliert (§19.3 Prompt Armor)</span>
                   </div>
                   <p className="text-xs text-amber-200/90 leading-relaxed">
-                    Diese E-Mail enthält bösartige Instruktionen zur Manipulation der KI-Logik (z. B. System-Prompt-Leaks oder Datenbank-Befehle). Die Befehle wurden unschädlich gemacht und als passive Nutzdaten gekapselt.
+                    Diese E-Mail enthält bösartige Instruktionen zur Manipulation der KI-Logik (z.
+                    B. System-Prompt-Leaks oder Datenbank-Befehle). Die Befehle wurden unschädlich
+                    gemacht und als passive Nutzdaten gekapselt.
                   </p>
                 </div>
               )}
@@ -420,33 +448,47 @@ export const InboxPage: React.FC = () => {
                     </span>
                   </div>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-bold">
-                    Lead-Score: {currentSecurityAnalysis?.hasInjection ? '10/100 (Sicherheitsrisiko)' : '85/100'}
+                    Lead-Score:{' '}
+                    {currentSecurityAnalysis?.hasInjection
+                      ? '10/100 (Sicherheitsrisiko)'
+                      : '85/100'}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 text-xs">
                   <div className="p-2 bg-slate-900 rounded-xl border border-slate-800">
                     <span className="text-[10px] text-slate-500 block">Wichtigkeit</span>
-                    <span className={`font-bold ${currentUrgencyAnalysis?.isUrgent ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    <span
+                      className={`font-bold ${currentUrgencyAnalysis?.isUrgent ? 'text-rose-400' : 'text-emerald-400'}`}
+                    >
                       {currentUrgencyAnalysis?.isUrgent ? 'Dringend / Eilig' : 'Hoch (needs_reply)'}
                     </span>
                   </div>
                   <div className="p-2 bg-slate-900 rounded-xl border border-slate-800">
                     <span className="text-[10px] text-slate-500 block">Stimmung</span>
                     <span className="text-blue-400 font-bold">
-                      {currentSecurityAnalysis?.hasInjection ? 'Kritisch (Angriff)' : 'Positiv (Kaufinteresse)'}
+                      {currentSecurityAnalysis?.hasInjection
+                        ? 'Kritisch (Angriff)'
+                        : 'Positiv (Kaufinteresse)'}
                     </span>
                   </div>
                   <div className="p-2 bg-slate-900 rounded-xl border border-slate-800">
                     <span className="text-[10px] text-slate-500 block">Kategorie</span>
                     <span className="text-purple-400 font-bold">
-                      {currentSecurityAnalysis?.hasInjection ? 'Sicherheit / Prompt Armor' : 'Photovoltaik / Gewerbe'}
+                      {currentSecurityAnalysis?.hasInjection
+                        ? 'Sicherheit / Prompt Armor'
+                        : 'Photovoltaik / Gewerbe'}
                     </span>
                   </div>
                 </div>
 
                 <p className="text-xs text-slate-300 italic pt-1 border-t border-slate-800/60">
-                  💡 <strong>Zusammenfassung:</strong> {currentSecurityAnalysis?.hasInjection ? 'E-Mail enthält Injectionsversuch. KI-Antwort bleibt neutral und sicher.' : (currentUrgencyAnalysis?.deadline ? `Kunde bittet um PV-Kalkulation mit Rückmeldefrist bis ${currentUrgencyAnalysis.deadline}.` : 'Kunde bittet um detaillierte Ertragskalkulation für Gewerbehalle mit ca. 30 kWp und 20 kWh Speicher.')}
+                  💡 <strong>Zusammenfassung:</strong>{' '}
+                  {currentSecurityAnalysis?.hasInjection
+                    ? 'E-Mail enthält Injectionsversuch. KI-Antwort bleibt neutral und sicher.'
+                    : currentUrgencyAnalysis?.deadline
+                      ? `Kunde bittet um PV-Kalkulation mit Rückmeldefrist bis ${currentUrgencyAnalysis.deadline}.`
+                      : 'Kunde bittet um detaillierte Ertragskalkulation für Gewerbehalle mit ca. 30 kWp und 20 kWh Speicher.'}
                 </p>
               </div>
 
@@ -460,7 +502,9 @@ export const InboxPage: React.FC = () => {
                     </div>
                     <div>
                       <div className="text-sm font-semibold text-slate-200">
-                        {selectedMessage.sender_name?.String || selectedMessage.sender_name || selectedMessage.sender_email}
+                        {selectedMessage.sender_name?.String ||
+                          selectedMessage.sender_name ||
+                          selectedMessage.sender_email}
                       </div>
                       <div className="text-xs text-slate-500">{selectedMessage.sender_email}</div>
                     </div>
@@ -475,23 +519,24 @@ export const InboxPage: React.FC = () => {
                   <span className="text-xs text-slate-500 flex items-center gap-1">
                     <Tag className="w-3.5 h-3.5" /> Tags:
                   </span>
-                  {(emailTags[selectedMessage.id] || (selectedMessage.id.includes('1') ? ['PV-Interessent'] : [])).map(
-                    (tag) => (
-                      <span
-                        key={tag}
-                        className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium"
+                  {(
+                    emailTags[selectedMessage.id] ||
+                    (selectedMessage.id.includes('1') ? ['PV-Interessent'] : [])
+                  ).map((tag) => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium"
+                    >
+                      🏷️ {tag}
+                      <button
+                        onClick={() => handleRemoveTagFromMessage(selectedMessage.id, tag)}
+                        className="hover:text-rose-400 text-slate-400 ml-1 text-xs cursor-pointer"
+                        title="Tag entfernen"
                       >
-                        🏷️ {tag}
-                        <button
-                          onClick={() => handleRemoveTagFromMessage(selectedMessage.id, tag)}
-                          className="hover:text-rose-400 text-slate-400 ml-1 text-xs cursor-pointer"
-                          title="Tag entfernen"
-                        >
-                          ×
-                        </button>
-                      </span>
-                    )
-                  )}
+                        ×
+                      </button>
+                    </span>
+                  ))}
 
                   {isAddingTag ? (
                     <div className="inline-flex items-center gap-1 bg-slate-950 border border-slate-700 rounded-lg p-1">
@@ -501,7 +546,8 @@ export const InboxPage: React.FC = () => {
                         value={newCustomTag}
                         onChange={(e) => setNewCustomTag(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleAddTagToMessage(selectedMessage.id, newCustomTag);
+                          if (e.key === 'Enter')
+                            handleAddTagToMessage(selectedMessage.id, newCustomTag);
                         }}
                         className="bg-transparent text-xs text-slate-100 focus:outline-none px-1 w-24"
                         autoFocus
@@ -548,7 +594,8 @@ export const InboxPage: React.FC = () => {
               <div className="border-t border-slate-800 pt-4 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-semibold text-slate-400">
                   <span className="flex items-center gap-1.5">
-                    <Reply className="w-3.5 h-3.5 text-emerald-400" /> Antworten an {selectedMessage.sender_email}
+                    <Reply className="w-3.5 h-3.5 text-emerald-400" /> Antworten an{' '}
+                    {selectedMessage.sender_email}
                   </span>
 
                   <div className="flex items-center gap-2">
@@ -583,7 +630,9 @@ export const InboxPage: React.FC = () => {
                       disabled={isGeneratingDraft}
                       className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-lg shadow-purple-600/20 transition-colors cursor-pointer"
                     >
-                      <Sparkles className={`w-3.5 h-3.5 ${isGeneratingDraft ? 'animate-spin' : ''}`} />
+                      <Sparkles
+                        className={`w-3.5 h-3.5 ${isGeneratingDraft ? 'animate-spin' : ''}`}
+                      />
                       <span>{isGeneratingDraft ? 'Generiere...' : '⚡ KI-Entwurf'}</span>
                     </button>
                   </div>
@@ -617,7 +666,9 @@ export const InboxPage: React.FC = () => {
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-500 space-y-2">
               <Mail className="w-12 h-12 text-slate-800" />
               <div className="text-sm font-medium">Wähle eine E-Mail aus der Liste aus</div>
-              <div className="text-xs text-slate-600">Eingehende Nachrichten & Tags werden hier im Detail dargestellt</div>
+              <div className="text-xs text-slate-600">
+                Eingehende Nachrichten & Tags werden hier im Detail dargestellt
+              </div>
             </div>
           )}
         </div>
@@ -630,7 +681,12 @@ export const InboxPage: React.FC = () => {
             <h3 className="font-bold text-slate-100 text-lg">Eingehende Test-E-Mail simulieren</h3>
             <form onSubmit={handleDemoIngest} className="space-y-3">
               <div>
-                <label htmlFor="demo-sender-name" className="block text-xs font-medium text-slate-400 mb-1">Absender Name</label>
+                <label
+                  htmlFor="demo-sender-name"
+                  className="block text-xs font-medium text-slate-400 mb-1"
+                >
+                  Absender Name
+                </label>
                 <input
                   id="demo-sender-name"
                   type="text"
@@ -640,7 +696,12 @@ export const InboxPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label htmlFor="demo-sender-email" className="block text-xs font-medium text-slate-400 mb-1">Absender E-Mail</label>
+                <label
+                  htmlFor="demo-sender-email"
+                  className="block text-xs font-medium text-slate-400 mb-1"
+                >
+                  Absender E-Mail
+                </label>
                 <input
                   id="demo-sender-email"
                   type="email"
@@ -650,7 +711,12 @@ export const InboxPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label htmlFor="demo-subject" className="block text-xs font-medium text-slate-400 mb-1">Betreff</label>
+                <label
+                  htmlFor="demo-subject"
+                  className="block text-xs font-medium text-slate-400 mb-1"
+                >
+                  Betreff
+                </label>
                 <input
                   id="demo-subject"
                   type="text"
@@ -660,7 +726,12 @@ export const InboxPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label htmlFor="demo-body-text" className="block text-xs font-medium text-slate-400 mb-1">Nachrichtentext</label>
+                <label
+                  htmlFor="demo-body-text"
+                  className="block text-xs font-medium text-slate-400 mb-1"
+                >
+                  Nachrichtentext
+                </label>
                 <textarea
                   id="demo-body-text"
                   rows={3}

@@ -151,4 +151,3 @@ func (s *Service) Delete(ctx context.Context, actorID, compID pgtype.UUID) error
 	}
 	return nil
 }
-

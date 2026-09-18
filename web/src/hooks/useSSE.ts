@@ -11,7 +11,7 @@ export function useSSE(url: string = '/events/stream') {
 
   useEffect(() => {
     let eventSource: EventSource | null = null;
-    let reconnectTimeout: NodeJS.Timeout;
+    let reconnectTimeout: ReturnType<typeof setTimeout>;
 
     function connect() {
       const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
@@ -20,8 +20,8 @@ export function useSSE(url: string = '/events/stream') {
         return;
       }
 
-      const streamUrl = url.includes('?') 
-        ? `${url}&token=${encodeURIComponent(token)}` 
+      const streamUrl = url.includes('?')
+        ? `${url}&token=${encodeURIComponent(token)}`
         : `${url}?token=${encodeURIComponent(token)}`;
 
       eventSource = new EventSource(streamUrl);

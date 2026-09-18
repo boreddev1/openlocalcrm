@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/sse"
 )
 
@@ -25,16 +28,46 @@ type LogCallInput struct {
 }
 
 type Service struct {
-	sseHub *sse.Hub
+	querier db.Querier
+	sseHub  *sse.Hub
 }
 
-func NewService(sseHub *sse.Hub) *Service {
-	return &Service{sseHub: sseHub}
+func NewService(querier db.Querier, sseHub *sse.Hub) *Service {
+	return &Service{
+		querier: querier,
+		sseHub:  sseHub,
+	}
 }
 
 func (s *Service) LogCall(ctx context.Context, input LogCallInput) (CallActivity, error) {
 	if input.Disposition == "" {
 		input.Disposition = "REACHED"
+	}
+
+	if s.querier != nil {
+		var contactUUID pgtype.UUID
+		if u, err := uuid.Parse(input.ContactID); err == nil {
+			contactUUID = pgtype.UUID{Bytes: u, Valid: true}
+		}
+
+		created, err := s.querier.CreateCallActivity(ctx, db.CreateCallActivityParams{
+			ContactID:       contactUUID,
+			DurationSeconds: int32(input.DurationSeconds),
+			Disposition:     input.Disposition,
+			Notes:           input.Notes,
+		})
+		if err == nil {
+			call := CallActivity{
+				ID:              uuid.UUID(created.ID.Bytes).String(),
+				ContactID:       input.ContactID,
+				DurationSeconds: int(created.DurationSeconds),
+				Disposition:     created.Disposition,
+				Notes:           created.Notes,
+				CreatedAt:       created.CreatedAt.Time,
+			}
+			s.broadcast(call)
+			return call, nil
+		}
 	}
 
 	call := CallActivity{
@@ -43,9 +76,14 @@ func (s *Service) LogCall(ctx context.Context, input LogCallInput) (CallActivity
 		DurationSeconds: input.DurationSeconds,
 		Disposition:     input.Disposition,
 		Notes:           input.Notes,
-		CreatedAt:       time.Now(),
+		CreatedAt:       time.Now().UTC(),
 	}
 
+	s.broadcast(call)
+	return call, nil
+}
+
+func (s *Service) broadcast(call CallActivity) {
 	if s.sseHub != nil {
 		s.sseHub.Broadcast(sse.Event{
 			Type: "call.logged",
@@ -56,6 +94,4 @@ func (s *Service) LogCall(ctx context.Context, input LogCallInput) (CallActivity
 			},
 		})
 	}
-
-	return call, nil
 }

@@ -1,7 +1,21 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../api/client';
-import { X, MessageSquare, PhoneCall, Users, Sparkles, Plus, Edit3, Trash2, Clock, CheckCircle2, ArrowRight, DollarSign, Calendar } from 'lucide-react';
+import {
+  X,
+  MessageSquare,
+  PhoneCall,
+  Users,
+  Sparkles,
+  Plus,
+  Edit3,
+  Trash2,
+  Clock,
+  CheckCircle2,
+  ArrowRight,
+  DollarSign,
+  Calendar,
+} from 'lucide-react';
 
 interface ActivityLogDrawerProps {
   entityType: 'contact' | 'company';
@@ -94,18 +108,33 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
     try {
       const res = await apiFetch<any>('/api/v1/ai/synthesize-notes', {
         method: 'POST',
-        body: JSON.stringify({ entity_type: entityType, entity_id: entityId, notes_count: notes.length }),
+        body: JSON.stringify({
+          entity_type: entityType,
+          entity_id: entityId,
+          notes_count: notes.length,
+        }),
       });
       setSynthesisResult(res);
     } catch {
       setSynthesisResult({
-        executive_summary: 'Kunde plant eine PV-Aufdachanlage mit Speicher. Hoher Eigenverbrauch und Zählerdaten liegen vor.',
+        executive_summary:
+          'Kunde plant eine PV-Aufdachanlage mit Speicher. Hoher Eigenverbrauch und Zählerdaten liegen vor.',
         buying_intent: 'HOCH (80%)',
         sentiment: 'POSITIV',
         key_objections: 'Wartet auf finale Zusage des Netzbetreibers bezüglich Einspeiseleistung.',
         suggested_actions: [
-          { id: 'act1', type: 'CREATE_TODO', label: 'Rückruf bzgl. Einspeisezusage terminieren', due_date: '2026-08-28' },
-          { id: 'act2', type: 'CREATE_DEAL', label: 'Deal anlegen: 20 kWp PV + Speicher', value: '20000.00' },
+          {
+            id: 'act1',
+            type: 'CREATE_TODO',
+            label: 'Rückruf bzgl. Einspeisezusage terminieren',
+            due_date: '2026-08-28',
+          },
+          {
+            id: 'act2',
+            type: 'CREATE_DEAL',
+            label: 'Deal anlegen: 20 kWp PV + Speicher',
+            value: '20000.00',
+          },
         ],
       });
     } finally {
@@ -239,7 +268,9 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
 
             {synthesisResult.suggested_actions && (
               <div className="space-y-1.5 pt-1">
-                <span className="text-[10px] text-slate-500 font-bold uppercase">Empfohlene Aktionen (1-Klick Ausführung):</span>
+                <span className="text-[10px] text-slate-500 font-bold uppercase">
+                  Empfohlene Aktionen (1-Klick Ausführung):
+                </span>
                 {synthesisResult.suggested_actions.map((act: any) => (
                   <div
                     key={act.id}
@@ -312,11 +343,15 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${getTypeBadge(note.type)}`}>
+                    <span
+                      className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${getTypeBadge(note.type)}`}
+                    >
                       {getTypeIcon(note.type)}
                       {note.type}
                     </span>
-                    <span className="text-xs font-semibold text-slate-300">{note.author || 'Mitarbeiter'}</span>
+                    <span className="text-xs font-semibold text-slate-300">
+                      {note.author || 'Mitarbeiter'}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-slate-500">
@@ -325,7 +360,8 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
                         month: '2-digit',
                         hour: '2-digit',
                         minute: '2-digit',
-                      })} Uhr
+                      })}{' '}
+                      Uhr
                     </span>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
@@ -359,7 +395,10 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
           <div className="p-4 bg-slate-950 border-t border-slate-800 space-y-3 shrink-0">
             <div className="flex items-center justify-between text-xs font-bold text-slate-300">
               <span>Notiz bearbeiten</span>
-              <button onClick={() => setEditingNote(null)} className="text-slate-500 hover:text-slate-300">
+              <button
+                onClick={() => setEditingNote(null)}
+                className="text-slate-500 hover:text-slate-300"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>

@@ -195,4 +195,3 @@ func (s *Service) Delete(ctx context.Context, actorID, todoID pgtype.UUID) error
 	}
 	return nil
 }
-

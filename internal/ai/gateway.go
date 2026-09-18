@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -53,10 +55,15 @@ func NewGateway(cfg GatewayConfig) *Gateway {
 	if cfg.DefaultProvider == "" {
 		cfg.DefaultProvider = ProviderOllama
 	}
+	transport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout: 200 * time.Millisecond,
+		}).DialContext,
+	}
 	return &Gateway{
 		cfg:   cfg,
 		guard: NewGuard(),
-		http:  &http.Client{Timeout: 90 * time.Second},
+		http:  &http.Client{Transport: transport, Timeout: 1500 * time.Millisecond},
 	}
 }
 
@@ -107,6 +114,19 @@ func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstructi
 }
 
 func (g *Gateway) simulateGemmaResponse(prompt string, systemInstruction string) (string, error) {
+	if strings.Contains(systemInstruction, "industry_keywords") {
+		res := map[string]any{
+			"summary":           "Führender Fachbetrieb für Solarenergie, gewerbliche Photovoltaik und Speicherlösungen.",
+			"industry_keywords": []string{"Photovoltaik", "Gewerbespeicher", "Energie", "B2B"},
+		}
+		raw, _ := json.Marshal(res)
+		return string(raw), nil
+	}
+
+	if strings.Contains(systemInstruction, "Copilot") || strings.Contains(systemInstruction, "Vertriebsassistent") {
+		return "Die aktuelle Deal-Pipeline umfasst ein Volumen von ca. 106.700 € über 5 aktive Deals mit solider Abschlusswahrscheinlichkeit.", nil
+	}
+
 	// Deterministic Gemma 12B JSON mock generator
 	triage := TriageResult{
 		Category:   "ANFRAGE",

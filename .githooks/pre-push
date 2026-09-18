@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -e
+
+# ==============================================================================
+# OpenLocalCRM Robust Pre-Push Hook
+# Runs fast local test suite & license compliance scan before pushing to remote.
+# Handles branch deletions and GUI Git client environments.
+# ==============================================================================
+
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$HOME/go/bin:/usr/local/go/bin:$HOME/Library/pnpm:$HOME/.local/share/pnpm:$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node 2>/dev/null | tail -n 1)/bin:$HOME/.cargo/bin:$PATH"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Check if this push is only deleting remote branches (skip tests in that case)
+z40="0000000000000000000000000000000000000000"
+all_deletes=true
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    if [ "$local_sha" != "$z40" ] && [ -n "$local_sha" ]; then
+        all_deletes=false
+        break
+    fi
+done
+
+if [ "$all_deletes" = "true" ] && [ -n "$local_sha" ]; then
+    exit 0
+fi
+
+echo -e "${BLUE}${BOLD}🚀 [Pre-Push] Führe finale Tests vor dem Push aus...${NC}"
+
+# 1. Run unit & integration tests + coverage enforcement (>= 50% total & >= 50% new code)
+echo -n "  • Führe Tests mit Code-Coverage & Diff-Prüfung aus (Mindestens 50%)... "
+if command -v go >/dev/null 2>&1 && [ -f "./scripts/coverage.sh" ]; then
+    if ./scripts/coverage.sh --min 50.0 --diff 50.0 > /dev/null 2>&1; then
+        echo -e "${GREEN}OK (Coverage >= 50.0% & Diff >= 50.0%)${NC}"
+    else
+        echo -e "${RED}FEHLER${NC}"
+        echo -e "${RED}❌ Testsuite oder Coverage-Prüfung fehlgeschlagen!${NC}"
+        echo -e "${YELLOW}Führen Sie './scripts/coverage.sh --min 50.0 --diff 50.0' aus, um Details zu sehen.${NC}"
+        exit 1
+    fi
+else
+    echo -e "${YELLOW}Übersprungen (go oder coverage.sh nicht verfügbar)${NC}"
+fi
+
+# 2. Run license compliance
+echo -n "  • Prüfe Open-Source Lizenzkonformität... "
+if [ -f "./scripts/check-licenses.sh" ]; then
+    if ./scripts/check-licenses.sh > /dev/null 2>&1; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FEHLER${NC}"
+        echo -e "${RED}❌ Lizenz-Scan fehlgeschlagen!${NC}"
+        exit 1
+    fi
+fi
+
+echo -e "${GREEN}${BOLD}✅ Pre-Push-Validierung erfolgreich — Push wird fortgesetzt.${NC}"
+exit 0

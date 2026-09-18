@@ -21,4 +21,14 @@ func TestJobKinds(t *testing.T) {
 	workers := river.NewWorkers()
 	queue.RegisterWorkers(workers)
 	// Registration succeeded without panics
+
+	syncWorker := &queue.EmailSyncWorker{}
+	if err := syncWorker.Work(t.Context(), &river.Job[queue.EmailSyncArgs]{Args: syncArgs}); err != nil {
+		t.Fatalf("syncWorker failed: %v", err)
+	}
+
+	triageWorker := &queue.EmailTriageWorker{}
+	if err := triageWorker.Work(t.Context(), &river.Job[queue.EmailTriageArgs]{Args: triageArgs}); err != nil {
+		t.Fatalf("triageWorker failed: %v", err)
+	}
 }

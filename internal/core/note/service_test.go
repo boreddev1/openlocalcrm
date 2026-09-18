@@ -10,7 +10,7 @@ import (
 
 func TestNoteServiceCRUD(t *testing.T) {
 	hub := sse.NewHub()
-	svc := note.NewService(hub)
+	svc := note.NewService(nil, hub)
 	ctx := context.Background()
 
 	// 1. Initial list

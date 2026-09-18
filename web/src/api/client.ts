@@ -22,7 +22,7 @@ export class ApiError extends Error {
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
   const headers = new Headers(options.headers || {});
-  
+
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
@@ -38,7 +38,10 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
       credentials: 'include',
     });
   } catch (netErr: any) {
-    throw new ApiError(0, `Verbindung zum Server fehlgeschlagen (${netErr?.message || 'Netzwerkfehler'})`);
+    throw new ApiError(
+      0,
+      `Verbindung zum Server fehlgeschlagen (${netErr?.message || 'Netzwerkfehler'})`,
+    );
   }
 
   if (res.ok) {

@@ -197,4 +197,3 @@ func (s *Service) Delete(ctx context.Context, actorID pgtype.UUID, id pgtype.UUI
 	}
 	return nil
 }
-

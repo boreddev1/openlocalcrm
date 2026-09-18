@@ -40,7 +40,8 @@ export const DemoBanner: React.FC = () => {
       <div className="flex items-center gap-2 font-medium">
         <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
         <span>
-          <strong className="font-bold text-amber-300">Demo-Modus aktiv:</strong> Autarke In-Memory Testumgebung ohne externe PostgreSQL-Datenbank.
+          <strong className="font-bold text-amber-300">Demo-Modus aktiv:</strong> Autarke In-Memory
+          Testumgebung ohne externe PostgreSQL-Datenbank.
         </span>
         {user && (
           <span className="hidden md:inline-block bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20 text-amber-300">
@@ -67,7 +68,8 @@ export const DemoBanner: React.FC = () => {
         <button
           onClick={() => setClosed(true)}
           className="p-1 hover:bg-amber-500/20 rounded text-amber-400/70 hover:text-amber-300 transition-colors ml-1"
-          title="Banner für diese Sitzung schließen"
+          title="Banner ausblenden"
+          aria-label="Banner ausblenden"
         >
           <X className="w-3.5 h-3.5" />
         </button>

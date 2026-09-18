@@ -45,6 +45,33 @@ esac
 BINARY_NAME="openlocalcrm-setup-${OS}-${ARCH}"
 echo -e "Erkannt: ${GREEN}${OS} (${ARCH})${NC} -> ${BINARY_NAME}"
 
+# Detect requested version from args or env var
+REQUESTED_VERSION="${OPENLOCALCRM_VERSION:-""}"
+FORWARD_ARGS=()
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --version|-v|--tag)
+            if [ "$#" -gt 1 ]; then
+                REQUESTED_VERSION="$2"
+                FORWARD_ARGS+=("$1" "$2")
+                shift 2
+            else
+                shift
+            fi
+            ;;
+        --version=*|--tag=*)
+            REQUESTED_VERSION="${1#*=}"
+            FORWARD_ARGS+=("$1")
+            shift
+            ;;
+        *)
+            FORWARD_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
 # 3. Determine Installation Destination
 INSTALL_DIR="/usr/local/bin"
 USE_SUDO=false
@@ -68,16 +95,35 @@ TEMP_DOWNLOAD="$(mktemp -t openlocalcrm-install.XXXXXX)"
 trap 'rm -f "${TEMP_DOWNLOAD}"' EXIT
 
 # 4. Download Binary
-REPO_URL="https://raw.githubusercontent.com/boreddev1/openlocalcrm/main/bin/${BINARY_NAME}"
-RELEASE_URL="https://github.com/boreddev1/openlocalcrm/releases/latest/download/${BINARY_NAME}"
-
-echo -e "Lade OpenLocalCRM Launcher herunter..."
-
-if curl -fsSL -H "User-Agent: OpenLocalCRM-Installer" "${RELEASE_URL}" -o "${TEMP_DOWNLOAD}" 2>/dev/null; then
-    echo -e "${GREEN}✅ Download von GitHub Releases erfolgreich.${NC}"
-elif curl -fsSL -H "User-Agent: OpenLocalCRM-Installer" "${REPO_URL}" -o "${TEMP_DOWNLOAD}"; then
-    echo -e "${GREEN}✅ Download aus Repository erfolgreich.${NC}"
+if [ -n "${REQUESTED_VERSION}" ]; then
+    TAGGED_RELEASE_URL="https://github.com/boreddev1/openlocalcrm/releases/download/${REQUESTED_VERSION}/${BINARY_NAME}"
+    TAGGED_REPO_URL="https://raw.githubusercontent.com/boreddev1/openlocalcrm/${REQUESTED_VERSION}/bin/${BINARY_NAME}"
 else
+    TAGGED_RELEASE_URL=""
+    TAGGED_REPO_URL=""
+fi
+LATEST_RELEASE_URL="https://github.com/boreddev1/openlocalcrm/releases/latest/download/${BINARY_NAME}"
+MAIN_REPO_URL="https://raw.githubusercontent.com/boreddev1/openlocalcrm/main/bin/${BINARY_NAME}"
+
+echo -e "Lade OpenLocalCRM Launcher herunter${REQUESTED_VERSION:+ (Version ${REQUESTED_VERSION})}..."
+
+DOWNLOAD_SUCCESS=false
+
+if [ -n "${TAGGED_RELEASE_URL}" ] && curl -fsSL -H "User-Agent: OpenLocalCRM-Installer" "${TAGGED_RELEASE_URL}" -o "${TEMP_DOWNLOAD}" 2>/dev/null; then
+    echo -e "${GREEN}✅ Download von GitHub Releases (${REQUESTED_VERSION}) erfolgreich.${NC}"
+    DOWNLOAD_SUCCESS=true
+elif [ -n "${TAGGED_REPO_URL}" ] && curl -fsSL -H "User-Agent: OpenLocalCRM-Installer" "${TAGGED_REPO_URL}" -o "${TEMP_DOWNLOAD}" 2>/dev/null; then
+    echo -e "${GREEN}✅ Download aus Repository (${REQUESTED_VERSION}) erfolgreich.${NC}"
+    DOWNLOAD_SUCCESS=true
+elif curl -fsSL -H "User-Agent: OpenLocalCRM-Installer" "${LATEST_RELEASE_URL}" -o "${TEMP_DOWNLOAD}" 2>/dev/null; then
+    echo -e "${GREEN}✅ Download von GitHub Releases (latest) erfolgreich.${NC}"
+    DOWNLOAD_SUCCESS=true
+elif curl -fsSL -H "User-Agent: OpenLocalCRM-Installer" "${MAIN_REPO_URL}" -o "${TEMP_DOWNLOAD}"; then
+    echo -e "${GREEN}✅ Download aus Repository (main) erfolgreich.${NC}"
+    DOWNLOAD_SUCCESS=true
+fi
+
+if [ "${DOWNLOAD_SUCCESS}" = false ]; then
     echo -e "${RED}❌ Download fehlgeschlagen. Bitte prüfen Sie Ihre Internetverbindung.${NC}"
     exit 1
 fi
@@ -111,12 +157,14 @@ echo -e "${GREEN}===============================================================
 "${TARGET_BIN}" --version || true
 
 # 6. Execute forwarded arguments if any were provided
-if [ "$#" -gt 0 ]; then
-    echo -e "\nFühre Befehl aus: openlocalcrm $*"
-    exec "${TARGET_BIN}" "$@"
+if [ "${#FORWARD_ARGS[@]}" -gt 0 ]; then
+    echo -e "\nFühre Befehl aus: openlocalcrm ${FORWARD_ARGS[*]}"
+    exec "${TARGET_BIN}" "${FORWARD_ARGS[@]}"
 else
     echo -e "\nNutzung:"
-    echo -e "  ${BLUE}openlocalcrm${NC}            # Startet Web-GUI auf http://localhost:9099"
-    echo -e "  ${BLUE}openlocalcrm install${NC}    # Startet geführte CRM-Installation im Terminal"
-    echo -e "  ${BLUE}openlocalcrm --help${NC}     # Zeigt alle verfügbaren CLI-Befehle"
+    echo -e "  ${BLUE}openlocalcrm${NC}                    # Startet Web-GUI auf http://localhost:9099"
+    echo -e "  ${BLUE}openlocalcrm install${NC}            # Startet geführte CRM-Installation im Terminal"
+    echo -e "  ${BLUE}openlocalcrm install --version v0.9${NC} # Installiert spezifische Version"
+    echo -e "  ${BLUE}openlocalcrm versions${NC}           # Zeigt alle verfügbaren Versionen"
+    echo -e "  ${BLUE}openlocalcrm --help${NC}             # Zeigt alle verfügbaren CLI-Befehle"
 fi

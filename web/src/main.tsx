@@ -27,5 +27,5 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         </AuthProvider>
       </QueryClientProvider>
     </ErrorBoundary>
-  </React.StrictMode>
+  </React.StrictMode>,
 );

@@ -1,0 +1,26 @@
+# Auto-detect text files and perform LF normalization
+* text=auto
+
+# Shell scripts and Git hooks MUST always have LF line endings
+*.sh text eol=lf
+.githooks/* text eol=lf
+Makefile text eol=lf
+
+# SQL migrations MUST always have LF line endings
+*.sql text eol=lf
+
+# Documentation and markdown
+*.md text
+*.json text
+*.yaml text
+*.yml text
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.key binary
+*.exe binary
+*.dll binary
