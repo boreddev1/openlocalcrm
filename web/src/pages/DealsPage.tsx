@@ -1,7 +1,20 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../api/client';
-import { Plus, X, Tag, Edit3, Trash2, ShieldCheck, DollarSign, Search, AlertCircle, CheckCircle2, RefreshCw, Sparkles } from 'lucide-react';
+import {
+  Plus,
+  X,
+  Tag,
+  Edit3,
+  Trash2,
+  ShieldCheck,
+  DollarSign,
+  Search,
+  AlertCircle,
+  CheckCircle2,
+  RefreshCw,
+  Sparkles,
+} from 'lucide-react';
 import { DndContext, DragEndEvent } from '@dnd-kit/core';
 import { OfferCalculatorModal } from '../components/calculator/OfferCalculatorModal';
 
@@ -18,11 +31,31 @@ interface Deal {
 }
 
 const STAGES = [
-  { id: 'LEAD', label: 'Lead / Erstkontakt', color: 'border-blue-500/30 bg-blue-500/5 text-blue-400' },
-  { id: 'QUALIFIED', label: 'Qualifiziert', color: 'border-purple-500/30 bg-purple-500/5 text-purple-400' },
-  { id: 'OFFER_SENT', label: 'Angebot vorliegend', color: 'border-amber-500/30 bg-amber-500/5 text-amber-400' },
-  { id: 'NEGOTIATION', label: 'Verhandlung', color: 'border-cyan-500/30 bg-cyan-500/5 text-cyan-400' },
-  { id: 'WON', label: 'Gewonnen / Abschluss', color: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400' },
+  {
+    id: 'LEAD',
+    label: 'Lead / Erstkontakt',
+    color: 'border-blue-500/30 bg-blue-500/5 text-blue-400',
+  },
+  {
+    id: 'QUALIFIED',
+    label: 'Qualifiziert',
+    color: 'border-purple-500/30 bg-purple-500/5 text-purple-400',
+  },
+  {
+    id: 'OFFER_SENT',
+    label: 'Angebot vorliegend',
+    color: 'border-amber-500/30 bg-amber-500/5 text-amber-400',
+  },
+  {
+    id: 'NEGOTIATION',
+    label: 'Verhandlung',
+    color: 'border-cyan-500/30 bg-cyan-500/5 text-cyan-400',
+  },
+  {
+    id: 'WON',
+    label: 'Gewonnen / Abschluss',
+    color: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400',
+  },
   { id: 'LOST', label: 'Verloren', color: 'border-rose-500/30 bg-rose-500/5 text-rose-400' },
 ];
 
@@ -48,10 +81,11 @@ export const DealsPage: React.FC = () => {
   });
 
   const createMutation = useMutation({
-    mutationFn: (newDeal: any) => apiFetch('/api/v1/deals', {
-      method: 'POST',
-      body: JSON.stringify(newDeal),
-    }),
+    mutationFn: (newDeal: any) =>
+      apiFetch('/api/v1/deals', {
+        method: 'POST',
+        body: JSON.stringify(newDeal),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deals'] });
       setIsModalOpen(false);
@@ -61,10 +95,11 @@ export const DealsPage: React.FC = () => {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (deal: any) => apiFetch(`/api/v1/deals/${deal.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(deal),
-    }),
+    mutationFn: (deal: any) =>
+      apiFetch(`/api/v1/deals/${deal.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(deal),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deals'] });
       setEditingDeal(null);
@@ -74,9 +109,10 @@ export const DealsPage: React.FC = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (dealId: string) => apiFetch(`/api/v1/deals/${dealId}`, {
-      method: 'DELETE',
-    }),
+    mutationFn: (dealId: string) =>
+      apiFetch(`/api/v1/deals/${dealId}`, {
+        method: 'DELETE',
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deals'] });
       setDeletingDeal(null);
@@ -127,8 +163,13 @@ export const DealsPage: React.FC = () => {
   });
 
   const totalPipeline = deals.reduce((sum, d) => sum + (parseFloat(d.value) || 0), 0);
-  const weightedPipeline = deals.reduce((sum, d) => sum + ((parseFloat(d.value) || 0) * ((d.probability || 0) / 100)), 0);
-  const wonPipeline = deals.filter((d) => d.stage === 'WON').reduce((sum, d) => sum + (parseFloat(d.value) || 0), 0);
+  const weightedPipeline = deals.reduce(
+    (sum, d) => sum + (parseFloat(d.value) || 0) * ((d.probability || 0) / 100),
+    0,
+  );
+  const wonPipeline = deals
+    .filter((d) => d.stage === 'WON')
+    .reduce((sum, d) => sum + (parseFloat(d.value) || 0), 0);
   const activeDealsCount = deals.filter((d) => d.stage !== 'LOST' && d.stage !== 'WON').length;
 
   return (
@@ -140,7 +181,9 @@ export const DealsPage: React.FC = () => {
             <DollarSign className="w-6 h-6 text-emerald-400" />
             Deal-Pipeline & Kanban (§3.3)
           </h1>
-          <p className="text-sm text-slate-400">Verkaufsphasen, Wahrscheinlichkeiten & § 355 BGB 14-Tage Widerrufs-Tracking</p>
+          <p className="text-sm text-slate-400">
+            Verkaufsphasen, Wahrscheinlichkeiten & § 355 BGB 14-Tage Widerrufs-Tracking
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -175,15 +218,21 @@ export const DealsPage: React.FC = () => {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
         <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl">
           <div className="text-[11px] font-semibold text-slate-400">Gesamt-Pipeline</div>
-          <div className="text-lg font-bold text-slate-100 mt-0.5">{totalPipeline.toLocaleString('de-DE')} €</div>
+          <div className="text-lg font-bold text-slate-100 mt-0.5">
+            {totalPipeline.toLocaleString('de-DE')} €
+          </div>
         </div>
         <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl">
           <div className="text-[11px] font-semibold text-purple-400">Gewichteter Forecast</div>
-          <div className="text-lg font-bold text-purple-300 mt-0.5">{Math.round(weightedPipeline).toLocaleString('de-DE')} €</div>
+          <div className="text-lg font-bold text-purple-300 mt-0.5">
+            {Math.round(weightedPipeline).toLocaleString('de-DE')} €
+          </div>
         </div>
         <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl">
           <div className="text-[11px] font-semibold text-emerald-400">Gewonnene Abschlüsse</div>
-          <div className="text-lg font-bold text-emerald-400 mt-0.5">{wonPipeline.toLocaleString('de-DE')} €</div>
+          <div className="text-lg font-bold text-emerald-400 mt-0.5">
+            {wonPipeline.toLocaleString('de-DE')} €
+          </div>
         </div>
         <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl">
           <div className="text-[11px] font-semibold text-blue-400">Aktive Deals im Trichter</div>
@@ -204,7 +253,10 @@ export const DealsPage: React.FC = () => {
           <div className="grid grid-flow-col auto-cols-[310px] gap-4 h-full min-w-max">
             {STAGES.map((stage) => {
               const stageDeals = filteredDeals.filter((d) => d.stage === stage.id);
-              const totalVolume = stageDeals.reduce((sum, d) => sum + (parseFloat(d.value) || 0), 0);
+              const totalVolume = stageDeals.reduce(
+                (sum, d) => sum + (parseFloat(d.value) || 0),
+                0,
+              );
 
               return (
                 <div
@@ -215,7 +267,9 @@ export const DealsPage: React.FC = () => {
                   {/* Column Header */}
                   <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${stage.color}`}>
+                      <span
+                        className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${stage.color}`}
+                      >
                         {stage.label}
                       </span>
                     </div>
@@ -224,7 +278,9 @@ export const DealsPage: React.FC = () => {
                         {stageDeals.length}
                       </span>
                       {totalVolume > 0 && (
-                        <div className="text-[10px] text-slate-500 mt-0.5">{totalVolume.toLocaleString('de-DE')} €</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          {totalVolume.toLocaleString('de-DE')} €
+                        </div>
                       )}
                     </div>
                   </div>
@@ -266,7 +322,9 @@ export const DealsPage: React.FC = () => {
 
                           <div className="flex items-center justify-between text-xs text-slate-400">
                             <span className="font-bold text-emerald-400 text-sm">
-                              {deal.value ? `${parseFloat(deal.value).toLocaleString('de-DE')} ${deal.currency}` : '0,00 EUR'}
+                              {deal.value
+                                ? `${parseFloat(deal.value).toLocaleString('de-DE')} ${deal.currency}`
+                                : '0,00 EUR'}
                             </span>
                             <span className="flex items-center gap-1 text-[11px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
                               <Tag className="w-3 h-3 text-purple-400" /> {deal.probability}%
@@ -277,11 +335,15 @@ export const DealsPage: React.FC = () => {
                           <div className="pt-2 border-t border-slate-900 flex items-center justify-between gap-2">
                             <select
                               value={deal.stage}
-                              onChange={(e) => updateMutation.mutate({ ...deal, stage: e.target.value })}
+                              onChange={(e) =>
+                                updateMutation.mutate({ ...deal, stage: e.target.value })
+                              }
                               className="text-[11px] bg-slate-900 border border-slate-800 text-slate-300 rounded px-2 py-1 focus:outline-none"
                             >
                               {STAGES.map((s) => (
-                                <option key={s.id} value={s.id}>{s.label}</option>
+                                <option key={s.id} value={s.id}>
+                                  {s.label}
+                                </option>
                               ))}
                             </select>
 
@@ -292,7 +354,9 @@ export const DealsPage: React.FC = () => {
                                   setResubmissionData({
                                     title: `Cross-Selling: ${deal.title}`,
                                     product_segment: 'Stromspeicher',
-                                    due_date: new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
+                                    due_date: new Date(Date.now() + 90 * 86400000)
+                                      .toISOString()
+                                      .split('T')[0],
                                     notes: `Folgekontakt für ${deal.title} (${deal.value} €)`,
                                   });
                                 }}
@@ -326,14 +390,19 @@ export const DealsPage: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="font-bold text-slate-100 text-lg">Neuen Deal anlegen (§3.3)</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Deal Titel *</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Deal Titel *
+                </label>
                 <input
                   required
                   type="text"
@@ -346,7 +415,9 @@ export const DealsPage: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Volumen (€)</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Volumen (€)
+                  </label>
                   <input
                     type="text"
                     value={formData.value}
@@ -355,13 +426,17 @@ export const DealsPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Wahrsch. (%)</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Wahrsch. (%)
+                  </label>
                   <input
                     type="number"
                     min="0"
                     max="100"
                     value={formData.probability}
-                    onChange={(e) => setFormData({ ...formData, probability: Number(e.target.value) })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, probability: Number(e.target.value) })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -375,7 +450,9 @@ export const DealsPage: React.FC = () => {
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                 >
                   {STAGES.map((s) => (
-                    <option key={s.id} value={s.id}>{s.label}</option>
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -410,14 +487,19 @@ export const DealsPage: React.FC = () => {
                 <Edit3 className="w-5 h-5 text-emerald-400" />
                 <span>Deal bearbeiten</span>
               </h3>
-              <button onClick={() => setEditingDeal(null)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setEditingDeal(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleUpdate} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Deal Titel *</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Deal Titel *
+                </label>
                 <input
                   required
                   type="text"
@@ -429,7 +511,9 @@ export const DealsPage: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Volumen (€)</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Volumen (€)
+                  </label>
                   <input
                     type="text"
                     value={editingDeal.value}
@@ -438,13 +522,17 @@ export const DealsPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Wahrsch. (%)</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Wahrsch. (%)
+                  </label>
                   <input
                     type="number"
                     min="0"
                     max="100"
                     value={editingDeal.probability}
-                    onChange={(e) => setEditingDeal({ ...editingDeal, probability: Number(e.target.value) })}
+                    onChange={(e) =>
+                      setEditingDeal({ ...editingDeal, probability: Number(e.target.value) })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -458,7 +546,9 @@ export const DealsPage: React.FC = () => {
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                 >
                   {STAGES.map((s) => (
-                    <option key={s.id} value={s.id}>{s.label}</option>
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -493,13 +583,18 @@ export const DealsPage: React.FC = () => {
                 <RefreshCw className="w-5 h-5 text-purple-400" />
                 Wiedervorlage & Cross-Selling anlegen (§3.5)
               </h3>
-              <button onClick={() => setResubmissionDeal(null)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setResubmissionDeal(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl text-xs text-purple-300">
-              Verknüpft mit Deal: <strong className="text-purple-200">{resubmissionDeal.title}</strong> ({resubmissionDeal.value} EUR)
+              Verknüpft mit Deal:{' '}
+              <strong className="text-purple-200">{resubmissionDeal.title}</strong> (
+              {resubmissionDeal.value} EUR)
             </div>
 
             <form
@@ -520,28 +615,38 @@ export const DealsPage: React.FC = () => {
                 });
                 queryClient.invalidateQueries({ queryKey: ['todos'] });
                 setResubmissionDeal(null);
-                setFeedbackBanner(`Wiedervorlage für "${resubmissionData.product_segment}" erfolgreich angelegt!`);
+                setFeedbackBanner(
+                  `Wiedervorlage für "${resubmissionData.product_segment}" erfolgreich angelegt!`,
+                );
                 setTimeout(() => setFeedbackBanner(null), 4000);
               }}
               className="space-y-3"
             >
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Titel / Betreff</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Titel / Betreff
+                </label>
                 <input
                   type="text"
                   required
                   value={resubmissionData.title}
-                  onChange={(e) => setResubmissionData({ ...resubmissionData, title: e.target.value })}
+                  onChange={(e) =>
+                    setResubmissionData({ ...resubmissionData, title: e.target.value })
+                  }
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-purple-500"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Cross-Selling Produkt</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Cross-Selling Produkt
+                  </label>
                   <select
                     value={resubmissionData.product_segment}
-                    onChange={(e) => setResubmissionData({ ...resubmissionData, product_segment: e.target.value })}
+                    onChange={(e) =>
+                      setResubmissionData({ ...resubmissionData, product_segment: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-purple-500"
                   >
                     <option value="Stromspeicher">Stromspeicher-Nachrüstung</option>
@@ -551,23 +656,31 @@ export const DealsPage: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Wiedervorlage-Datum</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Wiedervorlage-Datum
+                  </label>
                   <input
                     type="date"
                     required
                     value={resubmissionData.due_date}
-                    onChange={(e) => setResubmissionData({ ...resubmissionData, due_date: e.target.value })}
+                    onChange={(e) =>
+                      setResubmissionData({ ...resubmissionData, due_date: e.target.value })
+                    }
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-purple-500"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Notizen zum Folgeangebot</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Notizen zum Folgeangebot
+                </label>
                 <textarea
                   rows={2}
                   value={resubmissionData.notes}
-                  onChange={(e) => setResubmissionData({ ...resubmissionData, notes: e.target.value })}
+                  onChange={(e) =>
+                    setResubmissionData({ ...resubmissionData, notes: e.target.value })
+                  }
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-purple-500 resize-none"
                 />
               </div>
@@ -601,7 +714,8 @@ export const DealsPage: React.FC = () => {
               <h3 className="font-bold text-slate-100 text-base">Deal wirklich löschen?</h3>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Möchten Sie den Deal <strong className="text-slate-100">{deletingDeal.title}</strong> unwiderruflich aus der Pipeline entfernen?
+              Möchten Sie den Deal <strong className="text-slate-100">{deletingDeal.title}</strong>{' '}
+              unwiderruflich aus der Pipeline entfernen?
             </p>
             <div className="flex justify-end gap-3 pt-3">
               <button
@@ -623,9 +737,7 @@ export const DealsPage: React.FC = () => {
       )}
 
       {/* Offer Calculator & OCR Modal (§5.2 / §5.6) */}
-      {isCalculatorOpen && (
-        <OfferCalculatorModal onClose={() => setIsCalculatorOpen(false)} />
-      )}
+      {isCalculatorOpen && <OfferCalculatorModal onClose={() => setIsCalculatorOpen(false)} />}
     </div>
   );
 };

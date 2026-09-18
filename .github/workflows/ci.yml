@@ -23,11 +23,20 @@ jobs:
       - name: Install Dependencies
         run: go mod download
 
+      - name: Verify Go Formatting (gofmt)
+        run: |
+          UNFORMATTED=$(gofmt -s -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "❌ Unformatted Go files found:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
       - name: Run Go Vet
         run: go vet ./...
 
-      - name: Run Unit & Integration Tests
-        run: go test -v ./...
+      - name: Run Unit & Integration Tests (with Race Detector)
+        run: go test -race -v ./...
 
       - name: Check Open-Source Licenses
         run: |
@@ -75,6 +84,15 @@ jobs:
 
       - name: Run Security Audit
         run: cd web && pnpm audit
+
+      - name: Verify Code Formatting (Prettier)
+        run: cd web && pnpm format:check
+
+      - name: Run ESLint
+        run: cd web && pnpm lint
+
+      - name: Run TypeScript Typecheck
+        run: cd web && pnpm typecheck
 
       - name: Build Web Production Bundle
         run: cd web && pnpm build

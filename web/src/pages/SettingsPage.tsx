@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../api/client';
-import { 
-  Webhook, 
-  ShieldCheck, 
-  Database, 
-  Server, 
-  Copy, 
-  Check, 
-  Mail, 
-  Key, 
-  Sliders, 
-  Cpu, 
+import {
+  Webhook,
+  ShieldCheck,
+  Database,
+  Server,
+  Copy,
+  Check,
+  Mail,
+  Key,
+  Sliders,
+  Cpu,
   Send,
   QrCode,
   Archive,
@@ -24,7 +24,7 @@ import {
   Lock,
   AlertCircle,
   Users,
-  UserPlus
+  UserPlus,
 } from 'lucide-react';
 
 interface TeamUser {
@@ -37,7 +37,17 @@ interface TeamUser {
 }
 
 export const SettingsPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CONNECTORS' | 'EMAIL' | 'SECURITY' | 'USERS' | 'BACKUP' | 'TEMPLATES' | 'TAGS' | 'CUSTOM_FIELDS' | 'SYSTEM'>('CONNECTORS');
+  const [activeTab, setActiveTab] = useState<
+    | 'CONNECTORS'
+    | 'EMAIL'
+    | 'SECURITY'
+    | 'USERS'
+    | 'BACKUP'
+    | 'TEMPLATES'
+    | 'TAGS'
+    | 'CUSTOM_FIELDS'
+    | 'SYSTEM'
+  >('CONNECTORS');
   const [copied, setCopied] = useState(false);
   const [testWebhookStatus, setTestWebhookStatus] = useState<string | null>(null);
 
@@ -46,7 +56,9 @@ export const SettingsPage: React.FC = () => {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState<'ADMIN' | 'BENUTZER'>('BENUTZER');
-  const [userMsg, setUserMsg] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [userMsg, setUserMsg] = useState<{ type: 'success' | 'error'; message: string } | null>(
+    null,
+  );
 
   useEffect(() => {
     if (activeTab === 'USERS') {
@@ -61,7 +73,7 @@ export const SettingsPage: React.FC = () => {
                 role: u.role,
                 status: u.status,
                 invited_at: u.status === 'INVITED' ? 'Ausstehend' : undefined,
-              }))
+              })),
             );
           }
         })
@@ -83,7 +95,7 @@ export const SettingsPage: React.FC = () => {
             role: u.role,
             status: u.status,
             invited_at: u.status === 'INVITED' ? 'Ausstehend' : undefined,
-          }))
+          })),
         );
       }
     } catch (err) {
@@ -133,7 +145,10 @@ export const SettingsPage: React.FC = () => {
         method: 'PUT',
         body: JSON.stringify({ role: newRole }),
       });
-      setUserMsg({ type: 'success', message: `Rolle von ${targetUser.name} auf ${newRole} geändert.` });
+      setUserMsg({
+        type: 'success',
+        message: `Rolle von ${targetUser.name} auf ${newRole} geändert.`,
+      });
       await reloadUsers();
     } catch (err: any) {
       setUserMsg({ type: 'error', message: err.message || 'Fehler beim Ändern der Rolle' });
@@ -153,7 +168,10 @@ export const SettingsPage: React.FC = () => {
       });
       setUserMsg({
         type: 'success',
-        message: newStatus === 'DEACTIVATED' ? `Benutzer ${targetUser.name} wurde deaktiviert.` : `Benutzer ${targetUser.name} reaktiviert.`,
+        message:
+          newStatus === 'DEACTIVATED'
+            ? `Benutzer ${targetUser.name} wurde deaktiviert.`
+            : `Benutzer ${targetUser.name} reaktiviert.`,
       });
       await reloadUsers();
     } catch (err: any) {
@@ -166,7 +184,10 @@ export const SettingsPage: React.FC = () => {
   const [totpEnabled, setTotpEnabled] = useState(false);
   const [totpSecret, setTotpSecret] = useState('');
   const [totpCodeInput, setTotpCodeInput] = useState('');
-  const [totpStatus, setTotpStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [totpStatus, setTotpStatus] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const handleGenerateNewTotpSecret = async () => {
     try {
@@ -176,9 +197,16 @@ export const SettingsPage: React.FC = () => {
       setTotpSecret(res.secret);
       setTotpEnabled(false);
       setTotpCodeInput('');
-      setTotpStatus({ type: 'success', message: 'Neuer Secret Key generiert. Bitte mit Authenticator-App scannen und mit 6-stelligem Code verifizieren.' });
+      setTotpStatus({
+        type: 'success',
+        message:
+          'Neuer Secret Key generiert. Bitte mit Authenticator-App scannen und mit 6-stelligem Code verifizieren.',
+      });
     } catch (err: any) {
-      setTotpStatus({ type: 'error', message: err.message || 'Fehler beim Generieren des TOTP-Schlüssels' });
+      setTotpStatus({
+        type: 'error',
+        message: err.message || 'Fehler beim Generieren des TOTP-Schlüssels',
+      });
     }
     setTimeout(() => setTotpStatus(null), 6000);
   };
@@ -186,7 +214,10 @@ export const SettingsPage: React.FC = () => {
   const handleVerifyTotp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!totpCodeInput || totpCodeInput.trim().length !== 6) {
-      setTotpStatus({ type: 'error', message: 'Bitte geben Sie den vollständigen 6-stelligen Code ein.' });
+      setTotpStatus({
+        type: 'error',
+        message: 'Bitte geben Sie den vollständigen 6-stelligen Code ein.',
+      });
       return;
     }
 
@@ -196,10 +227,15 @@ export const SettingsPage: React.FC = () => {
         body: JSON.stringify({ code: totpCodeInput.trim() }),
       });
       setTotpEnabled(true);
-      setTotpStatus({ type: 'success', message: '2FA erfolgreich verifiziert und für Ihr Konto aktiviert!' });
+      setTotpStatus({
+        type: 'success',
+        message: '2FA erfolgreich verifiziert und für Ihr Konto aktiviert!',
+      });
       setTotpCodeInput('');
     } catch (err: any) {
-      const msg = err.message?.includes('Ungültiger Authenticator-Code') ? err.message : 'Ungültiger Authenticator-Code: ' + (err.message || 'Prüfen Sie den Code.');
+      const msg = err.message?.includes('Ungültiger Authenticator-Code')
+        ? err.message
+        : 'Ungültiger Authenticator-Code: ' + (err.message || 'Prüfen Sie den Code.');
       setTotpStatus({ type: 'error', message: msg });
     }
     setTimeout(() => setTotpStatus(null), 6000);
@@ -209,7 +245,10 @@ export const SettingsPage: React.FC = () => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordStatus, setPasswordStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [passwordStatus, setPasswordStatus] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -218,13 +257,19 @@ export const SettingsPage: React.FC = () => {
       return;
     }
     if (newPassword.length < 8) {
-      setPasswordStatus({ type: 'error', message: 'Das neue Passwort muss mindestens 8 Zeichen lang sein.' });
+      setPasswordStatus({
+        type: 'error',
+        message: 'Das neue Passwort muss mindestens 8 Zeichen lang sein.',
+      });
       return;
     }
     const hasNumber = /\d/.test(newPassword);
     const hasSpecial = /[^A-Za-z0-9]/.test(newPassword);
     if (!hasNumber || !hasSpecial) {
-      setPasswordStatus({ type: 'error', message: 'Das neue Passwort muss mindestens eine Zahl und ein Sonderzeichen enthalten.' });
+      setPasswordStatus({
+        type: 'error',
+        message: 'Das neue Passwort muss mindestens eine Zahl und ein Sonderzeichen enthalten.',
+      });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -245,7 +290,10 @@ export const SettingsPage: React.FC = () => {
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: any) {
-      setPasswordStatus({ type: 'error', message: err.message || 'Fehler beim Ändern des Passworts' });
+      setPasswordStatus({
+        type: 'error',
+        message: err.message || 'Fehler beim Ändern des Passworts',
+      });
     }
     setTimeout(() => setPasswordStatus(null), 6000);
   };
@@ -259,7 +307,9 @@ export const SettingsPage: React.FC = () => {
     setRestoreDrillStatus('Konsistenzprüfung läuft...');
     try {
       const res = await apiFetch<any>('/api/v1/backup/drill', { method: 'POST' });
-      setRestoreDrillStatus(`✅ Restore-Drill erfolgreich (Restore-Drill & Konsistenzprüfung erfolgreich: ${res.user_count} Benutzer, ${res.company_count} Firmen, ${res.contact_count} Kontakte, ${res.deal_count} Deals).`);
+      setRestoreDrillStatus(
+        `✅ Restore-Drill erfolgreich (Restore-Drill & Konsistenzprüfung erfolgreich: ${res.user_count} Benutzer, ${res.company_count} Firmen, ${res.contact_count} Kontakte, ${res.deal_count} Deals).`,
+      );
     } catch (err: any) {
       setRestoreDrillStatus(`❌ Prüfung fehlgeschlagen: ${err.message}`);
     } finally {
@@ -284,17 +334,40 @@ export const SettingsPage: React.FC = () => {
 
   // --- Tags State (§4.3) ---
   const [tags, setTags] = useState([
-    { id: 'tag-1', name: '🏷️ PV-Projekt 2026', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-    { id: 'tag-2', name: '⭐ VIP Großkunde', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
-    { id: 'tag-3', name: '⚡ Dringend / Vor-Ort', color: 'bg-rose-500/20 text-rose-400 border-rose-500/30' },
-    { id: 'tag-4', name: '🏠 D2D Haustür-Lead', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+    {
+      id: 'tag-1',
+      name: '🏷️ PV-Projekt 2026',
+      color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+    },
+    {
+      id: 'tag-2',
+      name: '⭐ VIP Großkunde',
+      color: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+    },
+    {
+      id: 'tag-3',
+      name: '⚡ Dringend / Vor-Ort',
+      color: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
+    },
+    {
+      id: 'tag-4',
+      name: '🏠 D2D Haustür-Lead',
+      color: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    },
   ]);
   const [newTagName, setNewTagName] = useState('');
 
   const handleAddTag = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTagName.trim()) return;
-    setTags([...tags, { id: 'tag-' + Date.now(), name: newTagName.trim(), color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' }]);
+    setTags([
+      ...tags,
+      {
+        id: 'tag-' + Date.now(),
+        name: newTagName.trim(),
+        color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      },
+    ]);
     setNewTagName('');
   };
 
@@ -344,7 +417,9 @@ export const SettingsPage: React.FC = () => {
   };
 
   const handleTestWebhook = () => {
-    setTestWebhookStatus('Test-Lead erfolgreich über Webhook eingespeist! Neuer Kontakt "Sabine Mustermann" angelegt.');
+    setTestWebhookStatus(
+      'Test-Lead erfolgreich über Webhook eingespeist! Neuer Kontakt "Sabine Mustermann" angelegt.',
+    );
     setTimeout(() => setTestWebhookStatus(null), 5000);
   };
 
@@ -354,7 +429,8 @@ export const SettingsPage: React.FC = () => {
       <div>
         <h1 className="text-2xl font-bold text-slate-100">Systemeinstellungen & Konfiguration</h1>
         <p className="text-sm text-slate-400">
-          Single-Tenant Konfiguration, E-Mail-Konten, Templates, Sicherheit, Datensicherung & Custom Fields
+          Single-Tenant Konfiguration, E-Mail-Konten, Templates, Sicherheit, Datensicherung & Custom
+          Fields
         </p>
       </div>
 
@@ -479,8 +555,13 @@ export const SettingsPage: React.FC = () => {
                   <Webhook className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-100">Lead-Intake & Partner-Konnektor (REST Webhook)</h3>
-                  <p className="text-xs text-slate-400">Automatische Erfassung von Leads aus Website-Formularen, Tarifrechnern oder D2D-Kampagnen</p>
+                  <h3 className="text-base font-bold text-slate-100">
+                    Lead-Intake & Partner-Konnektor (REST Webhook)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Automatische Erfassung von Leads aus Website-Formularen, Tarifrechnern oder
+                    D2D-Kampagnen
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -506,7 +587,9 @@ export const SettingsPage: React.FC = () => {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Webhook Endpoint URL</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Webhook Endpoint URL
+                </label>
                 <div className="flex gap-2">
                   <input
                     readOnly
@@ -517,14 +600,20 @@ export const SettingsPage: React.FC = () => {
                     onClick={() => copyToClipboard(webhookUrl)}
                     className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
                   >
-                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copied ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
                     Kopieren
                   </button>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Connector API Secret Bearer-Token</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Connector API Secret Bearer-Token
+                </label>
                 <div className="flex gap-2">
                   <input
                     readOnly
@@ -543,8 +632,12 @@ export const SettingsPage: React.FC = () => {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
           <div className="flex items-center justify-between border-b border-slate-800 pb-4">
             <div>
-              <h3 className="text-base font-bold text-slate-100">E-Mail-Konten (IMAP / SMTP Synchronisation)</h3>
-              <p className="text-xs text-slate-400">Verwalte Postfächer für automatischen E-Mail-Empfang und KI-Versand</p>
+              <h3 className="text-base font-bold text-slate-100">
+                E-Mail-Konten (IMAP / SMTP Synchronisation)
+              </h3>
+              <p className="text-xs text-slate-400">
+                Verwalte Postfächer für automatischen E-Mail-Empfang und KI-Versand
+              </p>
             </div>
             <span className="text-xs px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-semibold">
               1 Konto aktiv
@@ -556,15 +649,27 @@ export const SettingsPage: React.FC = () => {
               <div className="flex items-center gap-3">
                 <Mail className="w-5 h-5 text-emerald-400" />
                 <div>
-                  <div className="text-sm font-semibold text-slate-200">vertrieb@openlocalcrm.local</div>
-                  <div className="text-xs text-slate-500">Primäres Konto für Workflows & KI-Drafts (§4.1)</div>
+                  <div className="text-sm font-semibold text-slate-200">
+                    vertrieb@openlocalcrm.local
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Primäres Konto für Workflows & KI-Drafts (§4.1)
+                  </div>
                 </div>
               </div>
               <span className="text-xs font-mono text-emerald-400">IMAP: SSL / Port 993</span>
             </div>
             <div className="grid grid-cols-2 gap-4 text-xs text-slate-400 pt-2 border-t border-slate-800/80">
-              <div>SMTP Host: <span className="font-mono text-slate-300">mail.openlocalcrm.local:587 (STARTTLS)</span></div>
-              <div>Auto-Sync Intervall: <span className="font-mono text-slate-300">Alle 60 Sekunden</span></div>
+              <div>
+                SMTP Host:{' '}
+                <span className="font-mono text-slate-300">
+                  mail.openlocalcrm.local:587 (STARTTLS)
+                </span>
+              </div>
+              <div>
+                Auto-Sync Intervall:{' '}
+                <span className="font-mono text-slate-300">Alle 60 Sekunden</span>
+              </div>
             </div>
           </div>
         </div>
@@ -576,8 +681,13 @@ export const SettingsPage: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
-                <h3 className="text-base font-bold text-slate-100">KI-Template-Generator per Chat (§5.1)</h3>
-                <p className="text-xs text-slate-400">Lassen Sie Gemma 12B fertige Vorlagen mit Platzhaltern nach Ihren Wünschen erstellen</p>
+                <h3 className="text-base font-bold text-slate-100">
+                  KI-Template-Generator per Chat (§5.1)
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Lassen Sie Gemma 12B fertige Vorlagen mit Platzhaltern nach Ihren Wünschen
+                  erstellen
+                </p>
               </div>
             </div>
 
@@ -602,14 +712,19 @@ export const SettingsPage: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {templates.map((tpl) => (
-              <div key={tpl.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+              <div
+                key={tpl.id}
+                className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3"
+              >
                 <div className="flex items-center justify-between">
                   <h4 className="text-sm font-bold text-slate-100">{tpl.name}</h4>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
                     Aktiv
                   </span>
                 </div>
-                <div className="text-xs text-slate-400 font-semibold">Betreff: <span className="text-slate-200">{tpl.subject}</span></div>
+                <div className="text-xs text-slate-400 font-semibold">
+                  Betreff: <span className="text-slate-200">{tpl.subject}</span>
+                </div>
                 <pre className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">
                   {tpl.body}
                 </pre>
@@ -628,21 +743,33 @@ export const SettingsPage: React.FC = () => {
               <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 <Lock className="w-4 h-4 text-emerald-400" /> Eigenes Passwort ändern (§2.2)
               </h3>
-              <p className="text-xs text-slate-400">Regeln: Mindestens 8 Zeichen, mindestens 1 Zahl und 1 Sonderzeichen</p>
+              <p className="text-xs text-slate-400">
+                Regeln: Mindestens 8 Zeichen, mindestens 1 Zahl und 1 Sonderzeichen
+              </p>
             </div>
 
             {passwordStatus && (
-              <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
-                passwordStatus.type === 'success' ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
-              }`}>
-                {passwordStatus.type === 'success' ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+              <div
+                className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                  passwordStatus.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300'
+                    : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
+                }`}
+              >
+                {passwordStatus.type === 'success' ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <AlertCircle className="w-4 h-4" />
+                )}
                 {passwordStatus.message}
               </div>
             )}
 
             <form onSubmit={handlePasswordChange} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Aktuelles Passwort</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Aktuelles Passwort
+                </label>
                 <input
                   type="password"
                   value={currentPassword}
@@ -653,7 +780,9 @@ export const SettingsPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Neues Passwort</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Neues Passwort
+                </label>
                 <input
                   type="password"
                   value={newPassword}
@@ -664,7 +793,9 @@ export const SettingsPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Passwort bestätigen</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Passwort bestätigen
+                </label>
                 <input
                   type="password"
                   value={confirmPassword}
@@ -689,8 +820,12 @@ export const SettingsPage: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div>
-                <h3 className="text-base font-bold text-slate-100">Zwei-Faktor-Authentifizierung (RFC 6238 TOTP)</h3>
-                <p className="text-xs text-slate-400">Schützen Sie den Zugang zu Ihrem Single-Tenant CRM mit Authenticator-Apps</p>
+                <h3 className="text-base font-bold text-slate-100">
+                  Zwei-Faktor-Authentifizierung (RFC 6238 TOTP)
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Schützen Sie den Zugang zu Ihrem Single-Tenant CRM mit Authenticator-Apps
+                </p>
               </div>
               <button
                 onClick={() => setTotpEnabled(!totpEnabled)}
@@ -703,10 +838,18 @@ export const SettingsPage: React.FC = () => {
             </div>
 
             {totpStatus && (
-              <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
-                totpStatus.type === 'success' ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
-              }`}>
-                {totpStatus.type === 'success' ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+              <div
+                className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                  totpStatus.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300'
+                    : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
+                }`}
+              >
+                {totpStatus.type === 'success' ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <AlertCircle className="w-4 h-4" />
+                )}
                 {totpStatus.message}
               </div>
             )}
@@ -746,7 +889,8 @@ export const SettingsPage: React.FC = () => {
                   </button>
                 </form>
                 <p className="text-xs text-slate-500">
-                  Kompatibel mit Google Authenticator, Apple Passwords, 1Password, Bitwarden und YubiKey.
+                  Kompatibel mit Google Authenticator, Apple Passwords, 1Password, Bitwarden und
+                  YubiKey.
                 </p>
               </div>
               <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center gap-3">
@@ -755,7 +899,9 @@ export const SettingsPage: React.FC = () => {
                   <div className="font-semibold text-slate-200">OpenLocalCRM: Admin</div>
                   <div>Algorithmus: SHA-1 (6 Digits)</div>
                   <div>Periode: 30s</div>
-                  <div className="font-mono text-[10px] text-emerald-400 mt-1">Key: {totpSecret.slice(0, 8)}...</div>
+                  <div className="font-mono text-[10px] text-emerald-400 mt-1">
+                    Key: {totpSecret.slice(0, 8)}...
+                  </div>
                 </div>
               </div>
             </div>
@@ -774,23 +920,37 @@ export const SettingsPage: React.FC = () => {
                   <UserPlus className="w-4 h-4 text-emerald-400" /> Neuen Benutzer einladen (§2.3)
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Einladungslink ist 7 Tage gültig. Benutzer vergibt beim Erstlogin eigenes Passwort (min. 8 Zeichen).
+                  Einladungslink ist 7 Tage gültig. Benutzer vergibt beim Erstlogin eigenes Passwort
+                  (min. 8 Zeichen).
                 </p>
               </div>
             </div>
 
             {userMsg && (
-              <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
-                userMsg.type === 'success' ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
-              }`}>
-                {userMsg.type === 'success' ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+              <div
+                className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                  userMsg.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300'
+                    : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
+                }`}
+              >
+                {userMsg.type === 'success' ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <AlertCircle className="w-4 h-4" />
+                )}
                 {userMsg.message}
               </div>
             )}
 
-            <form onSubmit={handleInviteUser} className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+            <form
+              onSubmit={handleInviteUser}
+              className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end"
+            >
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Vollständiger Name</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Vollständiger Name
+                </label>
                 <input
                   type="text"
                   value={inviteName}
@@ -801,7 +961,9 @@ export const SettingsPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">E-Mail-Adresse</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  E-Mail-Adresse
+                </label>
                 <input
                   type="email"
                   value={inviteEmail}
@@ -812,7 +974,9 @@ export const SettingsPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Rolle im CRM (§2.1)</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Rolle im CRM (§2.1)
+                </label>
                 <select
                   value={inviteRole}
                   onChange={(e) => setInviteRole(e.target.value as 'ADMIN' | 'BENUTZER')}
@@ -840,10 +1004,12 @@ export const SettingsPage: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
                 <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-emerald-400" /> Aktive Teammitglieder ({users.length})
+                  <Users className="w-4 h-4 text-emerald-400" /> Aktive Teammitglieder (
+                  {users.length})
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Shared-Workspace (§2.1): Alle Benutzer sehen dieselben CRM-Daten. Rollenwechsel und Deaktivierung werden protokolliert.
+                  Shared-Workspace (§2.1): Alle Benutzer sehen dieselben CRM-Daten. Rollenwechsel
+                  und Deaktivierung werden protokolliert.
                 </p>
               </div>
             </div>
@@ -870,17 +1036,31 @@ export const SettingsPage: React.FC = () => {
                       </td>
                       <td className="py-3 font-mono text-slate-400">{u.email}</td>
                       <td className="py-3">
-                        <span className={`px-2 py-0.5 rounded-full font-semibold text-[10px] ${
-                          u.role === 'ADMIN' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                        }`}>
+                        <span
+                          className={`px-2 py-0.5 rounded-full font-semibold text-[10px] ${
+                            u.role === 'ADMIN'
+                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                              : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                          }`}
+                        >
                           {u.role}
                         </span>
                       </td>
                       <td className="py-3">
-                        <span className={`px-2 py-0.5 rounded-full font-semibold text-[10px] ${
-                          u.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : u.status === 'INVITED' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                        }`}>
-                          {u.status === 'ACTIVE' ? 'Aktiv' : u.status === 'INVITED' ? 'Eingeladen (7 Tage)' : 'Deaktiviert'}
+                        <span
+                          className={`px-2 py-0.5 rounded-full font-semibold text-[10px] ${
+                            u.status === 'ACTIVE'
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : u.status === 'INVITED'
+                                ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                                : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                          }`}
+                        >
+                          {u.status === 'ACTIVE'
+                            ? 'Aktiv'
+                            : u.status === 'INVITED'
+                              ? 'Eingeladen (7 Tage)'
+                              : 'Deaktiviert'}
                         </span>
                       </td>
                       <td className="py-3 text-right space-x-2">
@@ -895,7 +1075,9 @@ export const SettingsPage: React.FC = () => {
                           type="button"
                           onClick={() => handleToggleDeactivateUser(u.id)}
                           className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors ${
-                            u.status !== 'DEACTIVATED' ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20' : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20'
+                            u.status !== 'DEACTIVATED'
+                              ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20'
+                              : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20'
                           }`}
                         >
                           {u.status !== 'DEACTIVATED' ? 'Deaktivieren' : 'Aktivieren'}
@@ -916,8 +1098,13 @@ export const SettingsPage: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div>
-                <h3 className="text-base font-bold text-slate-100">Datensicherung, Exporte & Restore-Drill (§8.7)</h3>
-                <p className="text-xs text-slate-400">Vollständige Datensouveränität mit PostgreSQL Dumps und nachweisbarer Wiederherstellung</p>
+                <h3 className="text-base font-bold text-slate-100">
+                  Datensicherung, Exporte & Restore-Drill (§8.7)
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Vollständige Datensouveränität mit PostgreSQL Dumps und nachweisbarer
+                  Wiederherstellung
+                </p>
               </div>
             </div>
 
@@ -934,7 +1121,8 @@ export const SettingsPage: React.FC = () => {
                   <Database className="w-4 h-4 text-emerald-400" /> PostgreSQL Datenbank-Backup
                 </div>
                 <p className="text-xs text-slate-400">
-                  Erstellt einen vollständigen SQL-Dump aller Kontakte, Deals, Notizen und Audit-Logs.
+                  Erstellt einen vollständigen SQL-Dump aller Kontakte, Deals, Notizen und
+                  Audit-Logs.
                 </p>
                 <button
                   onClick={() => handleDownloadBackup('db')}
@@ -964,14 +1152,16 @@ export const SettingsPage: React.FC = () => {
                   <RefreshCw className="w-4 h-4 text-cyan-400" /> Restore-Drill Integritäts-Test
                 </div>
                 <p className="text-xs text-slate-400">
-                  Prüft automatisch die Wiederherstellbarkeit und referentielle Integrität nach §8.7.
+                  Prüft automatisch die Wiederherstellbarkeit und referentielle Integrität nach
+                  §8.7.
                 </p>
                 <button
                   onClick={handleRunRestoreDrill}
                   disabled={isDrilling}
                   className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
                 >
-                  <ShieldCheck className="w-3.5 h-3.5" /> {isDrilling ? 'Prüfung läuft...' : 'Restore-Drill ausführen'}
+                  <ShieldCheck className="w-3.5 h-3.5" />{' '}
+                  {isDrilling ? 'Prüfung läuft...' : 'Restore-Drill ausführen'}
                 </button>
               </div>
             </div>
@@ -985,8 +1175,12 @@ export const SettingsPage: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
-                <h3 className="text-base font-bold text-slate-100">E-Mail- & Kontakt-Tags (§4.3)</h3>
-                <p className="text-xs text-slate-400">Definieren Sie eigene Labels und Schlagworte für Posteingang und Kontakte</p>
+                <h3 className="text-base font-bold text-slate-100">
+                  E-Mail- & Kontakt-Tags (§4.3)
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Definieren Sie eigene Labels und Schlagworte für Posteingang und Kontakte
+                </p>
               </div>
             </div>
 
@@ -1008,7 +1202,10 @@ export const SettingsPage: React.FC = () => {
 
             <div className="flex flex-wrap gap-2 pt-2">
               {tags.map((tag) => (
-                <span key={tag.id} className={`px-3 py-1.5 rounded-xl border text-xs font-semibold ${tag.color}`}>
+                <span
+                  key={tag.id}
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-semibold ${tag.color}`}
+                >
                   {tag.name}
                 </span>
               ))}
@@ -1021,33 +1218,53 @@ export const SettingsPage: React.FC = () => {
       {activeTab === 'CUSTOM_FIELDS' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
           <div className="border-b border-slate-800 pb-4">
-            <h3 className="text-base font-bold text-slate-100">Custom Fields & Branchen-Felder (§3.8 / §7.1)</h3>
-            <p className="text-xs text-slate-400">Konfigurierte Attribute für Photovoltaik-, Energie- und D2D-Vertrieb</p>
+            <h3 className="text-base font-bold text-slate-100">
+              Custom Fields & Branchen-Felder (§3.8 / §7.1)
+            </h3>
+            <p className="text-xs text-slate-400">
+              Konfigurierte Attribute für Photovoltaik-, Energie- und D2D-Vertrieb
+            </p>
           </div>
 
           <div className="space-y-3">
             <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
               <div>
                 <span className="font-semibold text-slate-200">Zählernummer (Strom / Gas)</span>
-                <div className="text-[11px] text-slate-500">Typ: TEXT (Regex: 1EMH... / 33-stellig) — Entität: Kontakt / Firma</div>
+                <div className="text-[11px] text-slate-500">
+                  Typ: TEXT (Regex: 1EMH... / 33-stellig) — Entität: Kontakt / Firma
+                </div>
               </div>
-              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">Aktiv</span>
+              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">
+                Aktiv
+              </span>
             </div>
 
             <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
               <div>
-                <span className="font-semibold text-slate-200">Jahresverbrauch (Strom kWh / Gas kWh)</span>
-                <div className="text-[11px] text-slate-500">Typ: NUMERIC — Entität: Deal / Kontakt</div>
+                <span className="font-semibold text-slate-200">
+                  Jahresverbrauch (Strom kWh / Gas kWh)
+                </span>
+                <div className="text-[11px] text-slate-500">
+                  Typ: NUMERIC — Entität: Deal / Kontakt
+                </div>
               </div>
-              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">Aktiv</span>
+              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">
+                Aktiv
+              </span>
             </div>
 
             <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
               <div>
-                <span className="font-semibold text-slate-200">Eigentümerstatus (Eigentümer / Mieter)</span>
-                <div className="text-[11px] text-slate-500">Typ: ENUM — Entität: D2D Gebietskarte / Lead</div>
+                <span className="font-semibold text-slate-200">
+                  Eigentümerstatus (Eigentümer / Mieter)
+                </span>
+                <div className="text-[11px] text-slate-500">
+                  Typ: ENUM — Entität: D2D Gebietskarte / Lead
+                </div>
               </div>
-              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">Aktiv</span>
+              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">
+                Aktiv
+              </span>
             </div>
           </div>
         </div>
@@ -1062,7 +1279,9 @@ export const SettingsPage: React.FC = () => {
                 <Server className="w-4 h-4 text-emerald-400" /> Server-Architektur
               </div>
               <div className="text-sm font-bold text-slate-100">Go 1.23 + Caddy + Chi</div>
-              <div className="text-xs text-slate-500">Single-Tenant Standalone Binary (&lt; 420 MB RAM Budget)</div>
+              <div className="text-xs text-slate-500">
+                Single-Tenant Standalone Binary (&lt; 420 MB RAM Budget)
+              </div>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
@@ -1083,12 +1302,26 @@ export const SettingsPage: React.FC = () => {
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-            <h4 className="text-xs font-bold uppercase text-slate-400">DSGVO & Rechtliche Konformität</h4>
+            <h4 className="text-xs font-bold uppercase text-slate-400">
+              DSGVO & Rechtliche Konformität
+            </h4>
             <div className="text-xs text-slate-300 space-y-1.5">
-              <div>• <strong>DSGVO Art. 20 (Datenübertragbarkeit):</strong> Vollständiger CSV-Export aller Kunden und Aktivitäten.</div>
-              <div>• <strong>UWG § 7 (Werbeeinwilligung):</strong> Telefon- & E-Mail-Consent-Nachweise in Kontaktdaten hinterlegt.</div>
-              <div>• <strong>BGB § 355 (Widerrufsrecht):</strong> Erfassung von Widerrufen ohne Verzerrung historischer Vertriebsstatistiken.</div>
-              <div>• <strong>EU AI Act (Art. 50/52):</strong> Revisionssicheres AI-Audit-Ledger mit Latenz, Provider und Modelltransparenz.</div>
+              <div>
+                • <strong>DSGVO Art. 20 (Datenübertragbarkeit):</strong> Vollständiger CSV-Export
+                aller Kunden und Aktivitäten.
+              </div>
+              <div>
+                • <strong>UWG § 7 (Werbeeinwilligung):</strong> Telefon- & E-Mail-Consent-Nachweise
+                in Kontaktdaten hinterlegt.
+              </div>
+              <div>
+                • <strong>BGB § 355 (Widerrufsrecht):</strong> Erfassung von Widerrufen ohne
+                Verzerrung historischer Vertriebsstatistiken.
+              </div>
+              <div>
+                • <strong>EU AI Act (Art. 50/52):</strong> Revisionssicheres AI-Audit-Ledger mit
+                Latenz, Provider und Modelltransparenz.
+              </div>
             </div>
           </div>
         </div>

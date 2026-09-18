@@ -1,18 +1,18 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../api/client';
-import { 
-  Zap, 
-  Plus, 
-  Play, 
-  CheckCircle2, 
-  Clock, 
-  Mail, 
-  CheckSquare, 
-  X, 
-  ShieldCheck, 
+import {
+  Zap,
+  Plus,
+  Play,
+  CheckCircle2,
+  Clock,
+  Mail,
+  CheckSquare,
+  X,
+  ShieldCheck,
   Activity,
-  UserCheck
+  UserCheck,
 } from 'lucide-react';
 
 export const AutomationsPage: React.FC = () => {
@@ -32,10 +32,11 @@ export const AutomationsPage: React.FC = () => {
   });
 
   const createMutation = useMutation({
-    mutationFn: (newWf: any) => apiFetch('/api/v1/automations', {
-      method: 'POST',
-      body: JSON.stringify(newWf),
-    }),
+    mutationFn: (newWf: any) =>
+      apiFetch('/api/v1/automations', {
+        method: 'POST',
+        body: JSON.stringify(newWf),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['automations'] });
       setIsModalOpen(false);
@@ -64,14 +65,26 @@ export const AutomationsPage: React.FC = () => {
       target_type: formData.target_type,
       is_active: true,
       steps: [
-        { step_number: 1, title: formData.step1_title, action_type: formData.step1_action, payload: {} },
-        { step_number: 2, title: formData.step2_title, action_type: formData.step2_action, payload: {} },
+        {
+          step_number: 1,
+          title: formData.step1_title,
+          action_type: formData.step1_action,
+          payload: {},
+        },
+        {
+          step_number: 2,
+          title: formData.step2_title,
+          action_type: formData.step2_action,
+          payload: {},
+        },
       ],
     });
   };
 
   const handleTriggerRun = (wfName: string) => {
-    setSuccessToast(`Workflow "${wfName}" manuell ausgelöst! Schritt 1 vorbereitet (HITL-Freigabe erforderlich).`);
+    setSuccessToast(
+      `Workflow "${wfName}" manuell ausgelöst! Schritt 1 vorbereitet (HITL-Freigabe erforderlich).`,
+    );
     setTimeout(() => setSuccessToast(null), 5000);
   };
 
@@ -135,9 +148,13 @@ export const AutomationsPage: React.FC = () => {
       {activeTab === 'WORKFLOWS' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {isLoading ? (
-            <div className="col-span-3 py-12 text-center text-slate-500 text-sm">Lade Automationen...</div>
+            <div className="col-span-3 py-12 text-center text-slate-500 text-sm">
+              Lade Automationen...
+            </div>
           ) : workflows.length === 0 ? (
-            <div className="col-span-3 py-12 text-center text-slate-500 text-sm">Keine Automationen angelegt.</div>
+            <div className="col-span-3 py-12 text-center text-slate-500 text-sm">
+              Keine Automationen angelegt.
+            </div>
           ) : (
             workflows.map((wf) => (
               <div
@@ -154,11 +171,13 @@ export const AutomationsPage: React.FC = () => {
                         {wf.trigger_type}
                       </span>
                     </div>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                      wf.is_active 
-                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                        : 'bg-slate-800 text-slate-500 border-slate-700'
-                    }`}>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        wf.is_active
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          : 'bg-slate-800 text-slate-500 border-slate-700'
+                      }`}
+                    >
                       {wf.is_active ? 'AKTIV' : 'PAUSIERT'}
                     </span>
                   </div>
@@ -170,9 +189,14 @@ export const AutomationsPage: React.FC = () => {
 
                   {/* Steps List */}
                   <div className="space-y-1.5 pt-2 border-t border-slate-800/80">
-                    <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider">Ablauf-Schritte:</span>
+                    <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider">
+                      Ablauf-Schritte:
+                    </span>
                     {wf.steps?.map((step: any) => (
-                      <div key={step.step_number} className="flex items-center gap-2 text-xs text-slate-300">
+                      <div
+                        key={step.step_number}
+                        className="flex items-center gap-2 text-xs text-slate-300"
+                      >
                         <span className="w-4 h-4 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono shrink-0">
                           {step.step_number}
                         </span>
@@ -215,11 +239,20 @@ export const AutomationsPage: React.FC = () => {
                 {runs.map((run) => (
                   <tr key={run.id} className="hover:bg-slate-800/40 transition-colors">
                     <td className="py-4 px-6">
-                      <div className="font-semibold text-slate-100">{run.workflow_id === 'wf-1' ? 'Erstkontakt & Qualifizierung' : 'Deal-Abschluss Routine'}</div>
-                      <div className="text-xs text-slate-400">Ziel: {run.target_name} ({run.target_type})</div>
+                      <div className="font-semibold text-slate-100">
+                        {run.workflow_id === 'wf-1'
+                          ? 'Erstkontakt & Qualifizierung'
+                          : 'Deal-Abschluss Routine'}
+                      </div>
+                      <div className="text-xs text-slate-400">
+                        Ziel: {run.target_name} ({run.target_type})
+                      </div>
                     </td>
                     <td className="py-4 px-6 text-xs text-slate-300">
-                      Schritt {run.current_step}: {run.workflow_id === 'wf-1' ? 'E-Mail-Entwurf (Gemma 12B)' : 'Technik-Übergabe'}
+                      Schritt {run.current_step}:{' '}
+                      {run.workflow_id === 'wf-1'
+                        ? 'E-Mail-Entwurf (Gemma 12B)'
+                        : 'Technik-Übergabe'}
                     </td>
                     <td className="py-4 px-6">
                       {run.status === 'WAITING_APPROVAL' ? (
@@ -236,7 +269,9 @@ export const AutomationsPage: React.FC = () => {
                       {run.status === 'WAITING_APPROVAL' ? (
                         <button
                           onClick={() => {
-                            setSuccessToast(`Schritt für ${run.target_name} freigegeben und ausgeführt!`);
+                            setSuccessToast(
+                              `Schritt für ${run.target_name} freigegeben und ausgeführt!`,
+                            );
                             setTimeout(() => setSuccessToast(null), 4000);
                           }}
                           className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-bold rounded-lg transition-colors"
@@ -265,14 +300,19 @@ export const AutomationsPage: React.FC = () => {
                 <Zap className="w-5 h-5 text-amber-400" />
                 Neue Automatisierungs-Routine anlegen
               </h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-200">
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Name der Routine *</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Name der Routine *
+                </label>
                 <input
                   required
                   type="text"
@@ -284,7 +324,9 @@ export const AutomationsPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Beschreibung</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Beschreibung
+                </label>
                 <textarea
                   rows={2}
                   placeholder="Zweck dieser Automatisierung..."
@@ -296,7 +338,9 @@ export const AutomationsPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Trigger-Ereignis</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Trigger-Ereignis
+                  </label>
                   <select
                     value={formData.trigger_type}
                     onChange={(e) => setFormData({ ...formData, trigger_type: e.target.value })}
@@ -309,7 +353,9 @@ export const AutomationsPage: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Ziel-Objekt</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Ziel-Objekt
+                  </label>
                   <select
                     value={formData.target_type}
                     onChange={(e) => setFormData({ ...formData, target_type: e.target.value })}

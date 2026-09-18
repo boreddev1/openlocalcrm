@@ -60,6 +60,9 @@ logs: ## View real-time container logs
 test: ## Run Go tests
 	go test -v ./...
 
+coverage: ## Run Go test coverage analysis
+	./scripts/coverage.sh
+
 test-e2e: ## Run Playwright E2E tests
 	./scripts/run-e2e.sh
 

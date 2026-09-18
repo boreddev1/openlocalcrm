@@ -1,6 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bot, X, Send, Sparkles, ShieldCheck, Minimize2, Maximize2, Zap, ArrowRight } from 'lucide-react';
+import {
+  Bot,
+  X,
+  Send,
+  Sparkles,
+  ShieldCheck,
+  Minimize2,
+  Maximize2,
+  Zap,
+  ArrowRight,
+} from 'lucide-react';
 import { apiFetch } from '../../api/client';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -32,7 +42,8 @@ export const AIChatDrawer: React.FC = () => {
     {
       id: 'm-welcome',
       role: 'assistant',
-      content: 'Hallo! Ich bin Ihr OpenLocalCRM KI-Vertriebs-Copilot (Gemma 12B). Sie können mich direkt anweisen, Automatisierungen (§6.4), Tags, Deals oder E-Mail-Vorlagen im System anzulegen.',
+      content:
+        'Hallo! Ich bin Ihr OpenLocalCRM KI-Vertriebs-Copilot (Gemma 12B). Sie können mich direkt anweisen, Automatisierungen (§6.4), Tags, Deals oder E-Mail-Vorlagen im System anzulegen.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -196,8 +207,12 @@ export const AIChatDrawer: React.FC = () => {
                           <Zap className="w-3.5 h-3.5" />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-[11px] font-bold text-slate-100 truncate">{msg.actionCard.title}</div>
-                          <div className="text-[9px] text-emerald-400 font-mono font-bold">{msg.actionCard.badge}</div>
+                          <div className="text-[11px] font-bold text-slate-100 truncate">
+                            {msg.actionCard.title}
+                          </div>
+                          <div className="text-[9px] text-emerald-400 font-mono font-bold">
+                            {msg.actionCard.badge}
+                          </div>
                         </div>
                       </div>
                       <button
@@ -249,7 +264,10 @@ export const AIChatDrawer: React.FC = () => {
           </div>
 
           {/* Input Footer */}
-          <form onSubmit={handleSend} className="p-3 bg-slate-950 border-t border-slate-800 flex gap-2">
+          <form
+            onSubmit={handleSend}
+            className="p-3 bg-slate-950 border-t border-slate-800 flex gap-2"
+          >
             <input
               type="text"
               placeholder="Frage an den Copilot stellen (z.B. 'Workflow anlegen', 'Tag erstellen')..."

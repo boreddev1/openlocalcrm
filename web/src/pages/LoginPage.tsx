@@ -64,7 +64,9 @@ export const LoginPage: React.FC = () => {
             O
           </div>
           <h2 className="text-2xl font-bold text-slate-100">OpenLocalCRM</h2>
-          <p className="text-xs text-slate-400">Sicherer Single-Tenant Anmeldebereich für Vertriebsteams</p>
+          <p className="text-xs text-slate-400">
+            Sicherer Single-Tenant Anmeldebereich für Vertriebsteams
+          </p>
         </div>
 
         {/* Demo Mode Notice & Quick Fills */}
@@ -120,7 +122,9 @@ export const LoginPage: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">E-Mail-Adresse</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+              E-Mail-Adresse
+            </label>
             <div className="relative">
               <Mail className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
               <input
@@ -181,8 +185,8 @@ export const LoginPage: React.FC = () => {
             {isSubmitting
               ? 'Wird überprüft...'
               : totpRequired
-              ? 'Code bestätigen & Anmelden'
-              : 'Anmelden'}
+                ? 'Code bestätigen & Anmelden'
+                : 'Anmelden'}
           </button>
 
           {totpRequired && (

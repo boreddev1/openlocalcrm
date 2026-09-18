@@ -35,7 +35,10 @@ export const Header: React.FC<HeaderProps> = ({ onMenuToggle, onOpenSearch }) =>
       {/* Brand & Search Quick Switcher */}
       <div className="flex items-center gap-4">
         {onMenuToggle && (
-          <button onClick={onMenuToggle} className="lg:hidden p-1.5 text-slate-400 hover:text-slate-200">
+          <button
+            onClick={onMenuToggle}
+            className="lg:hidden p-1.5 text-slate-400 hover:text-slate-200"
+          >
             <Menu className="w-5 h-5" />
           </button>
         )}
@@ -52,7 +55,9 @@ export const Header: React.FC<HeaderProps> = ({ onMenuToggle, onOpenSearch }) =>
         >
           <Search className="w-3.5 h-3.5 text-slate-500" />
           <span className="hidden md:inline">Schnellsuche...</span>
-          <kbd className="hidden md:inline text-[10px] px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-400 font-mono">⌘K</kbd>
+          <kbd className="hidden md:inline text-[10px] px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-400 font-mono">
+            ⌘K
+          </kbd>
         </button>
       </div>
 
@@ -87,7 +92,9 @@ export const Header: React.FC<HeaderProps> = ({ onMenuToggle, onOpenSearch }) =>
           {isNotificationOpen && (
             <div className="absolute right-0 mt-2 w-80 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-4 space-y-3 z-50">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <span className="text-xs font-bold uppercase text-slate-400">Benachrichtigungen</span>
+                <span className="text-xs font-bold uppercase text-slate-400">
+                  Benachrichtigungen
+                </span>
                 {notifications.length > 0 && (
                   <button
                     onClick={() => markAllReadMutation.mutate()}
@@ -100,7 +107,9 @@ export const Header: React.FC<HeaderProps> = ({ onMenuToggle, onOpenSearch }) =>
 
               <div className="divide-y divide-slate-800/60 max-h-64 overflow-y-auto">
                 {notifications.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-slate-500">Keine neuen Benachrichtigungen</div>
+                  <div className="py-6 text-center text-xs text-slate-500">
+                    Keine neuen Benachrichtigungen
+                  </div>
                 ) : (
                   notifications.map((n) => (
                     <div key={n.id} className="py-2.5 space-y-1">
@@ -120,7 +129,9 @@ export const Header: React.FC<HeaderProps> = ({ onMenuToggle, onOpenSearch }) =>
             <User className="w-4 h-4" />
           </div>
           <div className="hidden md:block text-left">
-            <div className="text-xs font-medium text-slate-200">{user?.email || 'Nicht angemeldet'}</div>
+            <div className="text-xs font-medium text-slate-200">
+              {user?.email || 'Nicht angemeldet'}
+            </div>
             <div className="text-[10px] text-slate-500">{user?.role || 'GAST'}</div>
           </div>
           {user && (

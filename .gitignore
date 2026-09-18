@@ -26,6 +26,7 @@
 *.dylib
 
 # Test artifacts
+coverage/
 coverage.out
 coverage.html
 test-results/

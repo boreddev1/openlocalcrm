@@ -57,7 +57,9 @@ Thomas,Becker,becker@bau-solar.de,+49 69 55443322,1EMH0033445566,12000,Mainzer L
     setIsProcessing(true);
     setTimeout(() => {
       setIsProcessing(false);
-      setImportStatus('✅ Import erfolgreich: 3 Kontakte importiert, 1 Bestandsdatensatz dedupliziert & aktualisiert (§6.2).');
+      setImportStatus(
+        '✅ Import erfolgreich: 3 Kontakte importiert, 1 Bestandsdatensatz dedupliziert & aktualisiert (§6.2).',
+      );
       setTimeout(() => {
         onImportComplete();
         onClose();
@@ -71,7 +73,9 @@ Thomas,Becker,becker@bau-solar.de,+49 69 55443322,1EMH0033445566,12000,Mainzer L
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2">
             <FileSpreadsheet className="w-5 h-5 text-emerald-400" />
-            <h3 className="font-bold text-slate-100 text-base">CSV Kontakte- & Lead-Import (§6.2)</h3>
+            <h3 className="font-bold text-slate-100 text-base">
+              CSV Kontakte- & Lead-Import (§6.2)
+            </h3>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-200">
             <X className="w-5 h-5" />
@@ -100,12 +104,18 @@ Thomas,Becker,becker@bau-solar.de,+49 69 55443322,1EMH0033445566,12000,Mainzer L
                   Beispiel-CSV laden
                 </button>
               </div>
-              {fileName && <div className="text-xs text-emerald-400 font-mono font-semibold">{fileName} geladen</div>}
+              {fileName && (
+                <div className="text-xs text-emerald-400 font-mono font-semibold">
+                  {fileName} geladen
+                </div>
+              )}
             </div>
 
             {previewRows.length > 0 && (
               <div className="space-y-2">
-                <div className="text-xs font-bold text-slate-300">Vorschau & Spalten-Mapping (erste 3 Datensätze):</div>
+                <div className="text-xs font-bold text-slate-300">
+                  Vorschau & Spalten-Mapping (erste 3 Datensätze):
+                </div>
                 <div className="overflow-x-auto border border-slate-800 rounded-xl bg-slate-950">
                   <table className="w-full text-left text-[11px] text-slate-300">
                     <thead className="bg-slate-900 text-slate-400 uppercase border-b border-slate-800">
