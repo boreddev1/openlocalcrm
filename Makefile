@@ -60,8 +60,14 @@ logs: ## View real-time container logs
 test: ## Run Go tests
 	go test -v ./...
 
-coverage: ## Run Go test coverage analysis
-	./scripts/coverage.sh
+coverage: ## Run Go test coverage analysis with 50% minimum threshold
+	./scripts/coverage.sh --min 50.0 --diff 50.0
+
+coverage-html: ## Generate and open HTML test coverage report
+	./scripts/coverage.sh --html
+
+check-coverage: ## Verify 50%+ code coverage and 50%+ diff coverage on new code
+	./scripts/coverage.sh --min 50.0 --diff 50.0
 
 test-e2e: ## Run Playwright E2E tests
 	./scripts/run-e2e.sh

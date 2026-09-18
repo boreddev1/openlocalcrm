@@ -940,6 +940,8 @@ func (q *InMemoryQuerier) UpdateDealStage(ctx context.Context, arg db.UpdateDeal
 		return db.Deal{}, ErrNotFound
 	}
 	d.Stage = arg.Stage
+	d.Probability = arg.Probability
+	d.ClosedAt = arg.ClosedAt
 	d.UpdatedAt = nowTimestamptz()
 	q.deals[idStr] = d
 	return d, nil

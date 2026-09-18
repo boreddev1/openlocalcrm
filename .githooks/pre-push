@@ -32,18 +32,19 @@ fi
 
 echo -e "${BLUE}${BOLD}🚀 [Pre-Push] Führe finale Tests vor dem Push aus...${NC}"
 
-# 1. Run unit & integration tests
-echo -n "  • Führe Go Unit- und Integrationstests aus... "
-if command -v go >/dev/null 2>&1; then
-    if go test -short ./... > /dev/null 2>&1; then
-        echo -e "${GREEN}OK${NC}"
+# 1. Run unit & integration tests + coverage enforcement (>= 50% total & >= 50% new code)
+echo -n "  • Führe Tests mit Code-Coverage & Diff-Prüfung aus (Mindestens 50%)... "
+if command -v go >/dev/null 2>&1 && [ -f "./scripts/coverage.sh" ]; then
+    if ./scripts/coverage.sh --min 50.0 --diff 50.0 > /dev/null 2>&1; then
+        echo -e "${GREEN}OK (Coverage >= 50.0% & Diff >= 50.0%)${NC}"
     else
         echo -e "${RED}FEHLER${NC}"
-        echo -e "${RED}❌ Go-Tests sind fehlgeschlagen! Bitte 'go test ./...' ausführen und Fehler beheben vor dem Push.${NC}"
+        echo -e "${RED}❌ Testsuite oder Coverage-Prüfung fehlgeschlagen!${NC}"
+        echo -e "${YELLOW}Führen Sie './scripts/coverage.sh --min 50.0 --diff 50.0' aus, um Details zu sehen.${NC}"
         exit 1
     fi
 else
-    echo -e "${YELLOW}Übersprungen (go nicht im PATH)${NC}"
+    echo -e "${YELLOW}Übersprungen (go oder coverage.sh nicht verfügbar)${NC}"
 fi
 
 # 2. Run license compliance
