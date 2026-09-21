@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -24,10 +23,11 @@ func GenerateCSRFToken() (string, error) {
 }
 
 // SetCSRFCookie sets or refreshes the readable CSRF cookie for the client SPA
-func SetCSRFCookie(w http.ResponseWriter, secure bool) string {
+func SetCSRFCookie(w http.ResponseWriter, secure bool) (string, error) {
 	token, err := GenerateCSRFToken()
 	if err != nil {
-		token = hex.EncodeToString([]byte(time.Now().String()))
+		http.Error(w, `{"error":"internal_error","message":"failed to generate CSRF token"}`, http.StatusInternalServerError)
+		return "", err
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -40,11 +40,16 @@ func SetCSRFCookie(w http.ResponseWriter, secure bool) string {
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	return token
+	return token, nil
 }
 
 // ClearCSRFCookie invalidates the CSRF cookie on logout
-func ClearCSRFCookie(w http.ResponseWriter) {
+func ClearCSRFCookie(w http.ResponseWriter, secure ...bool) {
+	isSecure := true
+	if len(secure) > 0 {
+		isSecure = secure[0]
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     CSRFCookieName,
 		Value:    "",
@@ -52,6 +57,7 @@ func ClearCSRFCookie(w http.ResponseWriter) {
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 		HttpOnly: false,
+		Secure:   isSecure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -72,15 +78,13 @@ func CSRFProtectionMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 2. Requests using Authorization: Bearer <token> (such as connectors, webhooks, or API clients)
-		// are not ambient-credentialed and are therefore immune to browser CSRF
-		authHeader := r.Header.Get("Authorization")
-		if strings.HasPrefix(authHeader, "Bearer ") {
+		// 3. Requests authenticated via verified Bearer token are not ambient-credentialed and are therefore immune to browser CSRF
+		if IsAuthViaBearer(r.Context()) {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// 3. For cookie-authenticated mutating requests, check Double Submit Cookie
+		// 4. For cookie-authenticated mutating requests, check Double Submit Cookie
 		cookie, err := r.Cookie(CSRFCookieName)
 		if err != nil || cookie.Value == "" {
 			http.Error(w, `{"error":"csrf_token_missing","message":"CSRF-Cookie fehlt"}`, http.StatusForbidden)

@@ -71,26 +71,27 @@ func (h *SettingsHandler) ExportSettings(w http.ResponseWriter, r *http.Request)
 			Version:    launcher.DefaultVersion,
 			ExportedAt: time.Now().UTC().Format(time.RFC3339),
 			AI: launcher.AISettings{
-				Provider: aiProv,
-				BaseURL:  aiBaseURL,
-				Model:    aiModel,
-				APIKey:   os.Getenv("AI_API_KEY"),
+				Provider:  aiProv,
+				BaseURL:   aiBaseURL,
+				Model:     aiModel,
+				HasAPIKey: os.Getenv("AI_API_KEY") != "",
 			},
 			Admin: launcher.AdminSettings{
-				Email: adminEmail,
+				Email:       adminEmail,
+				HasPassword: os.Getenv("INITIAL_ADMIN_PASSWORD") != "",
 			},
 			System: launcher.SystemSettings{
-				Port:              port,
-				DemoMode:          strings.EqualFold(os.Getenv("DEMO_MODE"), "true"),
-				ConnectorAPIToken: os.Getenv("CONNECTOR_API_TOKEN"),
-				Version:           launcher.DefaultVersion,
+				Port:                 port,
+				DemoMode:             strings.EqualFold(os.Getenv("DEMO_MODE"), "true"),
+				HasConnectorAPIToken: os.Getenv("CONNECTOR_API_TOKEN") != "",
+				Version:              launcher.DefaultVersion,
 			},
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="openlocalcrm-settings.json"`)
-	_ = json.NewEncoder(w).Encode(exported)
+	_ = json.NewEncoder(w).Encode(exported.RedactSecrets())
 }
 
 // ImportSettings imports settings from a JSON payload and updates the configuration.
@@ -123,6 +124,10 @@ func (h *SettingsHandler) ImportSettings(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := launcher.ImportSettingsToEnv(h.baseDir, &settings, true); err != nil {
+		if strings.Contains(err.Error(), "invalid control characters") || strings.Contains(err.Error(), "cannot be nil") {
+			http.Error(w, fmt.Sprintf(`{"error":"bad_request","message":"%s"}`, err.Error()), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, fmt.Sprintf(`{"error":"import_failed","message":"%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
@@ -131,6 +136,6 @@ func (h *SettingsHandler) ImportSettings(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success":  true,
 		"message":  "Einstellungen erfolgreich importiert. Bitte starten Sie die Container bei Bedarf neu.",
-		"settings": settings,
+		"settings": settings.RedactSecrets(),
 	})
 }

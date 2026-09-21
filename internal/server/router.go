@@ -86,7 +86,7 @@ func NewRouter(cfg Config) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// F-20: chi/middleware.RealIP removed to prevent header spoofing; ClientIP handles trusted proxies
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
@@ -244,25 +244,32 @@ func NewRouter(cfg Config) http.Handler {
 		}
 	}
 
+	loginLimiter := auth.NewRateLimiter(5, time.Minute, 5*time.Minute)
+	if cfg.Context != nil {
+		go func() {
+			<-cfg.Context.Done()
+			loginLimiter.Stop()
+		}()
+	}
+
 	// API v1 group
 	r.Route("/api/v1", func(api chi.Router) {
-		api.Use(CSRFProtectionMiddleware)
-
 		// Public Auth routes
 		if authH != nil {
-			api.Post("/auth/login", authH.Login)
-			api.With(auth.RateLimitMiddleware(authLimiter)).Post("/auth/refresh", authH.Refresh)
-			api.Post("/auth/logout", authH.Logout)
+			api.With(auth.RateLimitMiddleware(loginLimiter)).Post("/auth/login", authH.Login)
+			api.With(CSRFProtectionMiddleware, auth.RateLimitMiddleware(authLimiter)).Post("/auth/refresh", authH.Refresh)
+			api.With(CSRFProtectionMiddleware).Post("/auth/logout", authH.Logout)
 		}
 
-		// Public Webhook intake (secured via Connector Bearer Token)
+		// Public Webhook intake (secured via Connector Bearer Token, outside CSRF group)
 		if connectorH != nil {
 			api.Post("/connectors/lead-intake", connectorH.LeadIntake)
 		}
 
-		// Protected routes (Always enforced JWT authentication)
+		// Protected routes (Always enforced JWT authentication, then CSRF protection)
 		api.Group(func(protected chi.Router) {
 			protected.Use(auth.AuthMiddleware(cfg.PubKey))
+			protected.Use(CSRFProtectionMiddleware)
 
 			protected.Get("/me", func(w http.ResponseWriter, r *http.Request) {
 				claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)

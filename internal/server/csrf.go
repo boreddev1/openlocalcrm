@@ -11,8 +11,12 @@ const (
 	CSRFHeaderName = auth.CSRFHeaderName
 )
 
-func SetCSRFCookie(w http.ResponseWriter, secure bool) string {
+func SetCSRFCookie(w http.ResponseWriter, secure bool) (string, error) {
 	return auth.SetCSRFCookie(w, secure)
+}
+
+func ClearCSRFCookie(w http.ResponseWriter, secure ...bool) {
+	auth.ClearCSRFCookie(w, secure...)
 }
 
 func CSRFProtectionMiddleware(next http.Handler) http.Handler {

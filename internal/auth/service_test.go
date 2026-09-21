@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/pquerna/otp/totp"
 )
@@ -132,8 +134,8 @@ func TestAuthService_TOTPFlow(t *testing.T) {
 		t.Fatalf("expected TOTPRequired to be true")
 	}
 
-	// Login with valid TOTP code
-	codeNow, _ := totp.GenerateCode(setup.Secret, time.Now())
+	// Login with valid TOTP code for next time window
+	codeNow, _ := totp.GenerateCode(setup.Secret, time.Now().Add(30*time.Second))
 	loginRes, err = svc.Login(ctx, "admin@openlocalcrm.local", "demo123", codeNow, "127.0.0.1", "TestAgent")
 	if err != nil || loginRes.Token == "" {
 		t.Fatalf("expected login success with TOTP, got err: %v", err)
@@ -197,5 +199,97 @@ func TestAuthService_ChangePassword(t *testing.T) {
 	err = svc.ChangePassword(ctx, adminUUID, "oldpassword123", "anotherpassword123")
 	if err != auth.ErrInvalidOldPassword {
 		t.Fatalf("CRITICAL SECURITY VULNERABILITY: oldpassword123 bypass accepted in ChangePassword!")
+	}
+}
+
+func TestLogin_ConstantTimeOnUnknownUser(t *testing.T) {
+	svc, _, _ := setupTestAuthService(t)
+	ctx := context.Background()
+
+	// 1. Unknown user check duration: must perform real Argon2id derivation (> 20ms)
+	startUnknown := time.Now()
+	_, err := svc.Login(ctx, "unknown-user-does-not-exist@example.com", "any-password-123", "", "127.0.0.1", "TestAgent")
+	durUnknown := time.Since(startUnknown)
+
+	if err == nil {
+		t.Fatalf("expected error for unknown user")
+	}
+	if durUnknown < 20*time.Millisecond {
+		t.Fatalf("timing attack vulnerability (F-04): unknown user took only %v, expected > 20ms for full Argon2id calculation", durUnknown)
+	}
+
+	// 2. Wrong password check duration on real user
+	startWrong := time.Now()
+	_, err = svc.Login(ctx, "admin@openlocalcrm.local", "wrong-password-123", "", "127.0.0.1", "TestAgent")
+	durWrong := time.Since(startWrong)
+
+	if err == nil {
+		t.Fatalf("expected error for wrong password")
+	}
+	if durWrong < 20*time.Millisecond {
+		t.Fatalf("expected real user check to take > 20ms, took %v", durWrong)
+	}
+}
+
+func TestTOTP_SecretIsEncryptedInDatabase(t *testing.T) {
+	svc, querier, _ := setupTestAuthService(t)
+	ctx := context.Background()
+
+	adminUUID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	setupRes, err := svc.SetupTOTP(ctx, adminUUID)
+	if err != nil {
+		t.Fatalf("SetupTOTP failed: %v", err)
+	}
+
+	user, err := querier.GetUserByID(ctx, pgtype.UUID{Bytes: adminUUID, Valid: true})
+	if err != nil {
+		t.Fatalf("failed getting user: %v", err)
+	}
+
+	storedSecret := user.TotpSecretEncrypted.String
+	if storedSecret == "" {
+		t.Fatalf("expected stored secret in db")
+	}
+
+	// 1. Must NOT equal plaintext secret
+	if storedSecret == setupRes.Secret {
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY (F-01): TOTP secret stored in plaintext! stored=%s, plain=%s", storedSecret, setupRes.Secret)
+	}
+
+	// 2. Decrypting with crypto.DecryptSecret yields the plaintext setupRes.Secret
+	decrypted, err := crypto.DecryptSecret(storedSecret)
+	if err != nil {
+		t.Fatalf("failed to decrypt stored secret: %v", err)
+	}
+	if decrypted != setupRes.Secret {
+		t.Fatalf("expected decrypted secret to match plaintext setup secret, got %s != %s", decrypted, setupRes.Secret)
+	}
+}
+
+func TestAuthService_TOTPReplayPrevention(t *testing.T) {
+	svc, _, _ := setupTestAuthService(t)
+	ctx := context.Background()
+	adminUUID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	// Setup TOTP
+	setupRes, err := svc.SetupTOTP(ctx, adminUUID)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	code, err := totp.GenerateCode(setupRes.Secret, time.Now())
+	if err != nil {
+		t.Fatalf("failed generating code: %v", err)
+	}
+
+	// Verify TOTP to enable it
+	if err := svc.VerifyTOTP(ctx, adminUUID, code); err != nil {
+		t.Fatalf("verify failed: %v", err)
+	}
+
+	// Replay of the code used in VerifyTOTP must immediately fail on Login!
+	_, err = svc.Login(ctx, "admin@openlocalcrm.local", "demo123", code, "127.0.0.1", "TestAgent")
+	if err == nil {
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY (F-02): expected replay of TOTP verification code to fail during login")
 	}
 }

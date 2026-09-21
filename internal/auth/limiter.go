@@ -222,39 +222,37 @@ func (rl *RateLimiter) Reset(key string) {
 	delete(rl.attempts, key)
 }
 
+// ClientIP extracts the client IP, only trusting X-Forwarded-For if the immediate connection is from a trusted proxy (loopback or private IP).
+// True-Client-IP and X-Real-IP are never trusted (mitigating spoofing per F-20).
+func ClientIP(r *http.Request) string {
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remoteHost = r.RemoteAddr
+	}
+	remoteIP := net.ParseIP(remoteHost)
+
+	ip := remoteHost
+	isLocalOrPrivate := remoteIP != nil && (remoteIP.IsLoopback() || remoteIP.IsPrivate() || remoteIP.IsLinkLocalUnicast())
+	if isLocalOrPrivate {
+		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+			parts := strings.Split(forwarded, ",")
+			candidate := strings.TrimSpace(parts[0])
+			if host, _, err := net.SplitHostPort(candidate); err == nil {
+				candidate = host
+			}
+			if net.ParseIP(candidate) != nil {
+				ip = candidate
+			}
+		}
+	}
+	return ip
+}
+
 // RateLimitMiddleware creates an HTTP middleware that limits requests per IP
 func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
-			if err != nil {
-				remoteHost = r.RemoteAddr
-			}
-			remoteIP := net.ParseIP(remoteHost)
-
-			ip := remoteHost
-			// Only trust X-Forwarded-For or X-Real-IP if the immediate connection is from a trusted proxy (loopback or private IP)
-			isLocalOrPrivate := remoteIP != nil && (remoteIP.IsLoopback() || remoteIP.IsPrivate() || remoteIP.IsLinkLocalUnicast())
-			if isLocalOrPrivate {
-				if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-					parts := strings.Split(forwarded, ",")
-					candidate := strings.TrimSpace(parts[0])
-					if host, _, err := net.SplitHostPort(candidate); err == nil {
-						candidate = host
-					}
-					if net.ParseIP(candidate) != nil {
-						ip = candidate
-					}
-				} else if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
-					candidate := strings.TrimSpace(realIP)
-					if host, _, err := net.SplitHostPort(candidate); err == nil {
-						candidate = host
-					}
-					if net.ParseIP(candidate) != nil {
-						ip = candidate
-					}
-				}
-			}
+			ip := ClientIP(r)
 
 			allowed, remaining := limiter.Allow(ip)
 			if !allowed {

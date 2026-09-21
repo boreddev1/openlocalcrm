@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
@@ -28,6 +29,32 @@ var (
 	ErrInvalidOldPassword = errors.New("das aktuelle Passwort ist ungültig")
 	ErrUserNotFound       = errors.New("benutzer nicht gefunden")
 )
+
+var (
+	argon2Sem       = make(chan struct{}, 4)
+	dummyArgon2Hash string
+)
+
+func init() {
+	var err error
+	dummyArgon2Hash, err = HashPassword("OpenLocalCRM-Mitigate-User-Enumeration-Timing-F04-F05!")
+	if err != nil {
+		panic("auth: failed generating dummy password hash: " + err.Error())
+	}
+}
+
+func acquireArgonSem(ctx context.Context) error {
+	select {
+	case argon2Sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func releaseArgonSem() {
+	<-argon2Sem
+}
 
 type rotatedTokenEntry struct {
 	accessToken  string
@@ -134,17 +161,28 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 
 	user, err := s.querier.GetUserByEmail(ctx, email)
 	if err != nil {
-		// Mitigation against timing attacks (Finding #33): execute dummy password check to equalize timing
-		_ = CheckPassword("$argon2id$v=19$m=65536,t=1,p=4$dummySalt12345678$dummyHashDummyHashDummyHashDummyHashDummyHashD=", password)
+		// Mitigation against timing attacks (Finding #33 / F-04): execute real dummy Argon2id calculation under semaphore
+		if semErr := acquireArgonSem(ctx); semErr == nil {
+			_ = CheckPassword(dummyArgon2Hash, password)
+			releaseArgonSem()
+		}
+		s.limiter.RecordFailure(rateLimitKey)
+		return nil, ErrInvalidCredentials
+	}
+
+	// Always verify password under semaphore first to eliminate user enumeration (F-04, F-05)
+	if semErr := acquireArgonSem(ctx); semErr != nil {
+		return nil, semErr
+	}
+	passwordMatches := CheckPassword(user.PasswordHash, password)
+	releaseArgonSem()
+
+	if !passwordMatches {
 		s.limiter.RecordFailure(rateLimitKey)
 		return nil, ErrInvalidCredentials
 	}
 
 	if user.Status != "ACTIVE" {
-		return nil, ErrUserNotActive
-	}
-
-	if !CheckPassword(user.PasswordHash, password) {
 		s.limiter.RecordFailure(rateLimitKey)
 		return nil, ErrInvalidCredentials
 	}
@@ -157,10 +195,25 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 			}, nil
 		}
 
-		secret := user.TotpSecretEncrypted.String
-		if !ValidateTOTPCode(totpCode, secret) {
+		encryptedSecret := user.TotpSecretEncrypted.String
+		plainSecret, err := crypto.DecryptSecret(encryptedSecret)
+		if err != nil {
 			s.limiter.RecordFailure(rateLimitKey)
 			return nil, ErrInvalidTOTPCode
+		}
+
+		valid, usedStep := ValidateTOTPCodeWithStep(totpCode, plainSecret, user.TotpLastUsedStep)
+		if !valid {
+			s.limiter.RecordFailure(rateLimitKey)
+			return nil, ErrInvalidTOTPCode
+		}
+
+		// Persist used step to prevent replay attacks (F-02)
+		if err := s.querier.UpdateUserTOTPLastUsedStep(ctx, db.UpdateUserTOTPLastUsedStepParams{
+			ID:               user.ID,
+			TotpLastUsedStep: usedStep,
+		}); err != nil {
+			log.Printf("[AUTH] Warning: failed updating totp_last_used_step for user %s: %v", user.Email, err)
 		}
 	}
 
@@ -285,11 +338,17 @@ func (s *AuthService) SetupTOTP(ctx context.Context, userID uuid.UUID) (*TOTPSet
 		return nil, err
 	}
 
-	// Store secret temporarily (not enabled until verified)
+	encryptedSecret, err := crypto.EncryptSecret(secret)
+	if err != nil {
+		return nil, fmt.Errorf("failed encrypting totp secret: %w", err)
+	}
+
+	// Store encrypted secret temporarily (not enabled until verified)
 	err = s.querier.UpdateUserTOTP(ctx, db.UpdateUserTOTPParams{
 		ID:                  pgID,
-		TotpSecretEncrypted: pgtype.Text{String: secret, Valid: true},
+		TotpSecretEncrypted: pgtype.Text{String: encryptedSecret, Valid: true},
 		TotpEnabled:         false,
+		TotpLastUsedStep:    0,
 	})
 	if err != nil {
 		return nil, err
@@ -308,19 +367,26 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, userID uuid.UUID, code str
 		return ErrUserNotFound
 	}
 
-	secret := user.TotpSecretEncrypted.String
-	if secret == "" {
+	encryptedSecret := user.TotpSecretEncrypted.String
+	if encryptedSecret == "" {
 		return errors.New("no TOTP setup found in progress")
 	}
 
-	if !ValidateTOTPCode(code, secret) {
+	plainSecret, err := crypto.DecryptSecret(encryptedSecret)
+	if err != nil {
+		return errors.New("failed decrypting TOTP secret")
+	}
+
+	valid, usedStep := ValidateTOTPCodeWithStep(code, plainSecret, 0)
+	if !valid {
 		return ErrInvalidTOTPCode
 	}
 
 	return s.querier.UpdateUserTOTP(ctx, db.UpdateUserTOTPParams{
 		ID:                  pgID,
-		TotpSecretEncrypted: pgtype.Text{String: secret, Valid: true},
+		TotpSecretEncrypted: pgtype.Text{String: encryptedSecret, Valid: true},
 		TotpEnabled:         true,
+		TotpLastUsedStep:    usedStep,
 	})
 }
 
@@ -331,7 +397,13 @@ func (s *AuthService) DisableTOTP(ctx context.Context, userID uuid.UUID, current
 		return ErrUserNotFound
 	}
 
-	if !CheckPassword(user.PasswordHash, currentPassword) {
+	if semErr := acquireArgonSem(ctx); semErr != nil {
+		return semErr
+	}
+	pwMatches := CheckPassword(user.PasswordHash, currentPassword)
+	releaseArgonSem()
+
+	if !pwMatches {
 		return ErrInvalidOldPassword
 	}
 
@@ -339,6 +411,7 @@ func (s *AuthService) DisableTOTP(ctx context.Context, userID uuid.UUID, current
 		ID:                  pgID,
 		TotpSecretEncrypted: pgtype.Text{Valid: false},
 		TotpEnabled:         false,
+		TotpLastUsedStep:    0,
 	})
 }
 
@@ -353,11 +426,21 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldP
 		return ErrUserNotFound
 	}
 
-	if !CheckPassword(user.PasswordHash, oldPassword) {
+	if semErr := acquireArgonSem(ctx); semErr != nil {
+		return semErr
+	}
+	oldMatches := CheckPassword(user.PasswordHash, oldPassword)
+	releaseArgonSem()
+
+	if !oldMatches {
 		return ErrInvalidOldPassword
 	}
 
+	if semErr := acquireArgonSem(ctx); semErr != nil {
+		return semErr
+	}
 	hash, err := HashPassword(newPassword)
+	releaseArgonSem()
 	if err != nil {
 		return fmt.Errorf("failed hashing password: %w", err)
 	}

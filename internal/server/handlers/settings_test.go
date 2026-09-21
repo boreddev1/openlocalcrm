@@ -138,4 +138,78 @@ OLLAMA_MODEL=gemma4:12b
 		data, _ := os.ReadFile(filepath.Join(tmp, ".env"))
 		require.Contains(t, string(data), "INITIAL_ADMIN_EMAIL=multipart-admin@solar.de")
 	})
+
+	t.Run("ExportSettings never outputs plaintext secrets (F-31)", func(t *testing.T) {
+		secEnv := `PORT=8080
+INITIAL_ADMIN_EMAIL=admin@system.de
+INITIAL_ADMIN_PASSWORD=SuperSecretAdminPassword123!
+AI_API_KEY=sk-proj-ultra-secret-key-456
+CONNECTOR_API_TOKEN=super-secret-connector-token-789
+`
+		_ = os.WriteFile(filepath.Join(tmp, ".env"), []byte(secEnv), 0600)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/settings/export", nil).WithContext(adminCtx)
+		rec := httptest.NewRecorder()
+
+		h.ExportSettings(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		rawBody := rec.Body.String()
+		require.NotContains(t, rawBody, "SuperSecretAdminPassword123!")
+		require.NotContains(t, rawBody, "sk-proj-ultra-secret-key-456")
+		require.NotContains(t, rawBody, "super-secret-connector-token-789")
+
+		var exported launcher.ExportedSettings
+		err := json.Unmarshal([]byte(rawBody), &exported)
+		require.NoError(t, err)
+		require.Empty(t, exported.Admin.Password)
+		require.True(t, exported.Admin.HasPassword)
+		require.Empty(t, exported.AI.APIKey)
+		require.True(t, exported.AI.HasAPIKey)
+		require.Empty(t, exported.System.ConnectorAPIToken)
+		require.True(t, exported.System.HasConnectorAPIToken)
+	})
+
+	t.Run("ImportSettings rejects newlines to prevent .env injection (F-33)", func(t *testing.T) {
+		injectedSettings := launcher.ExportedSettings{
+			Admin: launcher.AdminSettings{
+				Email: "admin@system.de\nINJECTED_VAR=malicious_payload",
+			},
+		}
+		body, _ := json.Marshal(injectedSettings)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/import", bytes.NewReader(body)).WithContext(adminCtx)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		h.ImportSettings(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		require.Contains(t, rec.Body.String(), "invalid control characters")
+	})
+
+	t.Run("ImportSettings does not echo secrets in response (F-32)", func(t *testing.T) {
+		settingsWithSecrets := launcher.ExportedSettings{
+			Admin: launcher.AdminSettings{
+				Email:    "new@system.de",
+				Password: "NewPlaintextPassword999!",
+			},
+			AI: launcher.AISettings{
+				APIKey: "sk-another-secret-key-111",
+			},
+			System: launcher.SystemSettings{
+				ConnectorAPIToken: "conn-secret-token-222",
+			},
+		}
+		body, _ := json.Marshal(settingsWithSecrets)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/import", bytes.NewReader(body)).WithContext(adminCtx)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		h.ImportSettings(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		rawBody := rec.Body.String()
+		require.NotContains(t, rawBody, "NewPlaintextPassword999!")
+		require.NotContains(t, rawBody, "sk-another-secret-key-111")
+		require.NotContains(t, rawBody, "conn-secret-token-222")
+	})
 }

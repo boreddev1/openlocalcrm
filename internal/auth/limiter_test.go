@@ -1,6 +1,8 @@
 package auth_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -103,5 +105,38 @@ func TestRateLimiter_Allow(t *testing.T) {
 	allowed, _ = rl.Allow(key)
 	if !allowed {
 		t.Fatalf("expected request after lockout to be allowed")
+	}
+}
+
+func TestRealIP_HeaderSpoofingIgnored(t *testing.T) {
+	limiter := auth.NewRateLimiter(2, time.Minute, time.Minute)
+	defer limiter.Stop()
+
+	handler := auth.RateLimitMiddleware(limiter)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Untrusted public IP tries to spoof True-Client-IP and X-Real-IP
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/test", nil)
+		req.RemoteAddr = "203.0.113.50:1234"
+		req.Header.Set("True-Client-IP", "1.1.1."+string(rune('0'+i)))
+		req.Header.Set("X-Real-IP", "1.1.1."+string(rune('0'+i)))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("attempt %d should be allowed, got %d", i+1, rec.Code)
+		}
+	}
+
+	// 3rd request with yet another spoofed IP from the same RemoteAddr must be 429
+	req3 := httptest.NewRequest(http.MethodPost, "/test", nil)
+	req3.RemoteAddr = "203.0.113.50:1234"
+	req3.Header.Set("True-Client-IP", "1.1.1.99")
+	req3.Header.Set("X-Real-IP", "1.1.1.99")
+	rec3 := httptest.NewRecorder()
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 Too Many Requests despite spoofed True-Client-IP, got %d", rec3.Code)
 	}
 }

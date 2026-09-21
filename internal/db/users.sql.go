@@ -33,7 +33,7 @@ INSERT INTO users (
 ) VALUES (
     $1, $2, $3, $4, $5, $6
 )
-RETURNING id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at
+RETURNING id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step
 `
 
 type CreateUserParams struct {
@@ -69,12 +69,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TotpLastUsedStep,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at FROM users
+SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step FROM users
 WHERE email = $1 LIMIT 1
 `
 
@@ -94,12 +95,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TotpLastUsedStep,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at FROM users
+SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step FROM users
 WHERE id = $1 LIMIT 1
 `
 
@@ -119,12 +121,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TotpLastUsedStep,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at FROM users
+SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step FROM users
 ORDER BY created_at ASC
 `
 
@@ -150,6 +153,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.LastLoginAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TotpLastUsedStep,
 		); err != nil {
 			return nil, err
 		}
@@ -227,7 +231,7 @@ func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusPara
 
 const updateUserTOTP = `-- name: UpdateUserTOTP :exec
 UPDATE users
-SET totp_secret_encrypted = $2, totp_enabled = $3, updated_at = NOW()
+SET totp_secret_encrypted = $2, totp_enabled = $3, totp_last_used_step = $4, updated_at = NOW()
 WHERE id = $1
 `
 
@@ -235,9 +239,31 @@ type UpdateUserTOTPParams struct {
 	ID                  pgtype.UUID `json:"id"`
 	TotpSecretEncrypted pgtype.Text `json:"totp_secret_encrypted"`
 	TotpEnabled         bool        `json:"totp_enabled"`
+	TotpLastUsedStep    int64       `json:"totp_last_used_step"`
 }
 
 func (q *Queries) UpdateUserTOTP(ctx context.Context, arg UpdateUserTOTPParams) error {
-	_, err := q.db.Exec(ctx, updateUserTOTP, arg.ID, arg.TotpSecretEncrypted, arg.TotpEnabled)
+	_, err := q.db.Exec(ctx, updateUserTOTP,
+		arg.ID,
+		arg.TotpSecretEncrypted,
+		arg.TotpEnabled,
+		arg.TotpLastUsedStep,
+	)
+	return err
+}
+
+const updateUserTOTPLastUsedStep = `-- name: UpdateUserTOTPLastUsedStep :exec
+UPDATE users
+SET totp_last_used_step = $2, updated_at = NOW()
+WHERE id = $1
+`
+
+type UpdateUserTOTPLastUsedStepParams struct {
+	ID               pgtype.UUID `json:"id"`
+	TotpLastUsedStep int64       `json:"totp_last_used_step"`
+}
+
+func (q *Queries) UpdateUserTOTPLastUsedStep(ctx context.Context, arg UpdateUserTOTPLastUsedStepParams) error {
+	_, err := q.db.Exec(ctx, updateUserTOTPLastUsedStep, arg.ID, arg.TotpLastUsedStep)
 	return err
 }

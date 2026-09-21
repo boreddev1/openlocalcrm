@@ -197,3 +197,39 @@ func TestSettingsEndpoints(t *testing.T) {
 		t.Fatalf("expected 200 OK on settings import, got %d: %s", importRec.Code, importRec.Body.String())
 	}
 }
+
+func TestLoginRateLimit_TriggeredAfter5Attempts(t *testing.T) {
+	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
+	querier := demo.NewInMemoryQuerier()
+	r := server.NewRouter(server.Config{
+		DB:       querier,
+		SSEHub:   sse.NewHub(),
+		PubKey:   pubKey,
+		PrivKey:  privKey,
+		DemoMode: true,
+	})
+
+	for i := 0; i < 5; i++ {
+		payload := []byte(`{"email":"admin@openlocalcrm.local","password":"badpassword"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "198.51.100.25:4567"
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected 401 Unauthorized, got %d", i+1, rec.Code)
+		}
+	}
+
+	// 6th attempt must be rate-limited with 429 Too Many Requests
+	payload := []byte(`{"email":"admin@openlocalcrm.local","password":"badpassword"}`)
+	req6 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(payload))
+	req6.Header.Set("Content-Type", "application/json")
+	req6.RemoteAddr = "198.51.100.25:4567"
+	rec6 := httptest.NewRecorder()
+	r.ServeHTTP(rec6, req6)
+
+	if rec6.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 Too Many Requests on 6th login attempt, got %d: %s", rec6.Code, rec6.Body.String())
+	}
+}

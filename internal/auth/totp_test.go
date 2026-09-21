@@ -40,3 +40,27 @@ func TestTOTPFlow(t *testing.T) {
 		}
 	}
 }
+
+func TestTOTP_ReplayPrevention(t *testing.T) {
+	secret, _, err := auth.GenerateTOTPKey("replay@openlocalcrm.local")
+	if err != nil {
+		t.Fatalf("failed generating key: %v", err)
+	}
+
+	code, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatalf("failed generating code: %v", err)
+	}
+
+	// 1. Initial validation with lastUsedStep = 0 must pass and return usedStep > 0
+	valid, usedStep := auth.ValidateTOTPCodeWithStep(code, secret, 0)
+	if !valid || usedStep <= 0 {
+		t.Fatalf("expected initial verification to pass, valid=%v, usedStep=%d", valid, usedStep)
+	}
+
+	// 2. Replay with the same lastUsedStep must fail
+	validReplay, _ := auth.ValidateTOTPCodeWithStep(code, secret, usedStep)
+	if validReplay {
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY (F-02): TOTP token replayed successfully within the same time-step window!")
+	}
+}

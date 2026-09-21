@@ -49,8 +49,17 @@ OPENLOCALCRM_VERSION=v1.0.2
 	if exported.System.Port != 8080 {
 		t.Errorf("expected port 8080, got %d", exported.System.Port)
 	}
-	if exported.System.ConnectorAPIToken != "custom-token-xyz" {
-		t.Errorf("expected custom-token-xyz, got %s", exported.System.ConnectorAPIToken)
+	if exported.System.ConnectorAPIToken != "" {
+		t.Errorf("expected redacted connector token, got %s", exported.System.ConnectorAPIToken)
+	}
+	if !exported.System.HasConnectorAPIToken {
+		t.Errorf("expected HasConnectorAPIToken true")
+	}
+	if exported.Admin.Password != "" {
+		t.Errorf("expected redacted admin password, got %s", exported.Admin.Password)
+	}
+	if !exported.Admin.HasPassword {
+		t.Errorf("expected HasPassword true")
 	}
 
 	// 3. Save to settings.json and load back
@@ -67,9 +76,14 @@ OPENLOCALCRM_VERSION=v1.0.2
 		t.Errorf("loaded email mismatch: %s vs %s", loaded.Admin.Email, exported.Admin.Email)
 	}
 
-	// 4. Simulate clean rebuild directory without .env
+	// 4. Simulate clean rebuild directory with existing .env secrets
 	rebuildDir := t.TempDir()
-	if err := ImportSettingsToEnv(rebuildDir, loaded, false); err != nil {
+	existingEnv := `INITIAL_ADMIN_PASSWORD=GeheimesPasswort123!
+CONNECTOR_API_TOKEN=custom-token-xyz
+`
+	_ = os.WriteFile(filepath.Join(rebuildDir, ".env"), []byte(existingEnv), 0600)
+
+	if err := ImportSettingsToEnv(rebuildDir, loaded, true); err != nil {
 		t.Fatalf("failed importing settings to rebuild dir: %v", err)
 	}
 
@@ -88,6 +102,9 @@ OPENLOCALCRM_VERSION=v1.0.2
 	}
 	if !strings.Contains(content, "INITIAL_ADMIN_PASSWORD=GeheimesPasswort123!") {
 		t.Errorf("expected admin password in rebuilt .env")
+	}
+	if !strings.Contains(content, "CONNECTOR_API_TOKEN=custom-token-xyz") {
+		t.Errorf("expected connector token in rebuilt .env")
 	}
 	if !strings.Contains(content, "AI_PROVIDER=ollama") {
 		t.Errorf("expected AI_PROVIDER=ollama in rebuilt .env")

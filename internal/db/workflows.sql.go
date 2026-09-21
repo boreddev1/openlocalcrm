@@ -139,6 +139,29 @@ func (q *Queries) GetWorkflowByID(ctx context.Context, id string) (Workflow, err
 	return i, err
 }
 
+const getWorkflowRunByID = `-- name: GetWorkflowRunByID :one
+SELECT id, workflow_id, target_id, target_type, target_name, status, current_step, snapshot_json, started_at, completed_at FROM workflow_runs
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetWorkflowRunByID(ctx context.Context, id string) (WorkflowRun, error) {
+	row := q.db.QueryRow(ctx, getWorkflowRunByID, id)
+	var i WorkflowRun
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.TargetID,
+		&i.TargetType,
+		&i.TargetName,
+		&i.Status,
+		&i.CurrentStep,
+		&i.SnapshotJson,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const listWorkflowRuns = `-- name: ListWorkflowRuns :many
 SELECT id, workflow_id, target_id, target_type, target_name, status, current_step, snapshot_json, started_at, completed_at FROM workflow_runs
 ORDER BY started_at DESC
@@ -173,29 +196,6 @@ func (q *Queries) ListWorkflowRuns(ctx context.Context) ([]WorkflowRun, error) {
 		return nil, err
 	}
 	return items, nil
-}
-
-const getWorkflowRunByID = `-- name: GetWorkflowRunByID :one
-SELECT id, workflow_id, target_id, target_type, target_name, status, current_step, snapshot_json, started_at, completed_at FROM workflow_runs
-WHERE id = $1 LIMIT 1
-`
-
-func (q *Queries) GetWorkflowRunByID(ctx context.Context, id string) (WorkflowRun, error) {
-	row := q.db.QueryRow(ctx, getWorkflowRunByID, id)
-	var i WorkflowRun
-	err := row.Scan(
-		&i.ID,
-		&i.WorkflowID,
-		&i.TargetID,
-		&i.TargetType,
-		&i.TargetName,
-		&i.Status,
-		&i.CurrentStep,
-		&i.SnapshotJson,
-		&i.StartedAt,
-		&i.CompletedAt,
-	)
-	return i, err
 }
 
 const listWorkflows = `-- name: ListWorkflows :many
