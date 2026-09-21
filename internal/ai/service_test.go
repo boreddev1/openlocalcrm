@@ -395,3 +395,70 @@ func TestCopilotChatService(t *testing.T) {
 		}
 	})
 }
+
+func TestResearchCompanyUpstreamFailureDoesNotFabricate(t *testing.T) {
+	ctx := context.Background()
+	srv := fakeOllamaServer(t, http.StatusInternalServerError, "")
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+	})
+	svc := ai.NewResearchService(gw, ai.NewObservabilityService())
+
+	res, err := svc.ResearchCompany(ctx, "example.invalid")
+	if err == nil {
+		t.Fatalf("expected honest error on research gateway failure, got result: %+v", res)
+	}
+	if !errors.Is(err, ai.ErrUpstreamUnavailable) {
+		t.Fatalf("expected ErrUpstreamUnavailable, got: %v", err)
+	}
+	if res.Summary != "" {
+		t.Fatalf("must not fabricate research summary, got: %q", res.Summary)
+	}
+	if len(res.IndustryKeywords) != 0 {
+		t.Fatalf("must not fabricate industry keywords, got: %v", res.IndustryKeywords)
+	}
+}
+
+func TestResearchCompanyReturnsModelData(t *testing.T) {
+	ctx := context.Background()
+	payload := `{"summary":"Modell-Zusammenfassung","industry_keywords":["Solar","Handwerk"]}`
+	srv := fakeOllamaServer(t, http.StatusOK, payload)
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+	})
+	svc := ai.NewResearchService(gw, ai.NewObservabilityService())
+
+	res, err := svc.ResearchCompany(ctx, "example.invalid")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Summary != "Modell-Zusammenfassung" {
+		t.Fatalf("expected model summary, got: %q", res.Summary)
+	}
+	if len(res.IndustryKeywords) != 2 || res.IndustryKeywords[0] != "Solar" || res.IndustryKeywords[1] != "Handwerk" {
+		t.Fatalf("expected model keywords, got: %v", res.IndustryKeywords)
+	}
+}
+
+func TestTriageEmailMalformedJSONReturnsUpstreamError(t *testing.T) {
+	ctx := context.Background()
+	srv := fakeOllamaServer(t, http.StatusOK, "das ist kein gültiges JSON")
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+	})
+	svc := ai.NewTriageService(gw)
+
+	_, err := svc.TriageEmail(ctx, "kunde@solar.de", "Angebot", "Bitte um Angebot")
+	if err == nil {
+		t.Fatal("expected honest error on malformed upstream triage output")
+	}
+	if !errors.Is(err, ai.ErrUpstreamUnavailable) {
+		t.Fatalf("expected ErrUpstreamUnavailable, got: %v", err)
+	}
+}

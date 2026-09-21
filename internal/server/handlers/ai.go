@@ -134,6 +134,10 @@ func (h *AIHandler) ResearchCompany(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.researchSvc.ResearchCompany(r.Context(), req.Domain)
 	if err != nil {
+		if errors.Is(err, ai.ErrUpstreamUnavailable) {
+			http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+			return
+		}
 		http.Error(w, `{"error":"company research failed: `+err.Error()+`"}`, http.StatusBadRequest)
 		return
 	}

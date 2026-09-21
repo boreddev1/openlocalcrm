@@ -282,4 +282,14 @@ func TestAIHandler_KnowledgeBaseAndResearch(t *testing.T) {
 		h.CreateResearchJob(createRec, createReq)
 		require.Equal(t, http.StatusCreated, createRec.Code)
 	})
+
+	t.Run("ResearchCompany upstream failure is 502", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFailingAIGateway(t, http.StatusInternalServerError))
+		body := []byte(`{"domain":"example.invalid"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/research-company", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.ResearchCompany(rec, req)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+	})
 }
