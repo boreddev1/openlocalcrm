@@ -93,3 +93,97 @@ func TestDemoQuerierSeedAndUsers(t *testing.T) {
 		t.Fatalf("delete refresh token failed: %v", err)
 	}
 }
+
+func TestDemoQuerierEmailAccountLifecycle(t *testing.T) {
+	ctx := context.Background()
+	q := demo.NewEmptyInMemoryQuerier()
+
+	acc, err := q.CreateEmailAccount(ctx, db.CreateEmailAccountParams{
+		Name:         "Vertrieb",
+		EmailAddress: "vertrieb@openlocalcrm.local",
+		Provider:     "IMAP",
+		AccountType:  "team",
+		IsActive:     true,
+	})
+	if err != nil {
+		t.Fatalf("CreateEmailAccount failed: %v", err)
+	}
+	if acc.AccountType != "team" {
+		t.Fatalf("expected account_type 'team', got %q", acc.AccountType)
+	}
+
+	updated, err := q.UpdateEmailAccount(ctx, db.UpdateEmailAccountParams{
+		ID:       acc.ID,
+		Name:     "Vertrieb (neu)",
+		Username: pgtype.Text{String: "vertrieb2@openlocalcrm.local", Valid: true},
+		IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateEmailAccount failed: %v", err)
+	}
+	if updated.Name != "Vertrieb (neu)" {
+		t.Fatalf("expected updated name, got %q", updated.Name)
+	}
+
+	syncTime := pgtype.Timestamptz{Time: updated.CreatedAt.Time, Valid: true}
+	if err := q.UpdateEmailAccountSyncState(ctx, db.UpdateEmailAccountSyncStateParams{
+		ID:         acc.ID,
+		LastSyncAt: syncTime,
+		LastUid:    42,
+	}); err != nil {
+		t.Fatalf("UpdateEmailAccountSyncState failed: %v", err)
+	}
+	afterSync, err := q.GetEmailAccountByID(ctx, acc.ID)
+	if err != nil {
+		t.Fatalf("GetEmailAccountByID failed: %v", err)
+	}
+	if afterSync.LastUid != 42 {
+		t.Fatalf("expected LastUid=42, got %d", afterSync.LastUid)
+	}
+
+	if err := q.DeleteEmailAccount(ctx, acc.ID); err != nil {
+		t.Fatalf("DeleteEmailAccount failed: %v", err)
+	}
+	if _, err := q.GetEmailAccountByID(ctx, acc.ID); err == nil {
+		t.Fatal("expected account to be gone after delete")
+	}
+}
+
+func TestDemoQuerierUpdateEmailMessageTags(t *testing.T) {
+	ctx := context.Background()
+	q := demo.NewEmptyInMemoryQuerier()
+
+	acc, err := q.CreateEmailAccount(ctx, db.CreateEmailAccountParams{
+		Name:         "Postfach",
+		EmailAddress: "postfach@openlocalcrm.local",
+		Provider:     "IMAP",
+		IsActive:     true,
+	})
+	if err != nil {
+		t.Fatalf("CreateEmailAccount failed: %v", err)
+	}
+
+	msg, err := q.CreateEmailMessage(ctx, db.CreateEmailMessageParams{
+		AccountID:       acc.ID,
+		ThreadID:        "thread-1",
+		MessageID:       "<msg-1@example.com>",
+		Direction:       "INBOUND",
+		SenderEmail:     "kunde@example.com",
+		RecipientEmails: []byte("[]"),
+		Subject:         "Anfrage",
+	})
+	if err != nil {
+		t.Fatalf("CreateEmailMessage failed: %v", err)
+	}
+
+	updated, err := q.UpdateEmailMessageTags(ctx, db.UpdateEmailMessageTagsParams{
+		ID:   msg.ID,
+		Tags: []byte(`["wichtig","angebot"]`),
+	})
+	if err != nil {
+		t.Fatalf("UpdateEmailMessageTags failed: %v", err)
+	}
+	if string(updated.Tags) != `["wichtig","angebot"]` {
+		t.Fatalf("expected tags to be persisted, got %s", updated.Tags)
+	}
+}

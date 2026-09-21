@@ -379,9 +379,18 @@ func NewRouter(cfg Config) http.Handler {
 
 			if emailH != nil {
 				protected.Route("/emails", func(er chi.Router) {
+					er.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
 					er.Get("/messages", emailH.ListMessages)
 					er.Get("/threads/{threadID}", emailH.GetThread)
 					er.Post("/demo-ingest", emailH.IngestDemo)
+					er.Post("/send", emailH.SendEmail)
+					er.Patch("/{id}/tags", emailH.TagMessage)
+					er.Get("/accounts", emailH.ListAccounts)
+					er.Post("/accounts", emailH.CreateAccount)
+					er.Patch("/accounts/{id}", emailH.UpdateAccount)
+					er.Delete("/accounts/{id}", emailH.DeleteAccount)
+					er.Post("/accounts/{id}/test", emailH.TestAccountConnection)
+					er.Post("/accounts/{id}/sync", emailH.SyncAccount)
 				})
 			}
 

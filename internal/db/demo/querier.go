@@ -1302,11 +1302,72 @@ func (q *InMemoryQuerier) CreateEmailAccount(ctx context.Context, arg db.CreateE
 		Username:          arg.Username,
 		PasswordEncrypted: arg.PasswordEncrypted,
 		IsActive:          arg.IsActive,
+		AccountType:       arg.AccountType,
+		OwnerUserID:       arg.OwnerUserID,
 		CreatedAt:         nowTimestamptz(),
 		UpdatedAt:         nowTimestamptz(),
 	}
 	q.emailAccounts[uuidToStr(acc.ID)] = acc
 	return acc, nil
+}
+
+func (q *InMemoryQuerier) UpdateEmailAccount(ctx context.Context, arg db.UpdateEmailAccountParams) (db.EmailAccount, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	acc, ok := q.emailAccounts[idStr]
+	if !ok {
+		return db.EmailAccount{}, ErrNotFound
+	}
+	acc.Name = arg.Name
+	acc.ImapHost = arg.ImapHost
+	acc.ImapPort = arg.ImapPort
+	acc.SmtpHost = arg.SmtpHost
+	acc.SmtpPort = arg.SmtpPort
+	acc.Username = arg.Username
+	acc.PasswordEncrypted = arg.PasswordEncrypted
+	acc.IsActive = arg.IsActive
+	acc.UpdatedAt = nowTimestamptz()
+	q.emailAccounts[idStr] = acc
+	return acc, nil
+}
+
+func (q *InMemoryQuerier) DeleteEmailAccount(ctx context.Context, id pgtype.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	delete(q.emailAccounts, uuidToStr(id))
+	return nil
+}
+
+func (q *InMemoryQuerier) UpdateEmailAccountSyncState(ctx context.Context, arg db.UpdateEmailAccountSyncStateParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	if acc, ok := q.emailAccounts[idStr]; ok {
+		acc.LastSyncAt = arg.LastSyncAt
+		acc.LastUid = arg.LastUid
+		acc.LastSyncedAt = arg.LastSyncAt
+		acc.UpdatedAt = nowTimestamptz()
+		q.emailAccounts[idStr] = acc
+	}
+	return nil
+}
+
+func (q *InMemoryQuerier) UpdateEmailMessageTags(ctx context.Context, arg db.UpdateEmailMessageTagsParams) (db.EmailMessage, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	msg, ok := q.emailMessages[idStr]
+	if !ok {
+		return db.EmailMessage{}, ErrNotFound
+	}
+	msg.Tags = arg.Tags
+	q.emailMessages[idStr] = msg
+	return msg, nil
 }
 
 func (q *InMemoryQuerier) CreateEmailAttachment(ctx context.Context, arg db.CreateEmailAttachmentParams) (db.EmailAttachment, error) {
@@ -1347,6 +1408,7 @@ func (q *InMemoryQuerier) CreateEmailMessage(ctx context.Context, arg db.CreateE
 		IsRead:          arg.IsRead,
 		ContactID:       arg.ContactID,
 		DealID:          arg.DealID,
+		Tags:            []byte("[]"),
 		CreatedAt:       nowTimestamptz(),
 	}
 	q.emailMessages[uuidToStr(msg.ID)] = msg
