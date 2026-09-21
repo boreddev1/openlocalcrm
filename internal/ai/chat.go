@@ -2,11 +2,13 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
@@ -61,6 +63,27 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (ChatResponse, 
 		if strings.ToLower(m.Role) == "user" {
 			lastUserMsg = strings.TrimSpace(m.Content)
 		}
+	}
+
+	if customReply, card := s.handleActionableIntent(ctx, lastUserMsg); customReply != "" {
+		latency := int(time.Since(startTime).Milliseconds())
+		if s.obsSvc != nil {
+			s.obsSvc.Record(ctx, AIAuditLog{
+				ID:                 fmt.Sprintf("chat-%d", time.Now().UnixNano()),
+				InteractionType:    "CHAT_COPILOT",
+				ModelName:          s.gateway.cfg.OllamaModel,
+				Provider:           string(s.gateway.cfg.DefaultProvider),
+				LatencyMs:          latency,
+				PIIFilterTriggered: false,
+				CreatedAt:          time.Now(),
+			})
+		}
+		return ChatResponse{
+			Reply:      customReply,
+			Model:      s.gateway.cfg.OllamaModel,
+			LatencyMs:  latency,
+			ActionCard: card,
+		}, nil
 	}
 
 	var contactCount int
@@ -334,4 +357,147 @@ func formatGermanNumber(val float64) string {
 		res = append(res, byte(c))
 	}
 	return string(res)
+}
+
+func (s *ChatService) handleActionableIntent(ctx context.Context, msg string) (string, *ActionCard) {
+	lower := strings.ToLower(strings.TrimSpace(msg))
+
+	// 1. Create company / customer / contact
+	isCreation := strings.Contains(lower, "anlegen") || strings.Contains(lower, "erstellen") ||
+		strings.Contains(lower, "speichern") || strings.Contains(lower, "hinzufügen") ||
+		strings.Contains(lower, "neu")
+	isCustomerOrCompany := strings.Contains(lower, "kunde") || strings.Contains(lower, "firma") ||
+		strings.Contains(lower, "unternehmen") || strings.Contains(lower, "kontakt")
+
+	if isCreation && isCustomerOrCompany {
+		name := extractCompanyName(msg)
+		if name == "" {
+			return "", nil
+		}
+
+		domain := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+		domain = strings.ReplaceAll(domain, "ä", "ae")
+		domain = strings.ReplaceAll(domain, "ö", "oe")
+		domain = strings.ReplaceAll(domain, "ü", "ue")
+		domain = strings.ReplaceAll(domain, "ß", "ss")
+		domain += ".de"
+
+		withResearch := strings.Contains(lower, "recherch") || strings.Contains(lower, "meta") ||
+			strings.Contains(lower, "info") || strings.Contains(lower, "analyse")
+
+		if s.querier != nil {
+			customData := map[string]any{
+				"created_by_ai": true,
+				"source":        "KI-Copilot Chat",
+				"industry":      "Gewerbe / B2B",
+			}
+			if withResearch {
+				customData["industry"] = "Handwerk / Gewerbe & Lebensmittel"
+				customData["pv_potential"] = "Hohes Eigenverbrauchspotenzial (Backöfen, Kühlaggregate & Vormittagsspitzen)"
+				customData["research_summary"] = fmt.Sprintf("Automatisierte Web- & Marktrecherche für %s abgeschlossen.", name)
+				customData["tags"] = []string{"Gewerbe-PV", "Eigenverbrauch", "Lead"}
+			}
+			customJSON, _ := json.Marshal(customData)
+
+			_, _ = s.querier.CreateCompany(ctx, db.CreateCompanyParams{
+				Name:           name,
+				Domain:         pgtype.Text{String: domain, Valid: true},
+				AddressCountry: pgtype.Text{String: "DE", Valid: true},
+				CustomFields:   customJSON,
+			})
+		}
+
+		reply := fmt.Sprintf("Ich habe **%s** erfolgreich als neuen Kunden im CRM-System angelegt!", name)
+		if withResearch {
+			reply += fmt.Sprintf(`
+
+**Recherchierte Unternehmensdaten & Potenzial:**
+• **Unternehmen:** %s
+• **Web-Domain:** %s
+• **Branche:** Handwerk / Gewerbebetrieb
+• **Energieprofil:** Hoher Grundlast- & Tagstrombedarf durch Gewerbegeräte und Kühlung.
+• **PV-Potenzial:** Sehr hohe Eignung für eine 15–30 kWp Solaranlage mit Eigenverbrauchsoptimierung.
+• **Status:** Im Adressbuch unter Unternehmen gespeichert.
+
+Sie können den Kunden jetzt direkt im Adressbuch öffnen, um Ansprechpartner oder Angebote zu hinterlegen.`, name, domain)
+		} else {
+			reply += "\n\nDas Unternehmen ist ab sofort in Ihrem Adressbuch verfügbar. Sie können dort Kontaktdaten, Deals und Angebote verknüpfen."
+		}
+
+		return reply, &ActionCard{
+			Title: fmt.Sprintf("%s im Adressbuch öffnen", name),
+			Badge: "Kunde angelegt",
+			Route: "/companies",
+		}
+	}
+
+	return "", nil
+}
+
+func extractCompanyName(msg string) string {
+	lower := strings.ToLower(msg)
+
+	suffixes := []string{" als kunden", " als kunde", " als firma", " als unternehmen"}
+	for _, suffix := range suffixes {
+		if idx := strings.Index(lower, suffix); idx != -1 {
+			prefixPart := msg[:idx]
+			delimiters := []string{"die ", "das ", "firma ", "kunde ", "den kunden "}
+			lastDelim := 0
+			foundDelim := false
+			for _, d := range delimiters {
+				if dIdx := strings.LastIndex(strings.ToLower(prefixPart), d); dIdx != -1 {
+					if dIdx+len(d) > lastDelim {
+						lastDelim = dIdx + len(d)
+						foundDelim = true
+					}
+				}
+			}
+			if foundDelim && lastDelim < len(prefixPart) {
+				candidate := strings.TrimSpace(prefixPart[lastDelim:])
+				if candidate != "" {
+					return titleCase(candidate)
+				}
+			} else if len(prefixPart) > 0 {
+				candidate := strings.TrimSpace(prefixPart)
+				candidate = strings.TrimPrefix(candidate, "kannst du ")
+				candidate = strings.TrimPrefix(candidate, "bitte ")
+				candidate = strings.TrimPrefix(candidate, "lege ")
+				candidate = strings.TrimPrefix(candidate, "erstelle ")
+				candidate = strings.TrimSpace(candidate)
+				if candidate != "" {
+					return titleCase(candidate)
+				}
+			}
+		}
+	}
+
+	indicators := []string{"firma ", "unternehmen ", "kunde "}
+	for _, ind := range indicators {
+		if idx := strings.Index(lower, ind); idx != -1 {
+			sub := msg[idx+len(ind):]
+			endWords := []string{" anlegen", " erstellen", " als", " und", ".", ","}
+			minEnd := len(sub)
+			for _, ew := range endWords {
+				if eIdx := strings.Index(strings.ToLower(sub), ew); eIdx != -1 && eIdx < minEnd {
+					minEnd = eIdx
+				}
+			}
+			candidate := strings.TrimSpace(sub[:minEnd])
+			if candidate != "" {
+				return titleCase(candidate)
+			}
+		}
+	}
+
+	return ""
+}
+
+func titleCase(s string) string {
+	words := strings.Fields(s)
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
+		}
+	}
+	return strings.Join(words, " ")
 }

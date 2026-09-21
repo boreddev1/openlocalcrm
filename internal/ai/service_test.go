@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
+	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 )
 
 func TestPromptGuardPIIMasking(t *testing.T) {
@@ -180,6 +182,65 @@ func TestCopilotChatService(t *testing.T) {
 		}
 		if !contains(resp.Reply, "14 Tage") {
 			t.Fatalf("expected 14 days legal advice, got: %s", resp.Reply)
+		}
+	})
+
+	t.Run("customer creation and research intent creates company and returns action card", func(t *testing.T) {
+		querier := demo.NewInMemoryQuerier()
+		chatWithDB := ai.NewChatService(gw, obs, querier)
+
+		prompt := "kannst du die Bäckerei passa als kunden anlegen udn die meta information für den Kunden rechevcheiren und anlegen?"
+		resp, err := chatWithDB.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "assistant", Content: "Hallo! Ich bin Ihr OpenLocalCRM KI-Vertriebs-Copilot."},
+				{Role: "user", Content: prompt},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !contains(resp.Reply, "Bäckerei Passa") {
+			t.Errorf("expected reply to mention Bäckerei Passa, got: %s", resp.Reply)
+		}
+		if contains(resp.Reply, "Hallo! Ich bin Ihr OpenLocalCRM Vertriebs-Copilot") {
+			t.Errorf("greeting loop detected! Should have executed creation, got greeting: %s", resp.Reply)
+		}
+		if resp.ActionCard == nil || resp.ActionCard.Route != "/companies" {
+			t.Errorf("expected ActionCard to /companies, got: %+v", resp.ActionCard)
+		}
+
+		// Verify company was created in querier
+		companies, _ := querier.ListCompanies(ctx, db.ListCompaniesParams{Limit: 10, Offset: 0})
+		found := false
+		for _, c := range companies {
+			if c.Name == "Bäckerei Passa" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected Bäckerei Passa to be created in DB, but not found in %v", companies)
+		}
+	})
+
+	t.Run("custom model mistral is preserved in response", func(t *testing.T) {
+		mistralGw := ai.NewGateway(ai.GatewayConfig{
+			DefaultProvider: ai.ProviderOllama,
+			OllamaModel:     "mistral",
+		})
+		mistralChat := ai.NewChatService(mistralGw, obs)
+
+		resp, err := mistralChat.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: "Hallo"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Model != "mistral" {
+			t.Errorf("expected model mistral, got: %s", resp.Model)
 		}
 	})
 }
