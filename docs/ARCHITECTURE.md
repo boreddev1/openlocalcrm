@@ -20,8 +20,8 @@ graph TB
     subgraph "Docker / Podman Host"
         subgraph "Network: crm-net"
             Caddy["crm-proxy (Caddy v2)<br/>Ports: 80, 443<br/>Auto-TLS & SSE Proxying"]
-            Server["crm-server (Go 1.23)<br/>Port: 8080<br/>REST API, Auth, Static SPA"]
-            Worker["crm-worker (Go 1.23)<br/>Port: 8081<br/>River Queue Daemon"]
+            Server["crm-server (Go 1.26+)<br/>Port: 8080<br/>REST API, Auth, Static SPA"]
+            Worker["crm-worker (Go 1.26+)<br/>Port: 8081<br/>River Queue Daemon"]
             DB[("crm-db (PostgreSQL 16)<br/>Port: 5432<br/>Extensions: pgvector, pg_trgm")]
         end
 

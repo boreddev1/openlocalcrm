@@ -32,7 +32,7 @@ interface TeamUser {
   id: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'BENUTZER';
+  role: 'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE';
   status: 'ACTIVE' | 'INVITED' | 'DEACTIVATED';
   invited_at?: string;
 }
@@ -56,7 +56,7 @@ export const SettingsPage: React.FC = () => {
   const [users, setUsers] = useState<TeamUser[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
-  const [inviteRole, setInviteRole] = useState<'ADMIN' | 'BENUTZER'>('BENUTZER');
+  const [inviteRole, setInviteRole] = useState<'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE'>('BENUTZER');
   const [userMsg, setUserMsg] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null,
   );
@@ -1034,10 +1034,12 @@ export const SettingsPage: React.FC = () => {
                 </label>
                 <select
                   value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as 'ADMIN' | 'BENUTZER')}
+                  onChange={(e) => setInviteRole(e.target.value as 'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE')}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                 >
                   <option value="BENUTZER">Benutzer (Standard)</option>
+                  <option value="VERTRIEB">Vertrieb</option>
+                  <option value="BACKOFFICE">Backoffice</option>
                   <option value="ADMIN">Admin (Vollzugriff)</option>
                 </select>
               </div>

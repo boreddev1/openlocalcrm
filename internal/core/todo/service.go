@@ -3,6 +3,7 @@ package todo
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -84,7 +85,9 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateT
 	}
 
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "TODO", todo.ID, "CREATE", todo, "", "")
+		if auditErr := s.audit.Log(ctx, actorID, "TODO", todo.ID, "CREATE", todo, "", ""); auditErr != nil {
+			log.Printf("[AUDIT_ERROR] Failed logging todo creation: %v", auditErr)
+		}
 	}
 
 	return todo, nil
@@ -101,7 +104,9 @@ func (s *Service) UpdateStatus(ctx context.Context, actorID, todoID pgtype.UUID,
 	}
 
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "TODO", todo.ID, "UPDATE_STATUS", map[string]string{"status": status}, "", "")
+		if auditErr := s.audit.Log(ctx, actorID, "TODO", todo.ID, "UPDATE_STATUS", map[string]string{"status": status}, "", ""); auditErr != nil {
+			log.Printf("[AUDIT_ERROR] Failed logging todo status update: %v", auditErr)
+		}
 	}
 
 	return todo, nil
@@ -179,7 +184,9 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateT
 	}
 
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "TODO", todo.ID, "UPDATE", todo, "", "")
+		if auditErr := s.audit.Log(ctx, actorID, "TODO", todo.ID, "UPDATE", todo, "", ""); auditErr != nil {
+			log.Printf("[AUDIT_ERROR] Failed logging todo update: %v", auditErr)
+		}
 	}
 
 	return todo, nil
@@ -191,7 +198,9 @@ func (s *Service) Delete(ctx context.Context, actorID, todoID pgtype.UUID) error
 		return err
 	}
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "TODO", todoID, "DELETE", map[string]string{"status": "deleted"}, "", "")
+		if auditErr := s.audit.Log(ctx, actorID, "TODO", todoID, "DELETE", map[string]string{"status": "deleted"}, "", ""); auditErr != nil {
+			log.Printf("[AUDIT_ERROR] Failed logging todo deletion: %v", auditErr)
+		}
 	}
 	return nil
 }

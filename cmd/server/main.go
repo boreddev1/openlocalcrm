@@ -125,9 +125,15 @@ func main() {
 	}
 	storagePath := os.Getenv("STORAGE_PATH")
 	if storagePath == "" {
+		storagePath = os.Getenv("STORAGE_LOCAL_DIR")
+	}
+	if storagePath == "" {
 		storagePath = "./data/storage"
 	}
 	jwtKeyPath := os.Getenv("JWT_SECRET_KEY_PATH")
+	if jwtKeyPath == "" {
+		jwtKeyPath = os.Getenv("JWT_PRIVATE_KEY_PATH")
+	}
 	if jwtKeyPath == "" {
 		jwtKeyPath = filepath.Join(storagePath, "keys", "ed25519.key")
 	}

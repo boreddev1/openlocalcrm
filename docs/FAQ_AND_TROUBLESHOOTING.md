@@ -28,9 +28,11 @@ Häufig gestellte Fragen (FAQ), Best Practices und Lösungen für typische Probl
 Ein kleiner VPS mit 2–4 GB RAM reicht für 1–10 gleichzeitige Benutzer vollkommen aus.
 
 ### Q: Welche Rollen gibt es im System?
-**A:** Nach §2 der Fachspezifikation gibt es genau zwei Rollen:
-1. `Admin`: Vollzugriff, Einrichtung von E-Mail-Konten, Konnektoren, Custom Fields, Workflows und 2FA.
-2. `Benutzer`: Vertriebler/Mitarbeiter (Zugriff auf Kontakte, Firmen, Deals, Kalender, Karte, E-Mails, KI-Copilot und HITL-Freigaben).
+**A:** Das System unterstützt vier Rollen (`user_role` Enum):
+1. `ADMIN`: Vollzugriff auf alle Bereiche, Einstellungen, Konnektoren, E-Mail-Konten, Workflows, Benutzerverwaltung und 2FA.
+2. `VERTRIEB`: Außendienst & Vertrieb (Zugriff auf Kontakte, Firmen, Deals, Kalender, D2D-Gebietskarte, E-Mails, KI-Copilot und HITL-Freigaben).
+3. `BACKOFFICE`: Innendienst & Administration (Verwaltung von Stammdaten, Dokumenten, Aufgaben und Kundenhistorie).
+4. `BENUTZER`: Standardbenutzer mit Basiszugriff auf CRM-Kernfunktionen.
 
 ---
 

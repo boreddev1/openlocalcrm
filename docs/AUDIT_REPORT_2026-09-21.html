@@ -644,10 +644,10 @@
               <div class="finding-refs"><code class="ref">internal/auth/service.go:244</code></div>
             </div>
             <p>Neben dem echten aktuellen Passwort akzeptiert <code>ChangePassword</code> zusätzlich die fest codierten
-              Strings <code>"oldpassword123"</code> und <code>"demo123"</code> als gültiges „altes Passwort" — für jeden
+              Strings <code>"oldpassword123"</code> und <code>"[DEMO_PASSWORD_REDACTED]"</code> als gültiges „altes Passwort" — für jeden
               Account, nicht nur Demo-Nutzer.</p>
             <p class="scenario">Jeder Angreifer mit einem gültigen (auch niedrig privilegierten oder liegengelassenen)
-              Access-Token ruft <code>POST /change-password</code> mit <code>old_password=demo123</code> auf und setzt
+              Access-Token ruft <code>POST /change-password</code> mit <code>old_password=[DEMO_PASSWORD_REDACTED]</code> auf und setzt
               ein neues Passwort für den Account — vollständige Kontoübernahme ohne Kenntnis des echten Passworts.</p>
             <p class="fix">Beide Sonderfälle entfernen, ausschließlich <code>CheckPassword</code> gegen den echten Hash
               prüfen.</p>
@@ -962,7 +962,7 @@
                 class="finding-title">Docker-Compose-Standardpasswort für Postgres</span>
               <div class="finding-refs"><code class="ref">docker-compose.yml</code></div>
             </div>
-            <p><code>POSTGRES_PASSWORD=${DB_PASSWORD:-crm_pass}</code> — ein schwaches, bekanntes Default greift, wenn
+            <p><code>POSTGRES_PASSWORD=${DB_PASSWORD:-[DEFAULT_PASSWORD_REDACTED]}</code> — ein schwaches, bekanntes Default greift, wenn
               <code>DB_PASSWORD</code> nicht gesetzt wird.</p>
             <p class="scenario">Bei fehlerhafter Netzwerk-Isolation (z.B. versehentlich exponierter Postgres-Port) ist
               die DB mit einem öffentlich bekannten Passwort erreichbar.</p>

@@ -4,7 +4,7 @@ import { apiFetch } from '../api/client';
 export interface UserSession {
   user_id: string;
   email: string;
-  role: 'ADMIN' | 'BENUTZER';
+  role: 'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE';
   first_name?: string;
   last_name?: string;
 }

@@ -154,7 +154,7 @@ Nimmt externe Leads entgegen, führt Deduplizierung durch und legt automatisch K
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/connectors/lead-intake \
-  -H "Authorization: Bearer openlocalcrm-secret-connector-token" \
+  -H "Authorization: Bearer demo-connector-token" \
   -H "Content-Type: application/json" \
   -d '{
     "first_name": "Dr. Michael",
@@ -173,8 +173,8 @@ curl -X POST http://localhost:8080/api/v1/connectors/lead-intake \
 ```json
 {
   "status": "created",
-  "contact_id": "c-1724541234",
-  "deal_id": "d-1724541235",
+  "contact_id": "00000000-0000-0000-0000-000000000001",
+  "deal_id": "00000000-0000-0000-0000-000000000002",
   "source": "WEB_FORM_INTAKE"
 }
 ```
@@ -332,14 +332,14 @@ curl -X GET http://localhost:8080/api/v1/appointments/app-1/ics \
 
 ---
 
-### 6. Click-to-Call Telefonie
+### 8. Click-to-Call Telefonie (`/api/v1/telephony`)
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/telephony/calls \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "contact_id": "c-1",
+    "contact_id": "00000000-0000-0000-0000-000000000001",
     "duration_seconds": 184,
     "disposition": "REACHED",
     "notes": "Kunde bestätigt Termin am Donnerstag."
@@ -348,7 +348,7 @@ curl -X POST http://localhost:8080/api/v1/telephony/calls \
 
 ---
 
-### 7. Automatisierungs-Engine & Workflows
+### 9. Automatisierungs-Engine & Workflows (`/api/v1/automations`)
 
 #### Aktive Workflows auflisten
 ```bash
@@ -364,7 +364,7 @@ curl -X GET http://localhost:8080/api/v1/automations/runs \
 
 ---
 
-### 8. KI-Gateway (Gemma 12B & PII-Filter)
+### 10. KI-Gateway (Gemma 12B & PII-Filter) (`/api/v1/ai`)
 
 #### E-Mail Triage & Entwurf
 ```bash
@@ -397,9 +397,9 @@ curl -X GET http://localhost:8080/api/v1/ai/observability \
 
 ---
 
-### 9. Server-Sent Events (SSE Realtime Stream)
+### 11. Server-Sent Events (SSE Realtime Stream) (`/events/stream`)
 
-Der SSE-Stream liefert Systemereignisse in Echtzeit. Aus Sicherheitsgründen erfordert dieser Endpunkt eine gültige Authentifizierung über ein Bearer-Token, einen Query-Parameter (`?token=<jwt>`) oder das `access_token`-Cookie.
+Der SSE-Stream liefert Systemereignisse in Echtzeit über ein aktives `access_token`-Cookie oder den `Authorization: Bearer`-Header.
 
 ```bash
 curl -N -H "Accept: text/event-stream" \
@@ -421,7 +421,7 @@ data: {"id":"m-99","subject":"Neues PV-Projekt"}
 
 ---
 
-### 10. Team- & Benutzerverwaltung (`/api/v1/users`)
+### 12. Team- & Benutzerverwaltung (`/api/v1/users`)
 
 *Hinweis: Alle Benutzerverwaltungs-Endpunkte erfordern die Rolle `ADMIN`.*
 
@@ -447,22 +447,20 @@ curl -X GET http://localhost:8080/api/v1/users \
 ```
 
 #### Neues Teammitglied einladen
-Erstellt ein neues Benutzerkonto mit sicherem Zufallspasswort oder Einladungs-Token.
+Erstellt ein neues Benutzerkonto mit Rolle (`ADMIN`, `BENUTZER`, `VERTRIEB`, `BACKOFFICE`).
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/users/invite \
   -H "Authorization: Bearer <ADMIN_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "kollege@openlocalcrm.local",
-    "name": "Sarah Vertrieb",
+    "email": "sarah.vertrieb@openlocalcrm.local",
+    "name": "Sarah Sommer",
     "role": "VERTRIEB"
   }'
 ```
 
-#### Benutzerrolle ändern (mit Last-Admin-Schutz)
-Verhindert, dass dem letzten aktiven Administrator die Administrator-Rechte entzogen werden.
-
+#### Rolle ändern
 ```bash
 curl -X PUT http://localhost:8080/api/v1/users/00000000-0000-0000-0000-000000000002/role \
   -H "Authorization: Bearer <ADMIN_TOKEN>" \
@@ -472,21 +470,19 @@ curl -X PUT http://localhost:8080/api/v1/users/00000000-0000-0000-0000-000000000
   }'
 ```
 
-#### Benutzerstatus ändern (Aktivieren / Deaktivieren)
-Verhindert die Deaktivierung des letzten aktiven Administrators.
-
+#### Benutzer sperren / deaktivieren
 ```bash
 curl -X PUT http://localhost:8080/api/v1/users/00000000-0000-0000-0000-000000000002/status \
   -H "Authorization: Bearer <ADMIN_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
-    "status": "SUSPENDED"
+    "status": "DEACTIVATED"
   }'
 ```
 
 ---
 
-### 11. Backup & Revisionssicherheit (`/api/v1/backup`)
+### 13. Backup & Revisionssicherheit (`/api/v1/backup`)
 
 *Hinweis: Alle Backup-Endpunkte erfordern die Rolle `ADMIN`.*
 
@@ -519,4 +515,26 @@ Erstellt einen revisionssicheren JSON-Dump des gesamten Mandanten für Offsite-S
 ```bash
 curl -X GET http://localhost:8080/api/v1/backup/export \
   -H "Authorization: Bearer <ADMIN_TOKEN>" > openlocalcrm_backup.json
+```
+
+---
+
+### 14. Firmen, Aufgaben & Benachrichtigungen (`/api/v1/companies`, `/api/v1/todos`, `/api/v1/notifications`)
+
+#### Firmen auflisten & anlegen
+```bash
+curl -X GET http://localhost:8080/api/v1/companies \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Aufgaben verwalten
+```bash
+curl -X GET http://localhost:8080/api/v1/todos \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Ungelesene Benachrichtigungen abrufen
+```bash
+curl -X GET http://localhost:8080/api/v1/notifications/unread \
+  -H "Authorization: Bearer <token>"
 ```
