@@ -62,6 +62,7 @@ user-errors/
 .idea/
 .vscode/
 *.swp
+*.png
 
 # Superpowers and Planning Artifacts
 .superpowers/

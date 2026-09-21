@@ -23,26 +23,37 @@ export const DashboardPage: React.FC = () => {
   });
   const deals = Array.isArray(rawDeals) ? rawDeals : [];
 
+  const { data: rawCompanies = [] } = useQuery<any[]>({
+    queryKey: ['companies'],
+    queryFn: () => apiFetch('/api/v1/companies'),
+  });
+  const companies = Array.isArray(rawCompanies) ? rawCompanies : [];
+
   const metrics = [
     {
       title: 'Aktive Kontakte',
-      value: contacts.length > 0 ? `${contacts.length}+` : '3+',
+      value: contacts.length.toString(),
       icon: Users,
-      change: '+12% diesen Monat',
+      change: contacts.length > 0 ? 'Im Adressbuch' : 'Keine Kontakte',
     },
     {
       title: 'Offene Deals',
-      value: deals.length > 0 ? `${deals.length}` : '5',
+      value: deals.length.toString(),
       icon: KanbanSquare,
-      change: 'Pipeline aktiv',
+      change: deals.length > 0 ? 'Pipeline aktiv' : 'Keine Deals',
     },
     {
       title: 'Offene Aufgaben',
-      value: todos.length > 0 ? `${todos.length}` : '3',
+      value: todos.length.toString(),
       icon: CheckSquare,
-      change: 'Für heute geplant',
+      change: todos.length > 0 ? 'Für heute geplant' : 'Keine Aufgaben',
     },
-    { title: 'Firmen im Portfolio', value: '14', icon: Building2, change: 'B2B & D2D' },
+    {
+      title: 'Firmen im Portfolio',
+      value: companies.length.toString(),
+      icon: Building2,
+      change: companies.length > 0 ? 'B2B & D2D' : 'Keine Firmen',
+    },
   ];
 
   return (

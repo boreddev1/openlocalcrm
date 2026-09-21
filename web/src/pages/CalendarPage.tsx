@@ -64,10 +64,11 @@ export const CalendarPage: React.FC = () => {
   const [inviteModalApp, setInviteModalApp] = useState<any | null>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
 
-  const { data: appointments = [], isLoading } = useQuery<any[]>({
+  const { data: rawAppointments = [], isLoading } = useQuery<any[]>({
     queryKey: ['appointments'],
     queryFn: () => apiFetch('/api/v1/appointments'),
   });
+  const appointments = Array.isArray(rawAppointments) ? rawAppointments : [];
 
   const [formData, setFormData] = useState({
     title: '',

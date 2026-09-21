@@ -41,10 +41,11 @@ export const ContactsPage: React.FC = () => {
   const [isResearching, setIsResearching] = useState(false);
   const [researchResult, setResearchResult] = useState<any | null>(null);
 
-  const { data: contacts = [], isLoading } = useQuery<any[]>({
+  const { data: rawContacts = [], isLoading } = useQuery<any[]>({
     queryKey: ['contacts', search],
     queryFn: () => apiFetch(`/api/v1/contacts?q=${encodeURIComponent(search)}`),
   });
+  const contacts = Array.isArray(rawContacts) ? rawContacts : [];
 
   const createMutation = useMutation({
     mutationFn: (newContact: any) =>

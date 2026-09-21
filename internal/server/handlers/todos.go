@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/todo"
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 type TodoHandler struct {
@@ -72,6 +73,10 @@ func (h *TodoHandler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, `{"error":"failed to list todos"}`, http.StatusInternalServerError)
 		return
+	}
+
+	if todos == nil {
+		todos = []db.Todo{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

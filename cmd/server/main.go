@@ -91,11 +91,20 @@ func bootstrapAdminUser(ctx context.Context, querier db.Querier) {
 			log.Fatalf("[FATAL] Failed hashing admin password: %v", hashErr)
 		}
 
+		firstName := os.Getenv("INITIAL_ADMIN_FIRST_NAME")
+		if firstName == "" {
+			firstName = "Admin"
+		}
+		lastName := os.Getenv("INITIAL_ADMIN_LAST_NAME")
+		if lastName == "" {
+			lastName = "User"
+		}
+
 		_, createErr := querier.CreateUser(ctx, db.CreateUserParams{
 			Email:        adminEmail,
 			PasswordHash: hash,
-			FirstName:    "Max",
-			LastName:     "Vertriebsleiter",
+			FirstName:    firstName,
+			LastName:     lastName,
 			Role:         "ADMIN",
 			Status:       "ACTIVE",
 		})

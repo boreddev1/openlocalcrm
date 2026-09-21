@@ -40,6 +40,10 @@ func (h *NoteHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if notes == nil {
+		notes = []note.Note{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(notes)
 }

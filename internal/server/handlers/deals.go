@@ -75,6 +75,10 @@ func (h *DealHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if deals == nil {
+		deals = []db.Deal{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(deals)
 }

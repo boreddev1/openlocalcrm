@@ -45,41 +45,10 @@ type Service struct {
 }
 
 func NewService(querier db.Querier, sseHub *sse.Hub) *Service {
-	now := time.Now().UTC()
-	initial := []Note{
-		{
-			ID:         "not-1",
-			EntityType: "contact",
-			EntityID:   "c1",
-			Type:       "CALL",
-			Author:     "Max Vertriebsleiter",
-			Content:    "Telefonat mit Hr. Dr. Weber: Großes Interesse an 30 kWp Gewerbedach Solaranlage inkl. 20 kWh Batteriespeicher. Statikunterlagen liegen vor.",
-			CreatedAt:  now.Add(-2 * time.Hour),
-		},
-		{
-			ID:         "not-2",
-			EntityType: "contact",
-			EntityID:   "c1",
-			Type:       "NOTE",
-			Author:     "Laura Closerin",
-			Content:    "Gemma 12B Analyse: Hoher gewerblicher Eigenverbrauch tagsüber durch Maschinenpark (ca. 45.000 kWh/a).",
-			CreatedAt:  now.Add(-5 * time.Hour),
-		},
-		{
-			ID:         "not-3",
-			EntityType: "contact",
-			EntityID:   "c2",
-			Type:       "MEETING",
-			Author:     "Felix Setter",
-			Content:    "D2D-Erstkontakt an der Haustür: Hauseigentümerin plant PV-Anlage für 2026. Zählernummer notiert (1EMH004512998).",
-			CreatedAt:  now.Add(-24 * time.Hour),
-		},
-	}
-
 	return &Service{
 		querier: querier,
 		sseHub:  sseHub,
-		notes:   initial,
+		notes:   make([]Note, 0),
 	}
 }
 
@@ -103,22 +72,23 @@ func (s *Service) List(ctx context.Context, entityType, entityID string) ([]Note
 		} else {
 			dbNotes, err = s.querier.ListNotes(ctx)
 		}
-
-		if err == nil && len(dbNotes) > 0 {
-			result := make([]Note, len(dbNotes))
-			for i, n := range dbNotes {
-				result[i] = Note{
-					ID:         uuid.UUID(n.ID.Bytes).String(),
-					EntityType: n.EntityType,
-					EntityID:   uuid.UUID(n.EntityID.Bytes).String(),
-					Type:       n.Type,
-					Author:     n.Author,
-					Content:    n.Content,
-					CreatedAt:  n.CreatedAt.Time,
-				}
-			}
-			return result, nil
+		if err != nil {
+			return nil, err
 		}
+
+		result := make([]Note, len(dbNotes))
+		for i, n := range dbNotes {
+			result[i] = Note{
+				ID:         uuid.UUID(n.ID.Bytes).String(),
+				EntityType: n.EntityType,
+				EntityID:   uuid.UUID(n.EntityID.Bytes).String(),
+				Type:       n.Type,
+				Author:     n.Author,
+				Content:    n.Content,
+				CreatedAt:  n.CreatedAt.Time,
+			}
+		}
+		return result, nil
 	}
 
 	s.mu.RLock()
@@ -134,25 +104,31 @@ func (s *Service) List(ctx context.Context, entityType, entityID string) ([]Note
 		}
 		result = append(result, n)
 	}
+	if result == nil {
+		result = []Note{}
+	}
 	return result, nil
 }
 
 func (s *Service) GetByID(ctx context.Context, id string) (Note, error) {
 	if s.querier != nil {
-		if u, err := uuid.Parse(id); err == nil {
-			n, err := s.querier.GetNoteByID(ctx, pgtype.UUID{Bytes: u, Valid: true})
-			if err == nil {
-				return Note{
-					ID:         uuid.UUID(n.ID.Bytes).String(),
-					EntityType: n.EntityType,
-					EntityID:   uuid.UUID(n.EntityID.Bytes).String(),
-					Type:       n.Type,
-					Author:     n.Author,
-					Content:    n.Content,
-					CreatedAt:  n.CreatedAt.Time,
-				}, nil
-			}
+		u, err := uuid.Parse(id)
+		if err != nil {
+			return Note{}, ErrNoteNotFound
 		}
+		n, err := s.querier.GetNoteByID(ctx, pgtype.UUID{Bytes: u, Valid: true})
+		if err != nil {
+			return Note{}, ErrNoteNotFound
+		}
+		return Note{
+			ID:         uuid.UUID(n.ID.Bytes).String(),
+			EntityType: n.EntityType,
+			EntityID:   uuid.UUID(n.EntityID.Bytes).String(),
+			Type:       n.Type,
+			Author:     n.Author,
+			Content:    n.Content,
+			CreatedAt:  n.CreatedAt.Time,
+		}, nil
 	}
 
 	s.mu.RLock()
@@ -272,6 +248,8 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		if u, err := uuid.Parse(id); err == nil {
 			_ = s.querier.DeleteNote(ctx, pgtype.UUID{Bytes: u, Valid: true})
 		}
+		s.broadcast("note.deleted", map[string]string{"id": id})
+		return nil
 	}
 
 	s.mu.Lock()

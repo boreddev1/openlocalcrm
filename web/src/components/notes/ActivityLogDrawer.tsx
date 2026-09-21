@@ -41,10 +41,11 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
   const [synthesisResult, setSynthesisResult] = useState<any | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
-  const { data: allNotes = [], isLoading } = useQuery<any[]>({
+  const { data: rawAllNotes = [], isLoading } = useQuery<any[]>({
     queryKey: ['notes'],
     queryFn: () => apiFetch('/api/v1/notes'),
   });
+  const allNotes = Array.isArray(rawAllNotes) ? rawAllNotes : [];
 
   const notes = allNotes.filter((n) => {
     return n.entity_id === entityId || (!n.entity_id && entityType === 'contact');

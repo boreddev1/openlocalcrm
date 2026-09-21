@@ -60,45 +60,14 @@ func NewAIHandler(
 	querier db.Querier,
 ) *AIHandler {
 	return &AIHandler{
-		triageSvc:   triageSvc,
-		chatSvc:     chatSvc,
-		researchSvc: researchSvc,
-		obsSvc:      obsSvc,
-		gateway:     gateway,
-		querier:     querier,
-		kbArticles: []KBArticle{
-			{
-				ID:          "kb-1",
-				Title:       "Technisches Handbuch Solarsysteme 2026",
-				Category:    "Photovoltaik & Speicher",
-				Source:      "Technisches_Handbuch_2026.pdf",
-				Content:     "Richtlinien zur Auslegung von PV-Anlagen nach EEG 2026 und DIN VDE AR-N 4105. Glas-Glas TOPCon Module erreichen 30 Jahre Leistungsgarantie.",
-				ChunksCount: 4,
-			},
-			{
-				ID:          "kb-2",
-				Title:       "Vergütungssätze & Einspeisemanagement 2026",
-				Category:    "Recht & Compliance",
-				Source:      "Bundesnetzagentur_EEG_2026.pdf",
-				Content:     "Überschusseinspeisung bis 10 kWp mit 8,1 Cent/kWh. Keine Rundsteuerempfängerpflicht mehr für Anlagen bis 25 kWp mit iMSys.",
-				ChunksCount: 3,
-			},
-		},
-		researchJobs: []ResearchJob{
-			{
-				ID:          "job-1",
-				Query:       "energie-dach.de",
-				CompanyName: "Energie Dach GmbH",
-				Category:    "Gewerbesolar & Hallendach",
-				Depth:       "deep",
-				Status:      "COMPLETED",
-				Result: &ResearchResult{
-					SiteTitle:      "Energie Dach GmbH - Solartechnik & Hallenbau",
-					Summary:        "Führender Anbieter für Aufdach-Photovoltaik im Gewerbesegment in Süddeutschland. Große Hallendachflächen, eigene Montagekolonnen und über 15 MWp realisierte Leistung.",
-					DecisionMakers: []string{"Dr. Michael Weber (Geschäftsführer)", "Markus Huber (Technischer Leiter)"},
-				},
-			},
-		},
+		triageSvc:    triageSvc,
+		chatSvc:      chatSvc,
+		researchSvc:  researchSvc,
+		obsSvc:       obsSvc,
+		gateway:      gateway,
+		querier:      querier,
+		kbArticles:   []KBArticle{},
+		researchJobs: []ResearchJob{},
 	}
 }
 
@@ -204,29 +173,36 @@ func (h *AIHandler) ParseBill(w http.ResponseWriter, r *http.Request) {
 func (h *AIHandler) ListKB(w http.ResponseWriter, r *http.Request) {
 	if h.querier != nil {
 		dbArticles, err := h.querier.ListKBArticles(r.Context())
-		if err == nil && len(dbArticles) > 0 {
-			res := make([]KBArticle, len(dbArticles))
-			for i, a := range dbArticles {
-				res[i] = KBArticle{
-					ID:          uuid.UUID(a.ID.Bytes).String(),
-					Title:       a.Title,
-					Category:    a.Category,
-					Content:     a.Content,
-					Source:      a.Author,
-					ChunksCount: 4,
-				}
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(res)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		res := make([]KBArticle, len(dbArticles))
+		for i, a := range dbArticles {
+			res[i] = KBArticle{
+				ID:          uuid.UUID(a.ID.Bytes).String(),
+				Title:       a.Title,
+				Category:    a.Category,
+				Content:     a.Content,
+				Source:      a.Author,
+				ChunksCount: 4,
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(res)
+		return
 	}
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	articles := h.kbArticles
+	if articles == nil {
+		articles = []KBArticle{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(h.kbArticles)
+	_ = json.NewEncoder(w).Encode(articles)
 }
 
 func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
@@ -295,34 +271,41 @@ func (h *AIHandler) DeleteKB(w http.ResponseWriter, r *http.Request) {
 func (h *AIHandler) ListResearchJobs(w http.ResponseWriter, r *http.Request) {
 	if h.querier != nil {
 		dbJobs, err := h.querier.ListAIResearchJobs(r.Context())
-		if err == nil && len(dbJobs) > 0 {
-			res := make([]ResearchJob, len(dbJobs))
-			for i, j := range dbJobs {
-				res[i] = ResearchJob{
-					ID:          uuid.UUID(j.ID.Bytes).String(),
-					Query:       j.Domain,
-					CompanyName: j.CompanyName,
-					Category:    "Technik",
-					Depth:       "DEEP",
-					Status:      j.Status,
-					Result: &ResearchResult{
-						SiteTitle:      j.CompanyName + " - Analyse",
-						Summary:        "Automatisch erstellte Firmenrecherche.",
-						DecisionMakers: []string{"Geschäftsführung (" + j.Domain + ")"},
-					},
-				}
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(res)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		res := make([]ResearchJob, len(dbJobs))
+		for i, j := range dbJobs {
+			res[i] = ResearchJob{
+				ID:          uuid.UUID(j.ID.Bytes).String(),
+				Query:       j.Domain,
+				CompanyName: j.CompanyName,
+				Category:    "Technik",
+				Depth:       "DEEP",
+				Status:      j.Status,
+				Result: &ResearchResult{
+					SiteTitle:      j.CompanyName + " - Analyse",
+					Summary:        "Automatisch erstellte Firmenrecherche.",
+					DecisionMakers: []string{"Geschäftsführung (" + j.Domain + ")"},
+				},
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(res)
+		return
 	}
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	jobs := h.researchJobs
+	if jobs == nil {
+		jobs = []ResearchJob{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(h.researchJobs)
+	_ = json.NewEncoder(w).Encode(jobs)
 }
 
 func (h *AIHandler) CreateResearchJob(w http.ResponseWriter, r *http.Request) {

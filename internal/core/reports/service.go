@@ -2,6 +2,10 @@ package reports
 
 import (
 	"context"
+	"math"
+	"strings"
+
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 type MonthlyForecast struct {
@@ -25,32 +29,119 @@ type SalesReport struct {
 	ConversionStats ConversionStats   `json:"conversion_stats"`
 }
 
-type Service struct{}
+type Service struct {
+	querier db.Querier
+}
 
-func NewService() *Service {
-	return &Service{}
+func NewService(querier db.Querier) *Service {
+	return &Service{querier: querier}
 }
 
 func (s *Service) GetSalesReport(ctx context.Context) (SalesReport, error) {
-	// 12-Month Sales Forecast & Real-Time Conversion Metrics (§6.3)
-	forecast := []MonthlyForecast{
-		{MonthName: "Sep 2026", WeightedEUR: 42500.00, CommittedEUR: 28000.00, DealCount: 4},
-		{MonthName: "Okt 2026", WeightedEUR: 58000.00, CommittedEUR: 35000.00, DealCount: 6},
-		{MonthName: "Nov 2026", WeightedEUR: 69000.00, CommittedEUR: 41000.00, DealCount: 7},
-		{MonthName: "Dez 2026", WeightedEUR: 84000.00, CommittedEUR: 52000.00, DealCount: 9},
-	}
+	if s.querier != nil {
+		deals, err := s.querier.ListDeals(ctx, db.ListDealsParams{Limit: 10000, Offset: 0})
+		if err != nil {
+			return SalesReport{
+				Forecast:        []MonthlyForecast{},
+				ConversionStats: ConversionStats{},
+			}, nil
+		}
+		contacts, _ := s.querier.ListContacts(ctx, db.ListContactsParams{Limit: 10000, Offset: 0})
 
-	conversion := ConversionStats{
-		TotalLeads:       28,
-		WonDeals:         12,
-		LostDeals:        4,
-		RevokedDeals:     1, // § 355 BGB separat erfasst
-		ConversionRate:   42.8,
-		AvgDealVolumeEUR: 19450.00,
+		totalLeads := len(contacts)
+		wonDeals := 0
+		lostDeals := 0
+		revokedDeals := 0
+		var wonVolume float64
+
+		type monthBucket struct {
+			committed float64
+			weighted  float64
+			deals     int
+		}
+		buckets := make(map[string]*monthBucket)
+
+		for _, d := range deals {
+			val, _ := d.Value.Float64Value()
+			dealVal := val.Float64
+			prob := float64(d.Probability) / 100.0
+
+			// Widerruf check (§ 355 BGB)
+			if d.WiderrufenAt.Valid || strings.EqualFold(d.Stage, "REVOKED") || strings.EqualFold(d.Stage, "WIDERRUFEN") {
+				revokedDeals++
+				continue
+			}
+
+			switch strings.ToUpper(d.Stage) {
+			case "WON", "GEWONNEN":
+				wonDeals++
+				wonVolume += dealVal
+			case "LOST", "VERLOREN":
+				lostDeals++
+			}
+
+			// Monthly forecast aggregation by deal created/updated month
+			mName := d.CreatedAt.Time.Format("Jan 2006")
+			if b, exists := buckets[mName]; exists {
+				if strings.ToUpper(d.Stage) == "WON" || strings.ToUpper(d.Stage) == "GEWONNEN" {
+					b.committed += dealVal
+				}
+				b.weighted += dealVal * prob
+				b.deals++
+			} else {
+				comm := 0.0
+				if strings.ToUpper(d.Stage) == "WON" || strings.ToUpper(d.Stage) == "GEWONNEN" {
+					comm = dealVal
+				}
+				buckets[mName] = &monthBucket{
+					committed: comm,
+					weighted:  dealVal * prob,
+					deals:     1,
+				}
+			}
+		}
+
+		convRate := 0.0
+		if totalLeads > 0 {
+			convRate = math.Round((float64(wonDeals)/float64(totalLeads))*1000.0) / 10.0
+		}
+		avgDealVol := 0.0
+		if wonDeals > 0 {
+			avgDealVol = math.Round((wonVolume/float64(wonDeals))*100.0) / 100.0
+		}
+
+		forecast := make([]MonthlyForecast, 0, len(buckets))
+		for m, b := range buckets {
+			forecast = append(forecast, MonthlyForecast{
+				MonthName:    m,
+				WeightedEUR:  math.Round(b.weighted*100.0) / 100.0,
+				CommittedEUR: math.Round(b.committed*100.0) / 100.0,
+				DealCount:    b.deals,
+			})
+		}
+
+		return SalesReport{
+			Forecast: forecast,
+			ConversionStats: ConversionStats{
+				TotalLeads:       totalLeads,
+				WonDeals:         wonDeals,
+				LostDeals:        lostDeals,
+				RevokedDeals:     revokedDeals,
+				ConversionRate:   convRate,
+				AvgDealVolumeEUR: avgDealVol,
+			},
+		}, nil
 	}
 
 	return SalesReport{
-		Forecast:        forecast,
-		ConversionStats: conversion,
+		Forecast: []MonthlyForecast{},
+		ConversionStats: ConversionStats{
+			TotalLeads:       0,
+			WonDeals:         0,
+			LostDeals:        0,
+			RevokedDeals:     0,
+			ConversionRate:   0,
+			AvgDealVolumeEUR: 0,
+		},
 	}, nil
 }

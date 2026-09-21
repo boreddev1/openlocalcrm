@@ -7,11 +7,13 @@ import (
 	"testing"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/core/reports"
+	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/openlocalcrm/openlocalcrm/internal/server/handlers"
 )
 
 func TestReportsHandler_GetSalesReport(t *testing.T) {
-	svc := reports.NewService()
+	querier := demo.NewInMemoryQuerier()
+	svc := reports.NewService(querier)
 	h := handlers.NewReportsHandler(svc)
 
 	req := httptest.NewRequest("GET", "/api/v1/reports/sales", nil)

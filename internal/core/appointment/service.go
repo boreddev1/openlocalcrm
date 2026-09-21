@@ -95,31 +95,32 @@ func uuidToStrPtr(u pgtype.UUID) *string {
 func (s *Service) List(ctx context.Context) ([]Appointment, error) {
 	if s.querier != nil {
 		dbApps, err := s.querier.ListAppointments(ctx)
-		if err == nil && len(dbApps) > 0 {
-			result := make([]Appointment, len(dbApps))
-			for i, a := range dbApps {
-				idStr := uuid.UUID(a.ID.Bytes).String()
-				result[i] = Appointment{
-					ID:         idStr,
-					Title:      a.Title,
-					ContactID:  uuidToStrPtr(a.ContactID),
-					CompanyID:  uuidToStrPtr(a.CompanyID),
-					DealID:     uuidToStrPtr(a.DealID),
-					StartTime:  a.StartTime.Time,
-					EndTime:    a.EndTime.Time,
-					Location:   a.Location,
-					Notes:      a.Notes,
-					ICSUID:     a.IcsUid,
-					AssignedTo: a.AssignedTo,
-					Type:       a.Type,
-					IsExternal: a.IsExternal,
-					Provider:   a.Provider,
-					IsPrivate:  a.IsPrivate,
-					IsPushed:   a.IsPushed,
-				}
-			}
-			return result, nil
+		if err != nil {
+			return nil, err
 		}
+		result := make([]Appointment, len(dbApps))
+		for i, a := range dbApps {
+			idStr := uuid.UUID(a.ID.Bytes).String()
+			result[i] = Appointment{
+				ID:         idStr,
+				Title:      a.Title,
+				ContactID:  uuidToStrPtr(a.ContactID),
+				CompanyID:  uuidToStrPtr(a.CompanyID),
+				DealID:     uuidToStrPtr(a.DealID),
+				StartTime:  a.StartTime.Time,
+				EndTime:    a.EndTime.Time,
+				Location:   a.Location,
+				Notes:      a.Notes,
+				ICSUID:     a.IcsUid,
+				AssignedTo: a.AssignedTo,
+				Type:       a.Type,
+				IsExternal: a.IsExternal,
+				Provider:   a.Provider,
+				IsPrivate:  a.IsPrivate,
+				IsPushed:   a.IsPushed,
+			}
+		}
+		return result, nil
 	}
 
 	s.mu.RLock()

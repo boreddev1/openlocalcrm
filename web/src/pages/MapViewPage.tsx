@@ -14,10 +14,11 @@ L.Icon.Default.mergeOptions({
 });
 
 export const MapViewPage: React.FC = () => {
-  const { data: contacts = [] } = useQuery<any[]>({
+  const { data: rawContacts = [] } = useQuery<any[]>({
     queryKey: ['contacts'],
     queryFn: () => apiFetch('/api/v1/contacts'),
   });
+  const contacts = Array.isArray(rawContacts) ? rawContacts : [];
 
   // Default center: Frankfurt am Main
   const defaultCenter: [number, number] = [50.1109, 8.6821];

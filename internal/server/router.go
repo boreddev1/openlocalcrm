@@ -124,7 +124,7 @@ func NewRouter(cfg Config) http.Handler {
 			OllamaModel:     "gemma4:12b",
 		})
 		triageSvc := ai.NewTriageService(aiGateway)
-		chatSvc := ai.NewChatService(aiGateway, obsSvc)
+		chatSvc := ai.NewChatService(aiGateway, obsSvc, cfg.DB)
 		researchSvc := ai.NewResearchService(aiGateway, obsSvc)
 
 		connectorToken := os.Getenv("CONNECTOR_API_TOKEN")
@@ -286,7 +286,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			appointmentSvc := appointment.NewService(cfg.DB, cfg.SSEHub)
 			telephonySvc := telephony.NewService(cfg.DB, cfg.SSEHub)
-			reportsSvc := reports.NewService()
+			reportsSvc := reports.NewService(cfg.DB)
 			automationSvc := automation.NewService(cfg.DB)
 
 			appointmentH := handlers.NewAppointmentHandler(appointmentSvc)

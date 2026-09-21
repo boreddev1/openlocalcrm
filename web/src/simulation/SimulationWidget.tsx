@@ -21,6 +21,7 @@ interface SimulationScenario {
 export const SimulationWidget: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [isDemo, setIsDemo] = useState<boolean>(false);
   const [isRunning, setIsRunning] = useState(false);
   const [speed, setSpeed] = useState<number>(2);
   const [autoNavigate, setAutoNavigate] = useState<boolean>(true);
@@ -37,6 +38,16 @@ export const SimulationWidget: React.FC = () => {
   });
 
   const stepIndexRef = useRef(0);
+
+  useEffect(() => {
+    apiFetch<any>('/api/v1/health')
+      .then((res) => {
+        if (res && res.demo_mode) {
+          setIsDemo(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const addLog = (msg: string) => {
     const time = new Date().toLocaleTimeString();
@@ -296,6 +307,8 @@ export const SimulationWidget: React.FC = () => {
     setStats({ emails: 0, deals: 0, calls: 0, aiInferences: 0 });
     setTickerLogs(['Simulation zurückgesetzt.']);
   };
+
+  if (!isDemo) return null;
 
   if (!isExpanded) {
     return (

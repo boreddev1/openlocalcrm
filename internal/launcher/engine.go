@@ -457,6 +457,10 @@ func (e *Engine) GetContainers(ctx context.Context) ([]ContainerInfo, error) {
 }
 
 func GetPersistentBackupDir() string {
+	if custom := os.Getenv("OPENLOCALCRM_BACKUP_DIR"); custom != "" {
+		_ = os.MkdirAll(custom, 0755)
+		return custom
+	}
 	var dir string
 	if runtime.GOOS == "windows" {
 		localAppData := os.Getenv("LOCALAPPDATA")

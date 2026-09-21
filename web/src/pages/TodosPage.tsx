@@ -47,10 +47,11 @@ export const TodosPage: React.FC = () => {
   const [cancelNotes, setCancelNotes] = useState<string>('');
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
 
-  const { data: todos = [] } = useQuery<any[]>({
+  const { data: rawTodos = [] } = useQuery<any[]>({
     queryKey: ['todos'],
     queryFn: () => apiFetch('/api/v1/todos'),
   });
+  const todos = Array.isArray(rawTodos) ? rawTodos : [];
 
   const createMutation = useMutation({
     mutationFn: (newTodo: any) =>

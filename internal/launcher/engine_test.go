@@ -32,6 +32,7 @@ func TestParseContainersJSON(t *testing.T) {
 
 func TestListBackups(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("OPENLOCALCRM_BACKUP_DIR", filepath.Join(tmpDir, "persistent_backups"))
 	engine := NewEngine(tmpDir)
 
 	backupsDir := filepath.Join(tmpDir, "backups")

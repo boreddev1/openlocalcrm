@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/contact"
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 type ContactHandler struct {
@@ -90,6 +91,9 @@ func (h *ContactHandler) List(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"search_failed"}`, http.StatusInternalServerError)
 			return
 		}
+		if results == nil {
+			results = []db.Contact{}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(results)
 		return
@@ -99,6 +103,9 @@ func (h *ContactHandler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, `{"error":"failed to list contacts"}`, http.StatusInternalServerError)
 		return
+	}
+	if contacts == nil {
+		contacts = []db.Contact{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

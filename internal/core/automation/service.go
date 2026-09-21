@@ -183,3 +183,33 @@ func (s *Service) CreateWorkflow(ctx context.Context, wf Workflow) (*Workflow, e
 
 	return &wf, nil
 }
+
+func (s *Service) ListRuns(ctx context.Context) ([]WorkflowRun, error) {
+	if s.querier != nil {
+		dbRuns, err := s.querier.ListWorkflowRuns(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]WorkflowRun, len(dbRuns))
+		for i, r := range dbRuns {
+			var compAt *time.Time
+			if r.CompletedAt.Valid {
+				t := r.CompletedAt.Time
+				compAt = &t
+			}
+			result[i] = WorkflowRun{
+				ID:          r.ID,
+				WorkflowID:  r.WorkflowID,
+				TargetID:    r.TargetID,
+				TargetType:  r.TargetType,
+				TargetName:  r.TargetName,
+				Status:      r.Status,
+				CurrentStep: int(r.CurrentStep),
+				StartedAt:   r.StartedAt.Time,
+				CompletedAt: compAt,
+			}
+		}
+		return result, nil
+	}
+	return []WorkflowRun{}, nil
+}

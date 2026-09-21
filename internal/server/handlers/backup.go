@@ -82,6 +82,19 @@ func (h *BackupHandler) Export(w http.ResponseWriter, r *http.Request) {
 	deals, _ := h.queries.ListDeals(ctx, db.ListDealsParams{Limit: 10000, Offset: 0})
 	todos, _ := h.queries.ListTodos(ctx, db.ListTodosParams{Limit: 10000, Offset: 0})
 
+	if companies == nil {
+		companies = []db.Company{}
+	}
+	if contacts == nil {
+		contacts = []db.Contact{}
+	}
+	if deals == nil {
+		deals = []db.Deal{}
+	}
+	if todos == nil {
+		todos = []db.Todo{}
+	}
+
 	payload := ExportPayload{
 		ExportedAt: time.Now().UTC().Format(time.RFC3339),
 		Companies:  companies,

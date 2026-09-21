@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../api/client';
 import {
@@ -24,9 +25,12 @@ import {
   Layers,
   Building2,
   Compass,
+  Zap,
+  ArrowRight,
 } from 'lucide-react';
 
 export const AIAssistantPage: React.FC = () => {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<
     'copilot' | 'facts' | 'kb' | 'research' | 'triage' | 'observability'
@@ -49,7 +53,7 @@ export const AIAssistantPage: React.FC = () => {
     mutationFn: (messages: any[]) =>
       apiFetch<any>('/api/v1/ai/chat', {
         method: 'POST',
-        body: JSON.stringify({ messages, context: '5 Deals (106.700 € Pipeline), 3 Kontakte' }),
+        body: JSON.stringify({ messages, context: '' }),
       }),
     onSuccess: (res) => {
       setChatMessages((prev) => [
@@ -57,9 +61,16 @@ export const AIAssistantPage: React.FC = () => {
         {
           role: 'assistant',
           content: res.reply,
+          actionCard: res.actionCard,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
+      if (res.actionCard) {
+        queryClient.invalidateQueries({ queryKey: ['automations'] });
+        queryClient.invalidateQueries({ queryKey: ['deals'] });
+        queryClient.invalidateQueries({ queryKey: ['contacts'] });
+        queryClient.invalidateQueries({ queryKey: ['emails'] });
+      }
     },
   });
 
@@ -80,44 +91,7 @@ export const AIAssistantPage: React.FC = () => {
   };
 
   // --- TAB 2: Evidence-Ledger / Fakten (§5.2) ---
-  const [facts, setFacts] = useState<any[]>([
-    {
-      id: 'fact-1',
-      entity: 'Energie Südwest GmbH',
-      field: 'Dachfläche',
-      value: '350 m² Südausrichtung',
-      source: 'Web-Recherche & Luftbild',
-      confidence: 0.94,
-      status: 'BESTÄTIGT',
-    },
-    {
-      id: 'fact-2',
-      entity: 'Dr. Michael Weber',
-      field: 'Jahresverbrauch',
-      value: '45.000 kWh Strom',
-      source: 'E-Mail Anfrage (24.08.)',
-      confidence: 0.98,
-      status: 'BESTÄTIGT',
-    },
-    {
-      id: 'fact-3',
-      entity: 'Sabine Mustermann',
-      field: 'Heizsystem',
-      value: 'Ölheizung (Bj. 1998)',
-      source: 'D2D Setter-Gespräch',
-      confidence: 0.88,
-      status: 'NEU',
-    },
-    {
-      id: 'fact-4',
-      entity: 'Solarpark Rhein-Main',
-      field: 'Zählerkasten',
-      value: '2023 komplett modernisiert',
-      source: 'Vor-Ort Notiz',
-      confidence: 0.92,
-      status: 'NEU',
-    },
-  ]);
+  const [facts, setFacts] = useState<any[]>([]);
 
   const handleConfirmFact = (id: string) => {
     setFacts((prev) => prev.map((f) => (f.id === id ? { ...f, status: 'BESTÄTIGT' } : f)));
@@ -137,10 +111,11 @@ export const AIAssistantPage: React.FC = () => {
     content: '',
   });
 
-  const { data: kbArticles = [] } = useQuery<any[]>({
+  const { data: rawKbArticles = [] } = useQuery<any[]>({
     queryKey: ['ai-kb'],
     queryFn: () => apiFetch('/api/v1/ai/kb'),
   });
+  const kbArticles = Array.isArray(rawKbArticles) ? rawKbArticles : [];
 
   const createKbMutation = useMutation({
     mutationFn: (newDoc: any) =>
@@ -188,10 +163,11 @@ export const AIAssistantPage: React.FC = () => {
   const [researchCategory, setResearchCategory] = useState('Gewerbesolar & Hallendach');
   const [selectedResearchJob, setSelectedResearchJob] = useState<any>(null);
 
-  const { data: researchJobs = [] } = useQuery<any[]>({
+  const { data: rawResearchJobs = [] } = useQuery<any[]>({
     queryKey: ['ai-research-jobs'],
     queryFn: () => apiFetch('/api/v1/ai/research/jobs'),
   });
+  const researchJobs = Array.isArray(rawResearchJobs) ? rawResearchJobs : [];
 
   const createResearchJobMutation = useMutation({
     mutationFn: (job: any) =>
@@ -250,97 +226,17 @@ export const AIAssistantPage: React.FC = () => {
   });
 
   const stats = observabilityData?.stats || {
-    total_interactions: 42,
-    total_pii_blocked: 9,
-    average_latency_ms: 412.5,
+    total_interactions: 0,
+    total_pii_blocked: 0,
+    average_latency_ms: 0,
     compliance_standard: 'EU AI Act konform (Art. 50/52 Transparenz & Auditierbarkeit)',
     active_model: 'gemma4:12b (Ollama On-Premise)',
     provider: 'Ollama Local / Isolated Single-Tenant',
   };
 
-  const recentLogs = [
-    {
-      id: 'log-101',
-      interaction_type: 'E-Mail Triage & Qualifizierung',
-      model_name: 'gemma4:12b',
-      provider: 'ollama (On-Premise)',
-      latency_ms: 380,
-      pii_filter_triggered: true,
-      pii_redactions_count: 2,
-      redacted_items: ['DE89370400440532013000 (IBAN)', 'sk_live_99887766 (Secret Key)'],
-      input_prompt:
-        'Absender: weber@energie-dach.de\nBetreff: 30 kWp Gewerbedach Solaranlage\nNachricht: Hallo OpenLocalCRM Team, bitte Angebot erstellen. IBAN ist DE89370400440532013000.',
-      extracted_decision: {
-        category: 'ANFRAGE',
-        sentiment: 'POSITIVE',
-        priority: 'HIGH',
-        summary: 'Kunde fragt 30 kWp Solaranlage für Gewerbehalle in Frankfurt an.',
-        suggested_draft:
-          'Sehr geehrter Herr Dr. Weber, vielen Dank für Ihre Anfrage. Gerne erstellen wir Ihnen ein maßgeschneidertes Angebot...',
-      },
-      created_at: new Date(Date.now() - 1000 * 60 * 3).toISOString(),
-    },
-    {
-      id: 'log-102',
-      interaction_type: 'KI-Copilot Strategie-Chat',
-      model_name: 'gemma4:12b',
-      provider: 'ollama (On-Premise)',
-      latency_ms: 450,
-      pii_filter_triggered: false,
-      pii_redactions_count: 0,
-      redacted_items: [],
-      input_prompt: 'Frage: Wie schließe ich den PV-Deal bei Dr. Michael Weber am besten ab?',
-      extracted_decision: {
-        category: 'COPILOT_ADVICE',
-        sentiment: 'NEUTRAL',
-        priority: 'MEDIUM',
-        summary:
-          'Empfehlung: Vor-Ort-Termin zur Dachbegehung vorschlagen, da Zählerkasten 2023 bereits erneuert wurde.',
-        suggested_draft: 'Fokus auf Amortisation und 20 kWh Batteriespeicher-Kombination legen.',
-      },
-      created_at: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-    },
-    {
-      id: 'log-103',
-      interaction_type: 'Webseiten- & Firmen-Recherche',
-      model_name: 'gemma4:12b',
-      provider: 'ollama (On-Premise)',
-      latency_ms: 510,
-      pii_filter_triggered: false,
-      pii_redactions_count: 0,
-      redacted_items: [],
-      input_prompt: 'Domain: energie-dach.de (SSRF-geschützt)',
-      extracted_decision: {
-        category: 'RESEARCH_EXTRACTION',
-        sentiment: 'NEUTRAL',
-        priority: 'LOW',
-        summary: 'Titel: EnergieDach Frankfurt GmbH | Keywords: Photovoltaik, Gewerbespeicher, B2B',
-        suggested_draft: 'Automatisch im Evidence-Ledger und Firmenprofil hinterlegt.',
-      },
-      created_at: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
-    },
-    {
-      id: 'log-104',
-      interaction_type: 'E-Mail Triage (Reklamation)',
-      model_name: 'gemma4:12b',
-      provider: 'ollama (On-Premise)',
-      latency_ms: 390,
-      pii_filter_triggered: true,
-      pii_redactions_count: 1,
-      redacted_items: ['0171 98765432 (Privatnummer)'],
-      input_prompt:
-        'Absender: meier@baubetrieb.de\nBetreff: Wechselrichter Störung\nNachricht: Wechselrichter speist nicht mehr ein!',
-      extracted_decision: {
-        category: 'REKLAMATION',
-        sentiment: 'NEGATIVE',
-        priority: 'URGENT',
-        summary: 'Störungsmeldung Wechselrichter Ausfall.',
-        suggested_draft:
-          'Sehr geehrter Herr Meier, wir haben Ihre Störungsmeldung erfasst. Unser Service meldet sich binnen 2 Stunden...',
-      },
-      created_at: new Date(Date.now() - 1000 * 60 * 40).toISOString(),
-    },
-  ];
+  const recentLogs = Array.isArray(observabilityData?.recent_logs)
+    ? observabilityData.recent_logs
+    : [];
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -476,6 +372,33 @@ export const AIAssistantPage: React.FC = () => {
                   }`}
                 >
                   {msg.content}
+
+                  {/* Interactive Action Card */}
+                  {msg.actionCard && (
+                    <div className="mt-3 p-3 bg-slate-900 border border-emerald-500/30 rounded-xl flex items-center justify-between gap-3 shadow-lg animate-fadeIn">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                          <Zap className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-100 truncate">
+                            {msg.actionCard.title}
+                          </div>
+                          <div className="text-[10px] text-emerald-400 font-mono font-bold">
+                            {msg.actionCard.badge}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => navigate(msg.actionCard.route)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-lg text-xs shrink-0 flex items-center gap-1.5 transition-colors"
+                      >
+                        <span>Öffnen</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
                   <div
                     className={`text-[10px] mt-1.5 text-right ${msg.role === 'user' ? 'text-emerald-950/70' : 'text-slate-500'}`}
                   >
@@ -517,7 +440,7 @@ export const AIAssistantPage: React.FC = () => {
           >
             <input
               type="text"
-              placeholder="Frage an den Copilot stellen (z. B. 'Wie schließe ich den Deal bei Dr. Weber am besten ab?')..."
+              placeholder="Frage an den Copilot stellen (z. B. 'Pipeline zusammenfassen' oder 'Neuen Deal anlegen')..."
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
@@ -563,45 +486,53 @@ export const AIAssistantPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {facts.map((fact) => (
-                  <tr key={fact.id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="py-4 px-6 font-semibold text-slate-100">{fact.entity}</td>
-                    <td className="py-4 px-6">
-                      <span className="text-slate-400">{fact.field}:</span>{' '}
-                      <span className="font-bold text-emerald-400">{fact.value}</span>
-                    </td>
-                    <td className="py-4 px-6 text-slate-400">
-                      <div>{fact.source}</div>
-                      <div className="text-[10px] text-emerald-400 font-mono font-semibold">
-                        Konfidenz: {(fact.confidence * 100).toFixed(0)}%
-                      </div>
-                    </td>
-                    <td className="py-4 px-6">
-                      {fact.status === 'BESTÄTIGT' ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <CheckCircle2 className="w-3 h-3" /> Bestätigt
-                        </span>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleConfirmFact(fact.id)}
-                            className="p-1 rounded bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold"
-                            title="Fakt bestätigen"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleRejectFact(fact.id)}
-                            className="p-1 rounded bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-700"
-                            title="Fakt ablehnen"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
+                {facts.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 text-center text-slate-500">
+                      Noch keine extrahierten Fakten im Ledger vorhanden.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  facts.map((fact) => (
+                    <tr key={fact.id} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="py-4 px-6 font-semibold text-slate-100">{fact.entity}</td>
+                      <td className="py-4 px-6">
+                        <span className="text-slate-400">{fact.field}:</span>{' '}
+                        <span className="font-bold text-emerald-400">{fact.value}</span>
+                      </td>
+                      <td className="py-4 px-6 text-slate-400">
+                        <div>{fact.source}</div>
+                        <div className="text-[10px] text-emerald-400 font-mono font-semibold">
+                          Konfidenz: {(fact.confidence * 100).toFixed(0)}%
+                        </div>
+                      </td>
+                      <td className="py-4 px-6">
+                        {fact.status === 'BESTÄTIGT' ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3 h-3" /> Bestätigt
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleConfirmFact(fact.id)}
+                              className="p-1 rounded bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold"
+                              title="Fakt bestätigen"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleRejectFact(fact.id)}
+                              className="p-1 rounded bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-700"
+                              title="Fakt ablehnen"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -1217,40 +1148,48 @@ export const AIAssistantPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {recentLogs.map((log: any) => (
-                    <tr
-                      key={log.id}
-                      onClick={() => setSelectedAuditLog(log)}
-                      className="hover:bg-slate-800/60 cursor-pointer transition-colors"
-                    >
-                      <td className="py-3 px-4 font-mono text-slate-400">
-                        {new Date(log.created_at).toLocaleTimeString()}
-                      </td>
-                      <td className="py-3 px-4 font-semibold text-slate-100">
-                        {log.interaction_type}
-                      </td>
-                      <td className="py-3 px-4 font-mono text-slate-300">
-                        {log.model_name} <span className="text-slate-500">({log.provider})</span>
-                      </td>
-                      <td className="py-3 px-4 font-mono text-slate-300">{log.latency_ms} ms</td>
-                      <td className="py-3 px-4">
-                        {log.pii_filter_triggered ? (
-                          <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold">
-                            {log.pii_redactions_count} PII Redacted
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
-                            Clean
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <button className="text-emerald-400 hover:text-emerald-300 font-semibold inline-flex items-center gap-1">
-                          <Eye className="w-3.5 h-3.5" /> Prüfen
-                        </button>
+                  {recentLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-500">
+                        Noch keine KI-Audit-Logs vorhanden.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    recentLogs.map((log: any) => (
+                      <tr
+                        key={log.id}
+                        onClick={() => setSelectedAuditLog(log)}
+                        className="hover:bg-slate-800/60 cursor-pointer transition-colors"
+                      >
+                        <td className="py-3 px-4 font-mono text-slate-400">
+                          {new Date(log.created_at).toLocaleTimeString()}
+                        </td>
+                        <td className="py-3 px-4 font-semibold text-slate-100">
+                          {log.interaction_type}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-300">
+                          {log.model_name} <span className="text-slate-500">({log.provider})</span>
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-300">{log.latency_ms} ms</td>
+                        <td className="py-3 px-4">
+                          {log.pii_filter_triggered ? (
+                            <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold">
+                              {log.pii_redactions_count} PII Redacted
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
+                              Clean
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <button className="text-emerald-400 hover:text-emerald-300 font-semibold inline-flex items-center gap-1">
+                            <Eye className="w-3.5 h-3.5" /> Prüfen
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>

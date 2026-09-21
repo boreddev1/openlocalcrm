@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '../../api/client';
 import {
   Search,
   Users,
@@ -24,6 +26,26 @@ interface CommandPaletteProps {
 export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
+
+  const { data: rawContacts = [] } = useQuery<any[]>({
+    queryKey: ['contacts-palette'],
+    queryFn: () => apiFetch('/api/v1/contacts?limit=20'),
+    enabled: isOpen,
+  });
+  const { data: rawDeals = [] } = useQuery<any[]>({
+    queryKey: ['deals-palette'],
+    queryFn: () => apiFetch('/api/v1/deals'),
+    enabled: isOpen,
+  });
+  const { data: rawCompanies = [] } = useQuery<any[]>({
+    queryKey: ['companies-palette'],
+    queryFn: () => apiFetch('/api/v1/companies'),
+    enabled: isOpen,
+  });
+
+  const contacts = Array.isArray(rawContacts) ? rawContacts : [];
+  const deals = Array.isArray(rawDeals) ? rawDeals : [];
+  const companies = Array.isArray(rawCompanies) ? rawCompanies : [];
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -70,34 +92,38 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     },
   ];
 
-  const searchResults = [
-    { label: 'Dr. Michael Weber (Kontakt)', path: '/contacts', icon: Users, category: 'Kontakte' },
-    { label: 'Sabine Mustermann (Kontakt)', path: '/contacts', icon: Users, category: 'Kontakte' },
-    {
-      label: 'Energie Südwest GmbH (Firma)',
+  const dynamicResults = [
+    ...contacts.map((c: any) => ({
+      label: `${c.first_name || ''} ${c.last_name || ''}`.trim() + ' (Kontakt)',
+      path: '/contacts',
+      icon: Users,
+      category: 'Kontakte',
+    })),
+    ...companies.map((co: any) => ({
+      label: `${co.name || ''} (Firma)`.trim(),
       path: '/companies',
       icon: Building2,
       category: 'Firmen',
-    },
-    {
-      label: '30 kWp Gewerbedach Solaranlage (Deal)',
+    })),
+    ...deals.map((d: any) => ({
+      label: `${d.title || ''} (Deal)`.trim(),
       path: '/deals',
       icon: KanbanSquare,
       category: 'Deals',
-    },
-    {
-      label: 'Wärmepumpe & 15 kWp PV (Deal)',
-      path: '/deals',
-      icon: KanbanSquare,
-      category: 'Deals',
-    },
-  ];
+    })),
+  ].filter(
+    (item) =>
+      item.label.length > 0 &&
+      item.label !== '(Kontakt)' &&
+      item.label !== '(Firma)' &&
+      item.label !== '(Deal)',
+  );
 
   const filteredLinks = quickLinks.filter((item) =>
     item.label.toLowerCase().includes(query.toLowerCase()),
   );
 
-  const filteredResults = searchResults.filter((item) =>
+  const filteredResults = dynamicResults.filter((item) =>
     item.label.toLowerCase().includes(query.toLowerCase()),
   );
 

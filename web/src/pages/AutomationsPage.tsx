@@ -21,15 +21,17 @@ export const AutomationsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'WORKFLOWS' | 'RUNS'>('WORKFLOWS');
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
-  const { data: workflows = [], isLoading } = useQuery<any[]>({
+  const { data: rawWorkflows = [], isLoading } = useQuery<any[]>({
     queryKey: ['automations'],
     queryFn: () => apiFetch('/api/v1/automations'),
   });
+  const workflows = Array.isArray(rawWorkflows) ? rawWorkflows : [];
 
-  const { data: runs = [] } = useQuery<any[]>({
+  const { data: rawRuns = [] } = useQuery<any[]>({
     queryKey: ['automation-runs'],
     queryFn: () => apiFetch('/api/v1/automations/runs'),
   });
+  const runs = Array.isArray(rawRuns) ? rawRuns : [];
 
   const createMutation = useMutation({
     mutationFn: (newWf: any) =>
@@ -236,55 +238,63 @@ export const AutomationsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {runs.map((run) => (
-                  <tr key={run.id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="py-4 px-6">
-                      <div className="font-semibold text-slate-100">
-                        {run.workflow_id === 'wf-1'
-                          ? 'Erstkontakt & Qualifizierung'
-                          : 'Deal-Abschluss Routine'}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        Ziel: {run.target_name} ({run.target_type})
-                      </div>
-                    </td>
-                    <td className="py-4 px-6 text-xs text-slate-300">
-                      Schritt {run.current_step}:{' '}
-                      {run.workflow_id === 'wf-1'
-                        ? 'E-Mail-Entwurf (Gemma 12B)'
-                        : 'Technik-Übergabe'}
-                    </td>
-                    <td className="py-4 px-6">
-                      {run.status === 'WAITING_APPROVAL' ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                          <Clock className="w-3 h-3" /> Wartet auf Freigabe
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <CheckCircle2 className="w-3 h-3" /> Abgeschlossen
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-4 px-6">
-                      {run.status === 'WAITING_APPROVAL' ? (
-                        <button
-                          onClick={() => {
-                            setSuccessToast(
-                              `Schritt für ${run.target_name} freigegeben und ausgeführt!`,
-                            );
-                            setTimeout(() => setSuccessToast(null), 4000);
-                          }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-bold rounded-lg transition-colors"
-                        >
-                          <UserCheck className="w-3.5 h-3.5" />
-                          Schritt freigeben
-                        </button>
-                      ) : (
-                        <span className="text-xs text-slate-500">Erledigt</span>
-                      )}
+                {runs.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 text-center text-slate-500">
+                      Noch keine Workflow-Läufe vorhanden.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  runs.map((run) => (
+                    <tr key={run.id} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="py-4 px-6">
+                        <div className="font-semibold text-slate-100">
+                          {run.workflow_id === 'wf-1'
+                            ? 'Erstkontakt & Qualifizierung'
+                            : 'Deal-Abschluss Routine'}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          Ziel: {run.target_name} ({run.target_type})
+                        </div>
+                      </td>
+                      <td className="py-4 px-6 text-xs text-slate-300">
+                        Schritt {run.current_step}:{' '}
+                        {run.workflow_id === 'wf-1'
+                          ? 'E-Mail-Entwurf (Gemma 12B)'
+                          : 'Technik-Übergabe'}
+                      </td>
+                      <td className="py-4 px-6">
+                        {run.status === 'WAITING_APPROVAL' ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            <Clock className="w-3 h-3" /> Wartet auf Freigabe
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3 h-3" /> Abgeschlossen
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-4 px-6">
+                        {run.status === 'WAITING_APPROVAL' ? (
+                          <button
+                            onClick={() => {
+                              setSuccessToast(
+                                `Schritt für ${run.target_name} freigegeben und ausgeführt!`,
+                              );
+                              setTimeout(() => setSuccessToast(null), 4000);
+                            }}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-bold rounded-lg transition-colors"
+                          >
+                            <UserCheck className="w-3.5 h-3.5" />
+                            Schritt freigeben
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-500">Erledigt</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
