@@ -78,15 +78,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip := r.RemoteAddr
+	ip := auth.ClientIP(r)
 	userAgent := r.UserAgent()
 
 	res, err := h.service.Login(r.Context(), req.Email, req.Password, req.TotpCode, ip, userAgent)
 	if err != nil {
 		status := http.StatusUnauthorized
-		if err == auth.ErrUserNotActive {
-			status = http.StatusForbidden
-		} else if strings.Contains(err.Error(), "gesperrt") {
+		if strings.Contains(err.Error(), "gesperrt") {
 			status = http.StatusTooManyRequests
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -168,7 +166,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newToken, newRefreshToken, err := h.service.RefreshToken(r.Context(), token, r.RemoteAddr, r.UserAgent())
+	newToken, newRefreshToken, err := h.service.RefreshToken(r.Context(), token, auth.ClientIP(r), r.UserAgent())
 	if err != nil {
 		http.Error(w, `{"error":"invalid_token","message":"`+err.Error()+`"}`, http.StatusUnauthorized)
 		return

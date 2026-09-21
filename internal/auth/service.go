@@ -29,6 +29,32 @@ var (
 	ErrUserNotFound       = errors.New("benutzer nicht gefunden")
 )
 
+var (
+	argon2Sem       = make(chan struct{}, 4)
+	dummyArgon2Hash string
+)
+
+func init() {
+	var err error
+	dummyArgon2Hash, err = HashPassword("OpenLocalCRM-Mitigate-User-Enumeration-Timing-F04-F05!")
+	if err != nil {
+		panic("auth: failed generating dummy password hash: " + err.Error())
+	}
+}
+
+func acquireArgonSem(ctx context.Context) error {
+	select {
+	case argon2Sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func releaseArgonSem() {
+	<-argon2Sem
+}
+
 type rotatedTokenEntry struct {
 	accessToken  string
 	refreshToken string
@@ -134,17 +160,28 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 
 	user, err := s.querier.GetUserByEmail(ctx, email)
 	if err != nil {
-		// Mitigation against timing attacks (Finding #33): execute dummy password check to equalize timing
-		_ = CheckPassword("$argon2id$v=19$m=65536,t=1,p=4$dummySalt12345678$dummyHashDummyHashDummyHashDummyHashDummyHashD=", password)
+		// Mitigation against timing attacks (Finding #33 / F-04): execute real dummy Argon2id calculation under semaphore
+		if semErr := acquireArgonSem(ctx); semErr == nil {
+			_ = CheckPassword(dummyArgon2Hash, password)
+			releaseArgonSem()
+		}
+		s.limiter.RecordFailure(rateLimitKey)
+		return nil, ErrInvalidCredentials
+	}
+
+	// Always verify password under semaphore first to eliminate user enumeration (F-04, F-05)
+	if semErr := acquireArgonSem(ctx); semErr != nil {
+		return nil, semErr
+	}
+	passwordMatches := CheckPassword(user.PasswordHash, password)
+	releaseArgonSem()
+
+	if !passwordMatches {
 		s.limiter.RecordFailure(rateLimitKey)
 		return nil, ErrInvalidCredentials
 	}
 
 	if user.Status != "ACTIVE" {
-		return nil, ErrUserNotActive
-	}
-
-	if !CheckPassword(user.PasswordHash, password) {
 		s.limiter.RecordFailure(rateLimitKey)
 		return nil, ErrInvalidCredentials
 	}
@@ -331,7 +368,13 @@ func (s *AuthService) DisableTOTP(ctx context.Context, userID uuid.UUID, current
 		return ErrUserNotFound
 	}
 
-	if !CheckPassword(user.PasswordHash, currentPassword) {
+	if semErr := acquireArgonSem(ctx); semErr != nil {
+		return semErr
+	}
+	pwMatches := CheckPassword(user.PasswordHash, currentPassword)
+	releaseArgonSem()
+
+	if !pwMatches {
 		return ErrInvalidOldPassword
 	}
 
@@ -353,11 +396,21 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldP
 		return ErrUserNotFound
 	}
 
-	if !CheckPassword(user.PasswordHash, oldPassword) {
+	if semErr := acquireArgonSem(ctx); semErr != nil {
+		return semErr
+	}
+	oldMatches := CheckPassword(user.PasswordHash, oldPassword)
+	releaseArgonSem()
+
+	if !oldMatches {
 		return ErrInvalidOldPassword
 	}
 
+	if semErr := acquireArgonSem(ctx); semErr != nil {
+		return semErr
+	}
 	hash, err := HashPassword(newPassword)
+	releaseArgonSem()
 	if err != nil {
 		return fmt.Errorf("failed hashing password: %w", err)
 	}

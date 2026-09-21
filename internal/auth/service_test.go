@@ -199,3 +199,32 @@ func TestAuthService_ChangePassword(t *testing.T) {
 		t.Fatalf("CRITICAL SECURITY VULNERABILITY: oldpassword123 bypass accepted in ChangePassword!")
 	}
 }
+
+func TestLogin_ConstantTimeOnUnknownUser(t *testing.T) {
+	svc, _, _ := setupTestAuthService(t)
+	ctx := context.Background()
+
+	// 1. Unknown user check duration: must perform real Argon2id derivation (> 20ms)
+	startUnknown := time.Now()
+	_, err := svc.Login(ctx, "unknown-user-does-not-exist@example.com", "any-password-123", "", "127.0.0.1", "TestAgent")
+	durUnknown := time.Since(startUnknown)
+
+	if err == nil {
+		t.Fatalf("expected error for unknown user")
+	}
+	if durUnknown < 20*time.Millisecond {
+		t.Fatalf("timing attack vulnerability (F-04): unknown user took only %v, expected > 20ms for full Argon2id calculation", durUnknown)
+	}
+
+	// 2. Wrong password check duration on real user
+	startWrong := time.Now()
+	_, err = svc.Login(ctx, "admin@openlocalcrm.local", "wrong-password-123", "", "127.0.0.1", "TestAgent")
+	durWrong := time.Since(startWrong)
+
+	if err == nil {
+		t.Fatalf("expected error for wrong password")
+	}
+	if durWrong < 20*time.Millisecond {
+		t.Fatalf("expected real user check to take > 20ms, took %v", durWrong)
+	}
+}
