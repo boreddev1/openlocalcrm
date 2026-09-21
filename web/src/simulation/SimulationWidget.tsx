@@ -115,27 +115,8 @@ export const SimulationWidget: React.FC = () => {
         let aiModelName = 'Gemma 12B (Lokal)';
         let aiSummary = 'PV-Interesse mit Speicherbedarf erkannt, PII maskiert';
 
-        // Versuche echte Live-Inferenz über Ollama auf localhost:11434
+        // Finding #40: Use backend AI gateway API instead of raw unauthenticated localhost:11434
         try {
-          const ollamaRes = await fetch('http://localhost:11434/api/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: 'gemma4:12b',
-              prompt:
-                'Klassifiziere diesen Lead für eine Solaranlage in Frankfurt und formuliere eine kurze Begrüßung auf Deutsch: 30 kWp PV-Anfrage von Dr. Michael Weber.',
-              stream: false,
-            }),
-          });
-          if (ollamaRes.ok) {
-            const data = await ollamaRes.json();
-            if (data.response) {
-              aiSummary = data.response.slice(0, 75).trim() + '...';
-              aiModelName = 'gemma4:12b (Live Ollama API)';
-            }
-          }
-        } catch {
-          // Fallback zu Backend AI Triage
           const triageRes = await apiFetch<{ category: string; summary: string }>(
             '/api/v1/ai/triage',
             {
@@ -147,7 +128,12 @@ export const SimulationWidget: React.FC = () => {
               }),
             },
           );
-          aiSummary = triageRes.summary || aiSummary;
+          if (triageRes.summary) {
+            aiSummary = triageRes.summary;
+          }
+          aiModelName = 'gemma4:12b (AI Gateway)';
+        } catch {
+          aiSummary = 'Kundenanfrage für 30 kWp PV-Anlage erfasst (PII maskiert).';
         }
 
         const latency = Date.now() - startTime;

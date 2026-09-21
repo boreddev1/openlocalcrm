@@ -14,17 +14,8 @@ export function useSSE(url: string = '/events/stream') {
     let reconnectTimeout: ReturnType<typeof setTimeout>;
 
     function connect() {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-      if (!token) {
-        setConnected(false);
-        return;
-      }
-
-      const streamUrl = url.includes('?')
-        ? `${url}&token=${encodeURIComponent(token)}`
-        : `${url}?token=${encodeURIComponent(token)}`;
-
-      eventSource = new EventSource(streamUrl);
+      // Authenticate via HttpOnly cookie (Finding #26: No token in query params)
+      eventSource = new EventSource(url, { withCredentials: true });
 
       eventSource.addEventListener('connected', () => {
         setConnected(true);

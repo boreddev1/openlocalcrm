@@ -12,12 +12,16 @@
         X-Frame-Options "DENY"
         # MIME-Type Sniffing Protection
         X-Content-Type-Options "nosniff"
+        # HSTS - Enforce HTTPS for 1 year with subdomains
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         # Referrer Policy
         Referrer-Policy "strict-origin-when-cross-origin"
         # XSS Protection
         X-XSS-Protection "1; mode=block"
-        # Content Security Policy (allows self, inline styles for Tailwind, and local connect)
-        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:8080 http://localhost:11434 http://127.0.0.1:11434 http://host.docker.internal:11434; img-src 'self' data: https:; font-src 'self' data:; object-src 'none'; base-uri 'self';"
+        # Content Security Policy (tightened: no direct Ollama access from browser)
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https:; font-src 'self' data:; object-src 'none'; base-uri 'self';"
+        # Permissions Policy
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
     }
 
     # API routes

@@ -35,7 +35,7 @@ make logs
 
 ## 3. Automatische Datenbank-Migrationen
 
-Der Server führt beim Start automatisch alle im Binary eingebetteten SQL-Migrationen (`00001` bis `00007`) aus:
+Der Server führt beim Start automatisch alle im Binary eingebetteten SQL-Migrationen (`00001` bis `00011`) aus:
 - **Tabelle:** `schema_migrations`
 - **Transaktionssicherheit:** Jede Migration wird in einer eigenen PostgreSQL-Transaktion angewendet.
 - **Rollback-Schutz:** Fehlgeschlagene Migrationen führen zu einem kontrollierten Abbruch, ohne Altbestände zu beschädigen.
@@ -47,13 +47,13 @@ Der Server führt beim Start automatisch alle im Binary eingebetteten SQL-Migrat
 Für Produktivsysteme können vorgebaute Multi-Arch Images (`linux/amd64` und `linux/arm64`) direkt bezogen werden:
 
 ```yaml
-# In docker-compose.prod.yml
+# Beispiel docker-compose.yml mit GHCR Images
 services:
   server:
     image: ghcr.io/boreddev1/openlocalcrm/server:latest
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgres://crm_user:crm_pass@db:5432/crm_db?sslmode=disable
+      - DATABASE_URL=postgres://crm_user:${DB_PASSWORD:-crm_pass}@db:5432/crm_db?sslmode=disable
       - PORT=8080
     depends_on:
       db:
@@ -63,7 +63,7 @@ services:
     image: ghcr.io/boreddev1/openlocalcrm/worker:latest
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgres://crm_user:crm_pass@db:5432/crm_db?sslmode=disable
+      - DATABASE_URL=postgres://crm_user:${DB_PASSWORD:-crm_pass}@db:5432/crm_db?sslmode=disable
 ```
 
 ---

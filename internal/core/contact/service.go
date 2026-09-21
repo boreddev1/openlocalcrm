@@ -3,6 +3,8 @@ package contact
 import (
 	"context"
 	"errors"
+	"log"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
@@ -12,7 +14,21 @@ import (
 var (
 	ErrContactNotFound = errors.New("contact not found")
 	ErrInvalidContact  = errors.New("first name and last name are required")
+	ErrInvalidEmail    = errors.New("invalid email address format")
 )
+
+// validateEmail performs basic email syntax validation.
+func validateEmail(email string) bool {
+	if email == "" {
+		return true // empty is allowed (optional field)
+	}
+	at := strings.Index(email, "@")
+	if at < 1 {
+		return false
+	}
+	dot := strings.LastIndex(email[at:], ".")
+	return dot > 1 && dot < len(email[at:])-1
+}
 
 type Service struct {
 	queries db.Querier
@@ -46,6 +62,9 @@ type CreateContactInput struct {
 func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateContactInput) (db.Contact, error) {
 	if input.FirstName == "" || input.LastName == "" {
 		return db.Contact{}, ErrInvalidContact
+	}
+	if !validateEmail(input.Email) {
+		return db.Contact{}, ErrInvalidEmail
 	}
 
 	var compID pgtype.UUID
@@ -88,7 +107,9 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateC
 	}
 
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "CONTACT", contact.ID, "CREATE", contact, "", "")
+		if err := s.audit.Log(ctx, actorID, "CONTACT", contact.ID, "CREATE", contact, "", ""); err != nil {
+			log.Printf("[audit] failed to log contact create: %v", err)
+		}
 	}
 
 	return contact, nil
@@ -140,6 +161,9 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateC
 	if input.FirstName == "" || input.LastName == "" {
 		return db.Contact{}, ErrInvalidContact
 	}
+	if !validateEmail(input.Email) {
+		return db.Contact{}, ErrInvalidEmail
+	}
 
 	var compID pgtype.UUID
 	if input.CompanyID != nil {
@@ -181,7 +205,9 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateC
 	}
 
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "CONTACT", contact.ID, "UPDATE", contact, "", "")
+		if err := s.audit.Log(ctx, actorID, "CONTACT", contact.ID, "UPDATE", contact, "", ""); err != nil {
+			log.Printf("[audit] failed to log contact update: %v", err)
+		}
 	}
 
 	return contact, nil
@@ -193,7 +219,9 @@ func (s *Service) Delete(ctx context.Context, actorID pgtype.UUID, id pgtype.UUI
 		return err
 	}
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "CONTACT", id, "DELETE", map[string]string{"status": "deleted"}, "", "")
+		if err := s.audit.Log(ctx, actorID, "CONTACT", id, "DELETE", map[string]string{"status": "deleted"}, "", ""); err != nil {
+			log.Printf("[audit] failed to log contact delete: %v", err)
+		}
 	}
 	return nil
 }

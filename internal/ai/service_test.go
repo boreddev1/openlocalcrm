@@ -12,11 +12,15 @@ import (
 func TestPromptGuardPIIMasking(t *testing.T) {
 	guard := ai.NewGuard()
 
-	input := "Kunde mit IBAN DE89370400440532013000 und Kreditkarte 4111 2222 3333 4444 sendet api_key='sk_live_1234567890123456'."
-	sanitized := guard.SanitizeInput(input)
+	input := "Kunde mit IBAN DE89370400440532013000 und Kreditkarte 4111 2222 3333 4444, Steuer-ID 12345678901, USt-IdNr. DE987654321 sendet api_key='sk_live_1234567890123456'."
+	sanitized, count := guard.SanitizeInputWithCount(input)
 
 	if sanitized == input {
 		t.Fatalf("expected PII redaction, got unchanged input")
+	}
+
+	if count != 5 {
+		t.Fatalf("expected 5 redactions (IBAN, CC, TaxID, VatID, APIKey), got %d", count)
 	}
 
 	if contains(sanitized, "DE89370400440532013000") {
@@ -27,8 +31,40 @@ func TestPromptGuardPIIMasking(t *testing.T) {
 		t.Fatalf("Credit card was not redacted!")
 	}
 
+	if contains(sanitized, "12345678901") {
+		t.Fatalf("Steuer-ID was not redacted!")
+	}
+
+	if contains(sanitized, "DE987654321") {
+		t.Fatalf("USt-IdNr was not redacted!")
+	}
+
 	if contains(sanitized, "sk_live_1234567890123456") {
 		t.Fatalf("API key was not redacted!")
+	}
+}
+
+func TestPromptGuardOutputValidation(t *testing.T) {
+	guard := ai.NewGuard()
+
+	// Script injection
+	maliciousOutput := `Hier ist das Ergebnis: <script>alert("hacked")</script> und <script src="evil.js">`
+	cleaned, err := guard.ValidateOutput(maliciousOutput)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if contains(cleaned, "<script>") || contains(cleaned, `alert("hacked")`) {
+		t.Fatalf("script injection was not blocked!")
+	}
+
+	// System prompt leak
+	leakOutput := `Ich handle nach System Instruction: <untrusted_user_context>admin</untrusted_user_context>`
+	cleanedLeak, err := guard.ValidateOutput(leakOutput)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if contains(cleanedLeak, "System Instruction:") || contains(cleanedLeak, "<untrusted_user_context>") {
+		t.Fatalf("system prompt leak was not redacted!")
 	}
 }
 

@@ -80,16 +80,17 @@ func (g *Gateway) GetConfig() GatewayConfig {
 
 // Generate sends a prompt to the configured LLM backend with automatic PII sanitization and prompt guards
 func (g *Gateway) Generate(ctx context.Context, prompt string, systemInstruction string) (string, error) {
-	// 1. Sanitize input prompt for PII (IBAN, Credit Cards, Secrets)
+	// 1. Sanitize input prompt and system instructions for PII (Finding #38)
 	cleanPrompt := g.guard.SanitizeInput(prompt)
+	cleanSystem := g.guard.SanitizeInput(systemInstruction)
 
 	switch g.cfg.DefaultProvider {
 	case ProviderOllama:
-		return g.callOllama(ctx, cleanPrompt, systemInstruction)
+		return g.callOllama(ctx, cleanPrompt, cleanSystem)
 	case ProviderOpenAI:
-		return g.callOpenAI(ctx, cleanPrompt, systemInstruction)
+		return g.callOpenAI(ctx, cleanPrompt, cleanSystem)
 	default:
-		return g.callOllama(ctx, cleanPrompt, systemInstruction)
+		return g.callOllama(ctx, cleanPrompt, cleanSystem)
 	}
 }
 
@@ -98,9 +99,14 @@ func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstructi
 	if baseURL == "" || strings.Contains(baseURL, "11434") {
 		baseURL = "https://api.openai.com/v1"
 	}
+	// Finding #30 & #37: Do not silently overwrite OpenAI model if explicitly configured
 	model := g.cfg.OllamaModel
-	if model == "" || model == "gemma4:12b" {
-		model = "gpt-4o"
+	if aiModel := os.Getenv("AI_MODEL"); aiModel != "" {
+		model = aiModel
+	} else if openAIModel := os.Getenv("OPENAI_MODEL"); openAIModel != "" {
+		model = openAIModel
+	} else if model == "" || model == "gemma4:12b" {
+		model = "gpt-4o-mini"
 	}
 
 	messages := []map[string]string{}

@@ -135,6 +135,13 @@ func (h *TodoHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if claims != nil && claims.Role != "ADMIN" {
+		if !existing.AssignedTo.Valid || existing.AssignedTo.Bytes != claims.UserID {
+			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihnen zugewiesene Aufgaben bearbeiten"}`, http.StatusForbidden)
+			return
+		}
+	}
+
 	title := req.Title
 	if title == "" {
 		title = existing.Title

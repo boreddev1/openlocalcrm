@@ -3,6 +3,7 @@ package company
 import (
 	"context"
 	"errors"
+	"log"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
@@ -70,7 +71,9 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateC
 	}
 
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "COMPANY", comp.ID, "CREATE", comp, "", "")
+		if auditErr := s.audit.Log(ctx, actorID, "COMPANY", comp.ID, "CREATE", comp, "", ""); auditErr != nil {
+			log.Printf("[AUDIT_ERROR] Failed logging company creation: %v", auditErr)
+		}
 	}
 
 	return comp, nil
@@ -135,7 +138,9 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateC
 	}
 
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "COMPANY", comp.ID, "UPDATE", comp, "", "")
+		if auditErr := s.audit.Log(ctx, actorID, "COMPANY", comp.ID, "UPDATE", comp, "", ""); auditErr != nil {
+			log.Printf("[AUDIT_ERROR] Failed logging company update: %v", auditErr)
+		}
 	}
 
 	return comp, nil
@@ -147,7 +152,9 @@ func (s *Service) Delete(ctx context.Context, actorID, compID pgtype.UUID) error
 		return err
 	}
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "COMPANY", compID, "DELETE", map[string]string{"status": "deleted"}, "", "")
+		if auditErr := s.audit.Log(ctx, actorID, "COMPANY", compID, "DELETE", map[string]string{"status": "deleted"}, "", ""); auditErr != nil {
+			log.Printf("[AUDIT_ERROR] Failed logging company deletion: %v", auditErr)
+		}
 	}
 	return nil
 }

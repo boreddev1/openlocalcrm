@@ -37,6 +37,11 @@ func AuthMiddleware(pubKey ed25519.PublicKey) func(http.Handler) http.Handler {
 				return
 			}
 
+			if IsTokenRevoked(tokenStr) {
+				http.Error(w, `{"error":"unauthorized","message":"token has been revoked"}`, http.StatusUnauthorized)
+				return
+			}
+
 			claims, err := ValidateAccessToken(tokenStr, pubKey)
 			if err != nil {
 				http.Error(w, `{"error":"unauthorized","message":"invalid or expired token"}`, http.StatusUnauthorized)
@@ -51,14 +56,25 @@ func AuthMiddleware(pubKey ed25519.PublicKey) func(http.Handler) http.Handler {
 
 // RequireRole enforces specific roles for authenticated users
 func RequireRole(role string) func(http.Handler) http.Handler {
+	return RequireAnyRole(role)
+}
+
+// RequireAnyRole enforces that the authenticated user has at least one of the specified roles
+func RequireAnyRole(roles ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims, ok := r.Context().Value(UserContextKey).(*AccessClaims)
-			if !ok || claims == nil || claims.Role != role {
+			if !ok || claims == nil {
 				http.Error(w, `{"error":"forbidden","message":"insufficient permissions"}`, http.StatusForbidden)
 				return
 			}
-			next.ServeHTTP(w, r)
+			for _, role := range roles {
+				if claims.Role == role {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			http.Error(w, `{"error":"forbidden","message":"insufficient permissions"}`, http.StatusForbidden)
 		})
 	}
 }

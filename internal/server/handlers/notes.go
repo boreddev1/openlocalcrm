@@ -99,7 +99,21 @@ type UpdateNoteRequest struct {
 }
 
 func (h *NoteHandler) Update(w http.ResponseWriter, r *http.Request) {
+	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 	id := chi.URLParam(r, "id")
+
+	if claims != nil && claims.Role != "ADMIN" {
+		existing, err := h.service.GetByID(r.Context(), id)
+		if err != nil {
+			http.Error(w, `{"error":"note not found"}`, http.StatusNotFound)
+			return
+		}
+		if existing.Author != claims.Email {
+			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihre eigenen Notizen bearbeiten"}`, http.StatusForbidden)
+			return
+		}
+	}
+
 	var req UpdateNoteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)

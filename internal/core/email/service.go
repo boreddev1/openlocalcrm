@@ -2,8 +2,14 @@ package email
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"time"
 
@@ -159,4 +165,67 @@ func (s *Service) GetThread(ctx context.Context, threadID string) ([]db.EmailMes
 
 func (s *Service) MarkAsRead(ctx context.Context, id pgtype.UUID) error {
 	return s.queries.MarkEmailMessageRead(ctx, id)
+}
+
+// EncryptPassword encrypts a plaintext password using AES-256-GCM.
+func EncryptPassword(plainText string, key []byte) (string, error) {
+	if len(key) == 0 {
+		return "", errors.New("encryption key is empty")
+	}
+	k := key
+	if len(k) != 32 {
+		h := sha256.Sum256(key)
+		k = h[:]
+	}
+	block, err := aes.NewCipher(k)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(plainText), nil)
+	return hex.EncodeToString(sealed), nil
+}
+
+// DecryptPassword decrypts a hex-encoded AES-256-GCM encrypted password.
+func DecryptPassword(cipherHex string, key []byte) (string, error) {
+	if cipherHex == "" {
+		return "", nil
+	}
+	if len(key) == 0 {
+		return "", errors.New("decryption key is empty")
+	}
+	k := key
+	if len(k) != 32 {
+		h := sha256.Sum256(key)
+		k = h[:]
+	}
+	data, err := hex.DecodeString(cipherHex)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(k)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(data) < gcm.NonceSize() {
+		return "", errors.New("ciphertext too short")
+	}
+	nonce := data[:gcm.NonceSize()]
+	ciphertext := data[gcm.NonceSize():]
+	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
 }

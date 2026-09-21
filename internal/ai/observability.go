@@ -4,6 +4,10 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 type AIAuditLog struct {
@@ -32,20 +36,49 @@ type ObservabilityStats struct {
 type ObservabilityService struct {
 	mu   sync.RWMutex
 	logs []AIAuditLog
+	dbtx db.DBTX
 }
 
-func NewObservabilityService() *ObservabilityService {
-	return &ObservabilityService{
+func NewObservabilityService(dbtx ...db.DBTX) *ObservabilityService {
+	s := &ObservabilityService{
 		logs: make([]AIAuditLog, 0),
 	}
+	if len(dbtx) > 0 {
+		s.dbtx = dbtx[0]
+	}
+	return s
 }
 
 func (s *ObservabilityService) Record(ctx context.Context, log AIAuditLog) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if log.CreatedAt.IsZero() {
 		log.CreatedAt = time.Now()
 	}
+	if log.ID == "" {
+		log.ID = uuid.New().String()
+	}
+
+	// Finding #3: Persist to Postgres ai_audit_logs if DB connection is available
+	if s.dbtx != nil {
+		idUUID, err := uuid.Parse(log.ID)
+		if err != nil {
+			idUUID = uuid.New()
+			log.ID = idUUID.String()
+		}
+		query := `INSERT INTO ai_audit_logs (
+			id, interaction_type, model_name, provider,
+			prompt_tokens, completion_tokens, latency_ms,
+			pii_filter_triggered, pii_redactions_count, human_approved, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+		_, _ = s.dbtx.Exec(ctx, query,
+			idUUID, log.InteractionType, log.ModelName, log.Provider,
+			log.PromptTokens, log.CompletionTokens, log.LatencyMs,
+			log.PIIFilterTriggered, log.PIIRedactionsCount, log.HumanApproved, log.CreatedAt,
+		)
+	}
+
+	// Always retain in memory for quick dashboard querying and demo mode
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.logs = append([]AIAuditLog{log}, s.logs...)
 	if len(s.logs) > 500 {
 		s.logs = s.logs[:500]
@@ -53,6 +86,43 @@ func (s *ObservabilityService) Record(ctx context.Context, log AIAuditLog) {
 }
 
 func (s *ObservabilityService) GetRecentLogs(limit int) []AIAuditLog {
+	// Finding #39: Prevent crash/panic on negative or zero limit
+	if limit <= 0 {
+		return []AIAuditLog{}
+	}
+
+	// Try fetching from database first if available
+	if s.dbtx != nil {
+		query := `SELECT id, interaction_type, model_name, provider,
+		                 prompt_tokens, completion_tokens, latency_ms,
+		                 pii_filter_triggered, pii_redactions_count, human_approved, created_at
+		          FROM ai_audit_logs
+		          ORDER BY created_at DESC
+		          LIMIT $1`
+		rows, err := s.dbtx.Query(context.Background(), query, limit)
+		if err == nil {
+			defer rows.Close()
+			var dbLogs []AIAuditLog
+			for rows.Next() {
+				var l AIAuditLog
+				var idUUID pgtype.UUID
+				var humanApproved *bool
+				if scanErr := rows.Scan(
+					&idUUID, &l.InteractionType, &l.ModelName, &l.Provider,
+					&l.PromptTokens, &l.CompletionTokens, &l.LatencyMs,
+					&l.PIIFilterTriggered, &l.PIIRedactionsCount, &humanApproved, &l.CreatedAt,
+				); scanErr == nil {
+					l.ID = uuid.UUID(idUUID.Bytes).String()
+					l.HumanApproved = humanApproved
+					dbLogs = append(dbLogs, l)
+				}
+			}
+			if len(dbLogs) > 0 {
+				return dbLogs
+			}
+		}
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if limit > len(s.logs) {

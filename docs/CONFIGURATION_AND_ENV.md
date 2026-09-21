@@ -9,16 +9,24 @@ Dieses Handbuch beschreibt alle Konfigurationsparameter, Umgebungsvariablen (`.e
 | Variable | Standardwert | Pflicht? | Beschreibung |
 |---|---|---|---|
 | `PORT` | `8080` | Nein | Port des Go API-Servers |
+| `DOMAIN` | `localhost` | Nein | Hauptdomain für Caddy-TLS & Cookie-Domain |
 | `DATABASE_URL` | `postgres://...` | Ja (Prod) | Verbindungs-URI zur PostgreSQL 16 Datenbank (entfällt bei `DEMO_MODE=true`) |
+| `DB_HOST` | `crm-db` | Ja (Docker) | Hostname des PostgreSQL-Containers |
+| `DB_PORT` | `5432` | Nein | Port des PostgreSQL-Servers |
+| `DB_NAME` | `crm_db` | Ja (Docker) | Name der PostgreSQL-Datenbank |
+| `DB_USER` | `crm_user` | Ja (Docker) | PostgreSQL-Benutzername |
+| `DB_PASSWORD` | — | Ja (Prod) | Pflichtpasswort für PostgreSQL (in `.env` definieren) |
 | `DEMO_MODE` | `false` | Nein | Bei `true` wird der In-Memory RAM Querier gestartet; keine externe DB nötig |
-| `INITIAL_ADMIN_PASSWORD` | — | Nein | Initiales Passwort für `admin@openlocalcrm.local` beim Erststart (wird sonst sicher generiert) |
-| `STORAGE_PATH` | `/data/storage` | Nein | Lokales Verzeichnis für Dateiuploads & E-Mail-Anhänge |
+| `INITIAL_ADMIN_EMAIL` | `admin@openlocalcrm.local` | Nein | E-Mail des initialen Administrators |
+| `INITIAL_ADMIN_PASSWORD` | — | Nein | Initiales Passwort für den Admin beim Erststart (wird sonst sicher generiert) |
+| `STORAGE_PATH` | `/data/storage` | Nein | Lokales Verzeichnis für Dateiuploads & E-Mail-Anhänge (Kompatibilitäts-Alias: `STORAGE_LOCAL_DIR`) |
+| `JWT_SECRET_KEY_PATH` | `/app/keys/ed25519.key` | Ja (Prod) | Pfad zum persistenten Ed25519-Schlüssel (Kompatibilitäts-Alias: `JWT_PRIVATE_KEY_PATH`) |
 | `CONNECTOR_API_TOKEN` | — | Ja (Prod) | Geheimer API-Schlüssel für Lead-Intake Webhooks (Bearer Auth) |
 | `AI_PROVIDER` | `ollama` | Nein | KI-Inferenz-Provider (`ollama`, `openai`, `gemini`) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Nein | URL der lokalen Ollama-Instanz |
 | `OLLAMA_MODEL` | `gemma4:12b` | Nein | Verwendetes Sprachmodell (z. B. `gemma4:12b`, `qwen3:8b`) |
-| `JWT_PRIVATE_KEY_PATH` | `/app/keys/ed25519.key` | Ja (Prod) | Pfad zum persistenten privaten Ed25519-Schlüssel (muss auf gemountetem Volume liegen) |
-| `JWT_PUBLIC_KEY_PATH` | `/app/keys/ed25519.pub` | Ja (Prod) | Pfad zum persistenten öffentlichen Ed25519-Schlüssel |
+| `AI_API_KEY` | — | Nein | API-Key bei Nutzung externer Provider (OpenAI, Gemini) |
+| `AI_BASE_URL` | — | Nein | Optionale Custom-Base-URL für OpenAI-kompatible Proxies |
 | `LOG_LEVEL` | `info` | Nein | Log-Level (`debug`, `info`, `warn`, `error`) |
 
 > [!WARNING]

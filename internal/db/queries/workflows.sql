@@ -41,6 +41,10 @@ RETURNING *;
 SELECT * FROM workflow_runs
 ORDER BY started_at DESC;
 
+-- name: GetWorkflowRunByID :one
+SELECT * FROM workflow_runs
+WHERE id = $1 LIMIT 1;
+
 -- name: UpdateWorkflowRunStatus :one
 UPDATE workflow_runs
 SET status = $2,

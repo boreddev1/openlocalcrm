@@ -40,11 +40,11 @@ sequenceDiagram
 1. **Ollama installieren:** [ollama.com](https://ollama.com)
 2. **Gemma 12B herunterladen:**
    ```bash
-   ollama pull gemma2:12b
+   ollama pull gemma4:12b
    ```
 3. **CRM-Konfiguration in `.env`:**
    ```dotenv
    AI_PROVIDER=ollama
    OLLAMA_BASE_URL=http://localhost:11434
-   OLLAMA_MODEL=gemma2:12b
+   OLLAMA_MODEL=gemma4:12b
    ```

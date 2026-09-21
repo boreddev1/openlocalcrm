@@ -21,7 +21,7 @@ func TestEmailHandler(t *testing.T) {
 	q := demo.NewInMemoryQuerier()
 	hub := sse.NewHub()
 	svc := email.NewService(q, nil, nil, hub)
-	h := handlers.NewEmailHandler(svc)
+	h := handlers.NewEmailHandler(svc, true)
 
 	t.Run("IngestDemo valid", func(t *testing.T) {
 		reqBody := handlers.IngestDemoEmailRequest{
@@ -50,6 +50,15 @@ func TestEmailHandler(t *testing.T) {
 
 		h.IngestDemo(rec, req)
 		require.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("IngestDemo forbidden in production mode", func(t *testing.T) {
+		hProd := handlers.NewEmailHandler(svc, false)
+		req := httptest.NewRequest(http.MethodPost, "/api/emails/demo-ingest", bytes.NewReader([]byte("{}")))
+		rec := httptest.NewRecorder()
+
+		hProd.IngestDemo(rec, req)
+		require.Equal(t, http.StatusForbidden, rec.Code)
 	})
 
 	t.Run("ListMessages", func(t *testing.T) {

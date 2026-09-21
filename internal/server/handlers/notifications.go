@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/notification"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
@@ -19,7 +20,16 @@ func NewNotificationHandler(service *notification.Service) *NotificationHandler 
 }
 
 func (h *NotificationHandler) ListUnread(w http.ResponseWriter, r *http.Request) {
-	items, err := h.service.ListUnread(r.Context(), nil, 20)
+	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
+	var actorID *pgtype.UUID
+	if claims != nil {
+		var uid pgtype.UUID
+		if err := uid.Scan(claims.UserID.String()); err == nil {
+			actorID = &uid
+		}
+	}
+
+	items, err := h.service.ListUnread(r.Context(), actorID, 20)
 	if err != nil {
 		http.Error(w, `{"error":"failed to fetch notifications"}`, http.StatusInternalServerError)
 		return
@@ -50,7 +60,16 @@ func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NotificationHandler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
-	if err := h.service.MarkAllAsRead(r.Context(), nil); err != nil {
+	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
+	var actorID *pgtype.UUID
+	if claims != nil {
+		var uid pgtype.UUID
+		if err := uid.Scan(claims.UserID.String()); err == nil {
+			actorID = &uid
+		}
+	}
+
+	if err := h.service.MarkAllAsRead(r.Context(), actorID); err != nil {
 		http.Error(w, `{"error":"failed to mark all as read"}`, http.StatusInternalServerError)
 		return
 	}

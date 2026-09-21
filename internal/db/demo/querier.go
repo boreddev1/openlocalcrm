@@ -1873,6 +1873,17 @@ func (q *InMemoryQuerier) CreateWorkflowRun(ctx context.Context, arg db.CreateWo
 	return run, nil
 }
 
+func (q *InMemoryQuerier) GetWorkflowRunByID(ctx context.Context, id string) (db.WorkflowRun, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	run, ok := q.workflowRuns[id]
+	if !ok {
+		return db.WorkflowRun{}, ErrNotFound
+	}
+	return run, nil
+}
+
 func (q *InMemoryQuerier) ListWorkflowRuns(ctx context.Context) ([]db.WorkflowRun, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()

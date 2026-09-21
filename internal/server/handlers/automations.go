@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 )
 
@@ -55,4 +56,23 @@ func (h *AutomationHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(runs)
+}
+
+// ApproveStep handles POST /automations/runs/{id}/approve
+// Advances a WAITING_APPROVAL workflow run by executing the pending step.
+func (h *AutomationHandler) ApproveStep(w http.ResponseWriter, r *http.Request) {
+	runID := chi.URLParam(r, "id")
+	if runID == "" {
+		http.Error(w, "run id is required", http.StatusBadRequest)
+		return
+	}
+
+	run, err := h.service.ApproveStep(r.Context(), runID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(run)
 }

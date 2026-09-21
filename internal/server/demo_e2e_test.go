@@ -92,14 +92,20 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	// 5. Authenticated SSE stream succeeds with Bearer token
 	streamReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/events/stream", nil)
 	streamReq.Header.Set("Authorization", "Bearer "+adminToken)
-	// Or test via query parameter
-	streamReqQuery, _ := http.NewRequest(http.MethodGet, ts.URL+"/events/stream?token="+adminToken, nil)
 
-	streamRes, err := client.Do(streamReqQuery)
+	streamRes, err := client.Do(streamReq)
 	if err != nil || streamRes.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for authenticated SSE stream, got %d, err: %v", streamRes.StatusCode, err)
 	}
 	streamRes.Body.Close()
+
+	// 5b. Finding #26: Query parameter token is rejected
+	streamReqQuery, _ := http.NewRequest(http.MethodGet, ts.URL+"/events/stream?token="+adminToken, nil)
+	queryRes, err := client.Do(streamReqQuery)
+	if err != nil || queryRes.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for SSE stream with query param token, got %d", queryRes.StatusCode)
+	}
+	queryRes.Body.Close()
 
 	// 6. Login as Sales User (BENUTZER)
 	salesLoginPayload := []byte(`{"email":"vertrieb@mavalio.local","password":"demo123"}`)

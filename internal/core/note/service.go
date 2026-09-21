@@ -246,7 +246,9 @@ func (s *Service) Update(ctx context.Context, id, content, noteType string) (Not
 func (s *Service) Delete(ctx context.Context, id string) error {
 	if s.querier != nil {
 		if u, err := uuid.Parse(id); err == nil {
-			_ = s.querier.DeleteNote(ctx, pgtype.UUID{Bytes: u, Valid: true})
+			if err := s.querier.DeleteNote(ctx, pgtype.UUID{Bytes: u, Valid: true}); err != nil {
+				return fmt.Errorf("failed to delete note: %w", err)
+			}
 		}
 		s.broadcast("note.deleted", map[string]string{"id": id})
 		return nil
