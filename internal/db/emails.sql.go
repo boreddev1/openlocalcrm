@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -572,8 +573,8 @@ RETURNING id, account_id, thread_id, message_id, in_reply_to, direction, sender_
 `
 
 type UpdateEmailMessageTagsParams struct {
-	ID   pgtype.UUID `json:"id"`
-	Tags []byte      `json:"tags"`
+	ID   pgtype.UUID     `json:"id"`
+	Tags json.RawMessage `json:"tags"`
 }
 
 func (q *Queries) UpdateEmailMessageTags(ctx context.Context, arg UpdateEmailMessageTagsParams) (EmailMessage, error) {

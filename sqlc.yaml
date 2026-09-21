@@ -22,3 +22,5 @@ sql:
             go_type: "string"
           - db_type: "email_direction"
             go_type: "string"
+          - column: "email_messages.tags"
+            go_type: "encoding/json.RawMessage"

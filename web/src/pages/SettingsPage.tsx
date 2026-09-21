@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { apiFetch } from '../api/client';
+import {
+  apiFetch,
+  getEmailAccounts,
+  createEmailAccount,
+  updateEmailAccount,
+  deleteEmailAccount,
+  testEmailAccount,
+  type EmailAccount,
+} from '../api/client';
 import {
   Webhook,
   ShieldCheck,
@@ -182,6 +190,131 @@ export const SettingsPage: React.FC = () => {
       setUserMsg({ type: 'error', message: err.message || 'Fehler beim Ändern des Status' });
     }
     setTimeout(() => setUserMsg(null), 5000);
+  };
+
+  // --- E-Mail-Konten State (IMAP/SMTP) ---
+  const [emailAccounts, setEmailAccounts] = useState<EmailAccount[]>([]);
+  const [emailMsg, setEmailMsg] = useState<{ type: 'success' | 'error'; message: string } | null>(
+    null,
+  );
+  const [testingAccountId, setTestingAccountId] = useState<string | null>(null);
+  const [emailForm, setEmailForm] = useState({
+    name: '',
+    email_address: '',
+    imap_host: '',
+    imap_port: '993',
+    smtp_host: '',
+    smtp_port: '587',
+    username: '',
+    password: '',
+  });
+
+  const reloadEmailAccounts = async () => {
+    try {
+      const res = await getEmailAccounts();
+      setEmailAccounts(Array.isArray(res) ? res : []);
+    } catch (err) {
+      console.error('Failed to load email accounts:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'EMAIL') {
+      reloadEmailAccounts();
+    }
+  }, [activeTab]);
+
+  const handleCreateEmailAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (
+      !emailForm.name.trim() ||
+      !emailForm.email_address.trim() ||
+      !emailForm.username.trim() ||
+      !emailForm.password.trim()
+    ) {
+      setEmailMsg({ type: 'error', message: 'Bitte alle Pflichtfelder ausfüllen.' });
+      setTimeout(() => setEmailMsg(null), 5000);
+      return;
+    }
+
+    try {
+      await createEmailAccount({
+        name: emailForm.name.trim(),
+        email_address: emailForm.email_address.trim(),
+        provider: 'IMAP',
+        imap_host: emailForm.imap_host.trim(),
+        imap_port: parseInt(emailForm.imap_port, 10) || 993,
+        smtp_host: emailForm.smtp_host.trim(),
+        smtp_port: parseInt(emailForm.smtp_port, 10) || 587,
+        username: emailForm.username.trim(),
+        password: emailForm.password,
+      });
+      setEmailMsg({
+        type: 'success',
+        message: `Postfach ${emailForm.email_address} erfolgreich angelegt.`,
+      });
+      setEmailForm({
+        name: '',
+        email_address: '',
+        imap_host: '',
+        imap_port: '993',
+        smtp_host: '',
+        smtp_port: '587',
+        username: '',
+        password: '',
+      });
+      await reloadEmailAccounts();
+    } catch (err: any) {
+      setEmailMsg({ type: 'error', message: err.message || 'Fehler beim Anlegen des Postfachs' });
+    }
+    setTimeout(() => setEmailMsg(null), 5000);
+  };
+
+  const handleDeleteEmailAccount = async (id: string) => {
+    try {
+      await deleteEmailAccount(id);
+      setEmailMsg({ type: 'success', message: 'Postfach erfolgreich gelöscht.' });
+      await reloadEmailAccounts();
+    } catch (err: any) {
+      setEmailMsg({ type: 'error', message: err.message || 'Fehler beim Löschen des Postfachs' });
+    }
+    setTimeout(() => setEmailMsg(null), 5000);
+  };
+
+  const handleToggleEmailAccountActive = async (acc: EmailAccount) => {
+    try {
+      await updateEmailAccount(acc.id, {
+        name: acc.name,
+        imap_host: acc.imap_host,
+        imap_port: acc.imap_port,
+        smtp_host: acc.smtp_host,
+        smtp_port: acc.smtp_port,
+        username: acc.username,
+        is_active: !acc.is_active,
+      });
+      await reloadEmailAccounts();
+    } catch (err: any) {
+      setEmailMsg({ type: 'error', message: err.message || 'Fehler beim Aktualisieren' });
+    }
+    setTimeout(() => setEmailMsg(null), 5000);
+  };
+
+  const handleTestEmailAccount = async (id: string) => {
+    setTestingAccountId(id);
+    try {
+      await testEmailAccount(id);
+      setEmailMsg({
+        type: 'success',
+        message: 'Verbindungstest erfolgreich: IMAP-Login und SMTP-Auth funktionieren.',
+      });
+    } catch (err: any) {
+      setEmailMsg({
+        type: 'error',
+        message: `Verbindungstest fehlgeschlagen: ${err.message || 'Unbekannter Fehler'}`,
+      });
+    }
+    setTestingAccountId(null);
+    setTimeout(() => setEmailMsg(null), 6000);
   };
 
   // --- 2FA TOTP State (§2.2) ---
@@ -793,48 +926,231 @@ export const SettingsPage: React.FC = () => {
 
       {/* Tab: EMAIL */}
       {activeTab === 'EMAIL' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-            <div>
-              <h3 className="text-base font-bold text-slate-100">
-                E-Mail-Konten (IMAP / SMTP Synchronisation)
-              </h3>
-              <p className="text-xs text-slate-400">
-                Verwalte Postfächer für automatischen E-Mail-Empfang und KI-Versand
-              </p>
+        <div className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-emerald-400" /> Neues Postfach anlegen
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Echte IMAP/SMTP-Zugangsdaten (Passwort wird AES-256-GCM verschlüsselt gespeichert)
+                </p>
+              </div>
             </div>
-            <span className="text-xs px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-semibold">
-              1 Konto aktiv
-            </span>
-          </div>
 
-          <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Mail className="w-5 h-5 text-emerald-400" />
-                <div>
-                  <div className="text-sm font-semibold text-slate-200">
-                    vertrieb@openlocalcrm.local
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    Primäres Konto für Workflows & KI-Drafts (§4.1)
-                  </div>
+            {emailMsg && (
+              <div
+                className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                  emailMsg.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300'
+                    : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
+                }`}
+              >
+                {emailMsg.type === 'success' ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <AlertCircle className="w-4 h-4" />
+                )}
+                {emailMsg.message}
+              </div>
+            )}
+
+            <form
+              onSubmit={handleCreateEmailAccount}
+              className="grid grid-cols-1 sm:grid-cols-4 gap-3"
+            >
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Anzeigename
+                </label>
+                <input
+                  type="text"
+                  value={emailForm.name}
+                  onChange={(e) => setEmailForm({ ...emailForm, name: e.target.value })}
+                  placeholder="Vertrieb Postfach"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  E-Mail-Adresse
+                </label>
+                <input
+                  type="email"
+                  value={emailForm.email_address}
+                  onChange={(e) => setEmailForm({ ...emailForm, email_address: e.target.value })}
+                  placeholder="vertrieb@unternehmen.de"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Benutzername
+                </label>
+                <input
+                  type="text"
+                  value={emailForm.username}
+                  onChange={(e) => setEmailForm({ ...emailForm, username: e.target.value })}
+                  placeholder="meist identisch mit E-Mail"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Passwort</label>
+                <input
+                  type="password"
+                  value={emailForm.password}
+                  onChange={(e) => setEmailForm({ ...emailForm, password: e.target.value })}
+                  placeholder="••••••••"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">IMAP Host</label>
+                <input
+                  type="text"
+                  value={emailForm.imap_host}
+                  onChange={(e) => setEmailForm({ ...emailForm, imap_host: e.target.value })}
+                  placeholder="imap.unternehmen.de"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">IMAP Port</label>
+                <input
+                  type="number"
+                  value={emailForm.imap_port}
+                  onChange={(e) => setEmailForm({ ...emailForm, imap_port: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">SMTP Host</label>
+                <input
+                  type="text"
+                  value={emailForm.smtp_host}
+                  onChange={(e) => setEmailForm({ ...emailForm, smtp_host: e.target.value })}
+                  placeholder="smtp.unternehmen.de"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    SMTP Port
+                  </label>
+                  <input
+                    type="number"
+                    value={emailForm.smtp_port}
+                    onChange={(e) => setEmailForm({ ...emailForm, smtp_port: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Anlegen
+                  </button>
                 </div>
               </div>
-              <span className="text-xs font-mono text-emerald-400">IMAP: SSL / Port 993</span>
-            </div>
-            <div className="grid grid-cols-2 gap-4 text-xs text-slate-400 pt-2 border-t border-slate-800/80">
+            </form>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
-                SMTP Host:{' '}
-                <span className="font-mono text-slate-300">
-                  mail.openlocalcrm.local:587 (STARTTLS)
-                </span>
-              </div>
-              <div>
-                Auto-Sync Intervall:{' '}
-                <span className="font-mono text-slate-300">Alle 60 Sekunden</span>
+                <h3 className="text-base font-bold text-slate-100">
+                  Postfächer ({emailAccounts.length})
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Auto-Sync alle 60 Sekunden pro aktivem Konto (River Periodic Job)
+                </p>
               </div>
             </div>
+
+            {emailAccounts.length === 0 ? (
+              <p className="text-xs text-slate-500 py-4 text-center">
+                Noch keine E-Mail-Konten angelegt.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {emailAccounts.map((acc) => (
+                  <div
+                    key={acc.id}
+                    className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Mail className="w-5 h-5 text-emerald-400" />
+                        <div>
+                          <div className="text-sm font-semibold text-slate-200">
+                            {acc.name} — {acc.email_address}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {acc.account_type === 'team'
+                              ? 'Team-Postfach'
+                              : 'Persönliches Postfach'}
+                            {acc.last_sync_at &&
+                              ` · zuletzt synchronisiert ${new Date(acc.last_sync_at).toLocaleString('de-DE')}`}
+                          </div>
+                        </div>
+                      </div>
+                      <span
+                        className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
+                          acc.is_active
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                        }`}
+                      >
+                        {acc.is_active ? 'Aktiv' : 'Inaktiv'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-xs text-slate-400 pt-2 border-t border-slate-800/80">
+                      <div>
+                        IMAP:{' '}
+                        <span className="font-mono text-slate-300">
+                          {acc.imap_host || '–'}:{acc.imap_port}
+                        </span>
+                      </div>
+                      <div>
+                        SMTP:{' '}
+                        <span className="font-mono text-slate-300">
+                          {acc.smtp_host || '–'}:{acc.smtp_port}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleTestEmailAccount(acc.id)}
+                        disabled={testingAccountId === acc.id}
+                        className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-semibold transition-colors disabled:opacity-50"
+                      >
+                        {testingAccountId === acc.id ? 'Teste...' : 'Verbindung testen'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleEmailAccountActive(acc)}
+                        className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-semibold transition-colors"
+                      >
+                        {acc.is_active ? 'Deaktivieren' : 'Aktivieren'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteEmailAccount(acc.id)}
+                        className="px-3 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg text-[10px] font-semibold transition-colors"
+                      >
+                        Löschen
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

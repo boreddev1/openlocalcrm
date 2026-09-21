@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '../api/client';
+import { apiFetch, sendEmail, tagEmailMessage } from '../api/client';
 import {
   Mail,
   Send,
@@ -103,20 +103,25 @@ export function analyzeUrgencyAndSLA(subject: string, body: string) {
   };
 }
 
+interface TriageResult {
+  category: string;
+  sentiment: string;
+  priority: string;
+  summary: string;
+  draft_reply: string;
+}
+
 export const InboxPage: React.FC = () => {
   const queryClient = useQueryClient();
-  const [selectedMessage, setSelectedMessage] = useState<any>(null);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>('ALL');
   const [newCustomTag, setNewCustomTag] = useState('');
   const [isAddingTag, setIsAddingTag] = useState(false);
-  const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
-  const [toneProfile, setToneProfile] = useState<'friendly' | 'concise' | 'formal'>('friendly');
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
-
-  // Email messages with interactive local tags
-  const [emailTags, setEmailTags] = useState<Record<string, string[]>>({});
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
+  const [triageByMessage, setTriageByMessage] = useState<Record<string, TriageResult>>({});
 
   const { data: healthData } = useQuery<any>({
     queryKey: ['health'],
@@ -129,6 +134,7 @@ export const InboxPage: React.FC = () => {
     queryFn: () => apiFetch('/api/v1/emails/messages'),
   });
   const messages = Array.isArray(rawMessages) ? rawMessages : [];
+  const selectedMessage = messages.find((m) => m.id === selectedMessageId) || null;
 
   const availableTags = [
     { id: 'PV-Interessent', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
@@ -138,9 +144,16 @@ export const InboxPage: React.FC = () => {
     { id: 'Angebot versendet', color: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' },
   ];
 
+  const tagMutation = useMutation({
+    mutationFn: ({ id, tags }: { id: string; tags: string[] }) => tagEmailMessage(id, tags),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['emails'] });
+    },
+  });
+
   const demoIngestMutation = useMutation({
     mutationFn: (demo: any) =>
-      apiFetch('/api/v1/emails/demo-ingest', {
+      apiFetch<any>('/api/v1/emails/demo-ingest', {
         method: 'POST',
         body: JSON.stringify(demo),
       }),
@@ -148,17 +161,14 @@ export const InboxPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['emails'] });
       setIsDemoModalOpen(false);
 
-      // Auto-tagging based on content & urgency analysis
+      // Auto-tag urgent-sounding demo messages, persisted server-side.
       if (newMsg && newMsg.id) {
         const urgency = analyzeUrgencyAndSLA(
           newMsg.subject || '',
           newMsg.body_text?.String || newMsg.body_text || '',
         );
         if (urgency.isUrgent) {
-          setEmailTags((prev) => ({
-            ...prev,
-            [newMsg.id]: [...(prev[newMsg.id] || []), 'Dringend'],
-          }));
+          tagMutation.mutate({ id: newMsg.id, tags: ['Dringend'] });
         }
       }
 
@@ -185,22 +195,15 @@ export const InboxPage: React.FC = () => {
     });
   };
 
-  const handleAddTagToMessage = (messageId: string, tag: string) => {
-    if (!tag.trim()) return;
-    setEmailTags((prev) => {
-      const current = prev[messageId] || [];
-      if (current.includes(tag)) return prev;
-      return { ...prev, [messageId]: [...current, tag] };
-    });
+  const handleAddTagToMessage = (messageId: string, currentTags: string[], tag: string) => {
+    if (!tag.trim() || currentTags.includes(tag)) return;
+    tagMutation.mutate({ id: messageId, tags: [...currentTags, tag] });
     setNewCustomTag('');
     setIsAddingTag(false);
   };
 
-  const handleRemoveTagFromMessage = (messageId: string, tag: string) => {
-    setEmailTags((prev) => {
-      const current = prev[messageId] || [];
-      return { ...prev, [messageId]: current.filter((t) => t !== tag) };
-    });
+  const handleRemoveTagFromMessage = (messageId: string, currentTags: string[], tag: string) => {
+    tagMutation.mutate({ id: messageId, tags: currentTags.filter((t) => t !== tag) });
   };
 
   // Selected message security & SLA analysis
@@ -217,46 +220,72 @@ export const InboxPage: React.FC = () => {
     return analyzeUrgencyAndSLA(subject, body);
   }, [selectedMessage]);
 
-  const handleGenerateAIDraft = () => {
-    if (!selectedMessage) return;
-    setIsGeneratingDraft(true);
-    setTimeout(() => {
-      let draft: string;
+  const currentTriage = selectedMessage ? triageByMessage[selectedMessage.id] : undefined;
 
-      // If prompt injection was attempted, AI safely ignores attacker's prompt
-      if (currentSecurityAnalysis?.hasInjection) {
-        draft = `Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Nachricht. Ihre Mitteilung wurde empfangen und an unsere zuständige Fachabteilung weitergeleitet.\n\nMit freundlichen Grüßen,\nIhr OpenLocalCRM Kundenservice`;
-      } else if (toneProfile === 'friendly') {
-        const sender =
-          selectedMessage.sender_name?.String || selectedMessage.sender_name || 'Interessent';
-        draft = `Guten Tag ${sender},\n\nvielen Dank für Ihre Anfrage bezüglich der PV-Anlage für Ihre Halle. Wir haben Ihre Anforderungen (30 kWp + 20 kWh Speicher) aufgenommen und erstellen Ihnen gerne eine individuelle Wirtschaftlichkeitsberechnung.\n\nWann passt Ihnen ein kurzer Vor-Ort-Termin zur Dachbegehung?\n\nHerzliche Grüße,\nIhr OpenLocalCRM Vertriebsteam`;
-      } else if (toneProfile === 'concise') {
-        const sender =
-          selectedMessage.sender_name?.String || selectedMessage.sender_name || 'Interessent';
-        draft = `Hallo ${sender},\n\nvielen Dank für die Anfrage. Wir kalkulieren die 30 kWp PV-Anlage inkl. Speicher für Sie. Bitte teilen Sie uns mit, ob bereits Statikunterlagen vorliegen.\n\nBeste Grüße,\nOpenLocalCRM Vertrieb`;
-      } else {
-        draft = `Sehr geehrte Damen und Herren,\n\nwir bedanken uns für Ihre geschätzte Kontaktaufnahme. Anbei bestätigen wir den Eingang Ihrer Anfrage für das 30 kWp PV-Projekt.\n\nMit freundlichen Grüßen,\nOpenLocalCRM Vertrieb`;
-      }
-      setReplyText(draft);
-      setIsGeneratingDraft(false);
+  const triageMutation = useMutation({
+    mutationFn: (payload: { sender: string; subject: string; body: string }) =>
+      apiFetch<TriageResult>('/api/v1/ai/triage', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: (result) => {
+      if (!selectedMessage) return;
+      setTriageByMessage((prev) => ({ ...prev, [selectedMessage.id]: result }));
+      setReplyText(result.draft_reply);
       setFeedbackBanner(
-        'Gemma 12B: Antwortentwurf erfolgreich generiert (Human-in-the-Loop Prüfung erforderlich)!',
+        'KI-Antwortentwurf erfolgreich generiert (Human-in-the-Loop Prüfung erforderlich)!',
       );
       setTimeout(() => setFeedbackBanner(null), 4000);
-    }, 600);
+    },
+    onError: (err: any) => {
+      setErrorBanner(`KI-Triage fehlgeschlagen: ${err?.message || 'Unbekannter Fehler'}`);
+      setTimeout(() => setErrorBanner(null), 5000);
+    },
+  });
+
+  const handleGenerateAIDraft = () => {
+    if (!selectedMessage) return;
+    triageMutation.mutate({
+      sender: selectedMessage.sender_email,
+      subject: selectedMessage.subject || '',
+      body: selectedMessage.body_text?.String || selectedMessage.body_text || '',
+    });
   };
 
+  const sendReplyMutation = useMutation({
+    mutationFn: () => {
+      const subject = (selectedMessage.subject || '').startsWith('Re:')
+        ? selectedMessage.subject
+        : `Re: ${selectedMessage.subject || ''}`;
+      return sendEmail({
+        account_id: selectedMessage.account_id,
+        to: [selectedMessage.sender_email],
+        subject,
+        body_text: replyText,
+        in_reply_to: selectedMessage.message_id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['emails'] });
+      setFeedbackBanner(`Antwort erfolgreich an ${selectedMessage.sender_email} versendet!`);
+      setReplyText('');
+      setTimeout(() => setFeedbackBanner(null), 4000);
+    },
+    onError: (err: any) => {
+      setErrorBanner(`Versand fehlgeschlagen: ${err?.message || 'Unbekannter Fehler'}`);
+      setTimeout(() => setErrorBanner(null), 5000);
+    },
+  });
+
   const handleSendReply = () => {
-    if (!replyText.trim()) return;
-    setFeedbackBanner(`Antwort erfolgreich an ${selectedMessage.sender_email} versendet!`);
-    setReplyText('');
-    setTimeout(() => setFeedbackBanner(null), 4000);
+    if (!replyText.trim() || !selectedMessage) return;
+    sendReplyMutation.mutate();
   };
 
   // Filter messages by tag
   const filteredMessages = messages.filter((msg) => {
     if (selectedTagFilter === 'ALL') return true;
-    const tags = emailTags[msg.id] || [];
+    const tags: string[] = msg.tags || [];
     return tags.includes(selectedTagFilter);
   });
 
@@ -291,6 +320,13 @@ export const InboxPage: React.FC = () => {
         <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300 flex items-center gap-2 shrink-0">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{feedbackBanner}</span>
+        </div>
+      )}
+
+      {errorBanner && (
+        <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-300 flex items-center gap-2 shrink-0">
+          <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+          <span>{errorBanner}</span>
         </div>
       )}
 
@@ -345,8 +381,7 @@ export const InboxPage: React.FC = () => {
             ) : (
               filteredMessages.map((msg) => {
                 const isSelected = selectedMessage?.id === msg.id;
-                const msgTags =
-                  emailTags[msg.id] || (msg.id.includes('1') ? ['PV-Interessent'] : []);
+                const msgTags: string[] = msg.tags || [];
                 const urgency = analyzeUrgencyAndSLA(
                   msg.subject || '',
                   msg.body_text?.String || msg.body_text || '',
@@ -358,7 +393,7 @@ export const InboxPage: React.FC = () => {
                 return (
                   <div
                     key={msg.id}
-                    onClick={() => setSelectedMessage(msg)}
+                    onClick={() => setSelectedMessageId(msg.id)}
                     className={`p-4 cursor-pointer transition-colors space-y-1.5 ${
                       isSelected
                         ? 'bg-emerald-500/10 border-l-2 border-emerald-400'
@@ -452,52 +487,55 @@ export const InboxPage: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <Brain className="w-4 h-4 text-purple-400" />
                     <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                      Gemma 12B KI-Triage & Analyse (§4.3)
+                      KI-Triage & Analyse (§4.3)
                     </span>
                   </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-bold">
-                    Lead-Score:{' '}
-                    {currentSecurityAnalysis?.hasInjection
-                      ? '10/100 (Sicherheitsrisiko)'
-                      : '85/100'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div className="p-2 bg-slate-900 rounded-xl border border-slate-800">
-                    <span className="text-[10px] text-slate-500 block">Wichtigkeit</span>
-                    <span
-                      className={`font-bold ${currentUrgencyAnalysis?.isUrgent ? 'text-rose-400' : 'text-emerald-400'}`}
+                  {!currentTriage && (
+                    <button
+                      type="button"
+                      onClick={handleGenerateAIDraft}
+                      disabled={triageMutation.isPending}
+                      className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 font-bold disabled:opacity-50 cursor-pointer"
                     >
-                      {currentUrgencyAnalysis?.isUrgent ? 'Dringend / Eilig' : 'Hoch (needs_reply)'}
-                    </span>
-                  </div>
-                  <div className="p-2 bg-slate-900 rounded-xl border border-slate-800">
-                    <span className="text-[10px] text-slate-500 block">Stimmung</span>
-                    <span className="text-blue-400 font-bold">
-                      {currentSecurityAnalysis?.hasInjection
-                        ? 'Kritisch (Angriff)'
-                        : 'Positiv (Kaufinteresse)'}
-                    </span>
-                  </div>
-                  <div className="p-2 bg-slate-900 rounded-xl border border-slate-800">
-                    <span className="text-[10px] text-slate-500 block">Kategorie</span>
-                    <span className="text-purple-400 font-bold">
-                      {currentSecurityAnalysis?.hasInjection
-                        ? 'Sicherheit / Prompt Armor'
-                        : 'Photovoltaik / Gewerbe'}
-                    </span>
-                  </div>
+                      <Sparkles
+                        className={`w-3 h-3 ${triageMutation.isPending ? 'animate-spin' : ''}`}
+                      />
+                      {triageMutation.isPending ? 'Analysiere...' : 'Jetzt analysieren'}
+                    </button>
+                  )}
                 </div>
 
-                <p className="text-xs text-slate-300 italic pt-1 border-t border-slate-800/60">
-                  💡 <strong>Zusammenfassung:</strong>{' '}
-                  {currentSecurityAnalysis?.hasInjection
-                    ? 'E-Mail enthält Injectionsversuch. KI-Antwort bleibt neutral und sicher.'
-                    : currentUrgencyAnalysis?.deadline
-                      ? `Kunde bittet um PV-Kalkulation mit Rückmeldefrist bis ${currentUrgencyAnalysis.deadline}.`
-                      : 'Kunde bittet um detaillierte Ertragskalkulation für Gewerbehalle mit ca. 30 kWp und 20 kWh Speicher.'}
-                </p>
+                {currentTriage ? (
+                  <>
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div className="p-2 bg-slate-900 rounded-xl border border-slate-800">
+                        <span className="text-[10px] text-slate-500 block">Priorität</span>
+                        <span
+                          className={`font-bold ${currentTriage.priority === 'URGENT' || currentTriage.priority === 'HIGH' ? 'text-rose-400' : 'text-emerald-400'}`}
+                        >
+                          {currentTriage.priority}
+                        </span>
+                      </div>
+                      <div className="p-2 bg-slate-900 rounded-xl border border-slate-800">
+                        <span className="text-[10px] text-slate-500 block">Stimmung</span>
+                        <span className="text-blue-400 font-bold">{currentTriage.sentiment}</span>
+                      </div>
+                      <div className="p-2 bg-slate-900 rounded-xl border border-slate-800">
+                        <span className="text-[10px] text-slate-500 block">Kategorie</span>
+                        <span className="text-purple-400 font-bold">{currentTriage.category}</span>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-slate-300 italic pt-1 border-t border-slate-800/60">
+                      💡 <strong>Zusammenfassung:</strong> {currentTriage.summary}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-500 italic">
+                    Noch nicht analysiert. Klicke „Jetzt analysieren“ für eine echte KI-Triage
+                    dieser E-Mail.
+                  </p>
+                )}
               </div>
 
               {/* Message Header */}
@@ -527,17 +565,20 @@ export const InboxPage: React.FC = () => {
                   <span className="text-xs text-slate-500 flex items-center gap-1">
                     <Tag className="w-3.5 h-3.5" /> Tags:
                   </span>
-                  {(
-                    emailTags[selectedMessage.id] ||
-                    (selectedMessage.id.includes('1') ? ['PV-Interessent'] : [])
-                  ).map((tag) => (
+                  {((selectedMessage.tags as string[]) || []).map((tag) => (
                     <span
                       key={tag}
                       className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium"
                     >
                       🏷️ {tag}
                       <button
-                        onClick={() => handleRemoveTagFromMessage(selectedMessage.id, tag)}
+                        onClick={() =>
+                          handleRemoveTagFromMessage(
+                            selectedMessage.id,
+                            selectedMessage.tags || [],
+                            tag,
+                          )
+                        }
                         className="hover:text-rose-400 text-slate-400 ml-1 text-xs cursor-pointer"
                         title="Tag entfernen"
                       >
@@ -555,13 +596,23 @@ export const InboxPage: React.FC = () => {
                         onChange={(e) => setNewCustomTag(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter')
-                            handleAddTagToMessage(selectedMessage.id, newCustomTag);
+                            handleAddTagToMessage(
+                              selectedMessage.id,
+                              selectedMessage.tags || [],
+                              newCustomTag,
+                            );
                         }}
                         className="bg-transparent text-xs text-slate-100 focus:outline-none px-1 w-24"
                         autoFocus
                       />
                       <button
-                        onClick={() => handleAddTagToMessage(selectedMessage.id, newCustomTag)}
+                        onClick={() =>
+                          handleAddTagToMessage(
+                            selectedMessage.id,
+                            selectedMessage.tags || [],
+                            newCustomTag,
+                          )
+                        }
                         className="text-[10px] bg-emerald-600 px-2 py-0.5 rounded text-slate-950 font-bold cursor-pointer"
                       >
                         OK
@@ -606,44 +657,17 @@ export const InboxPage: React.FC = () => {
                     {selectedMessage.sender_email}
                   </span>
 
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px]">
-                      <span className="text-slate-500 px-1">Tonalität:</span>
-                      <button
-                        type="button"
-                        onClick={() => setToneProfile('friendly')}
-                        className={`px-2 py-0.5 rounded-lg cursor-pointer ${toneProfile === 'friendly' ? 'bg-emerald-600 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
-                      >
-                        Freundlich
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setToneProfile('concise')}
-                        className={`px-2 py-0.5 rounded-lg cursor-pointer ${toneProfile === 'concise' ? 'bg-emerald-600 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
-                      >
-                        Kurz
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setToneProfile('formal')}
-                        className={`px-2 py-0.5 rounded-lg cursor-pointer ${toneProfile === 'formal' ? 'bg-emerald-600 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
-                      >
-                        Formell
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleGenerateAIDraft}
-                      disabled={isGeneratingDraft}
-                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-lg shadow-purple-600/20 transition-colors cursor-pointer"
-                    >
-                      <Sparkles
-                        className={`w-3.5 h-3.5 ${isGeneratingDraft ? 'animate-spin' : ''}`}
-                      />
-                      <span>{isGeneratingDraft ? 'Generiere...' : '⚡ KI-Entwurf'}</span>
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGenerateAIDraft}
+                    disabled={triageMutation.isPending}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-lg shadow-purple-600/20 transition-colors cursor-pointer"
+                  >
+                    <Sparkles
+                      className={`w-3.5 h-3.5 ${triageMutation.isPending ? 'animate-spin' : ''}`}
+                    />
+                    <span>{triageMutation.isPending ? 'Generiere...' : '⚡ KI-Entwurf'}</span>
+                  </button>
                 </div>
 
                 <textarea
@@ -661,11 +685,11 @@ export const InboxPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleSendReply}
-                    disabled={!replyText.trim()}
+                    disabled={!replyText.trim() || sendReplyMutation.isPending}
                     className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs transition-colors shadow-lg shadow-emerald-600/20 cursor-pointer"
                   >
                     <Send className="w-3.5 h-3.5" />
-                    <span>Antwort senden</span>
+                    <span>{sendReplyMutation.isPending ? 'Senden...' : 'Antwort senden'}</span>
                   </button>
                 </div>
               </div>

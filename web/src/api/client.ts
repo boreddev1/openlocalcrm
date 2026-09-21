@@ -96,3 +96,98 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
 
   throw new ApiError(res.status, errorMessage, errJson);
 }
+
+// --- E-Mail (SMTP/IMAP) --------------------------------------------------
+
+export interface EmailAccount {
+  id: string;
+  name: string;
+  email_address: string;
+  provider: string;
+  imap_host: string;
+  imap_port: number;
+  smtp_host: string;
+  smtp_port: number;
+  username: string;
+  has_password: boolean;
+  is_active: boolean;
+  account_type: string;
+  last_sync_at?: string;
+}
+
+export interface EmailAccountInput {
+  name: string;
+  email_address?: string;
+  provider?: string;
+  imap_host: string;
+  imap_port: number;
+  smtp_host: string;
+  smtp_port: number;
+  username: string;
+  password?: string;
+  is_active?: boolean;
+  account_type?: string;
+}
+
+export function getEmailAccounts(): Promise<EmailAccount[]> {
+  return apiFetch<EmailAccount[]>('/api/v1/emails/accounts');
+}
+
+export function createEmailAccount(input: EmailAccountInput): Promise<EmailAccount> {
+  return apiFetch<EmailAccount>('/api/v1/emails/accounts', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateEmailAccount(
+  id: string,
+  input: Partial<EmailAccountInput>,
+): Promise<EmailAccount> {
+  return apiFetch<EmailAccount>(`/api/v1/emails/accounts/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteEmailAccount(id: string): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(`/api/v1/emails/accounts/${id}`, { method: 'DELETE' });
+}
+
+export function testEmailAccount(id: string): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(`/api/v1/emails/accounts/${id}/test`, {
+    method: 'POST',
+  });
+}
+
+export function syncEmailAccount(id: string): Promise<{ success: boolean; new_messages: number }> {
+  return apiFetch<{ success: boolean; new_messages: number }>(
+    `/api/v1/emails/accounts/${id}/sync`,
+    { method: 'POST' },
+  );
+}
+
+export interface SendEmailInput {
+  account_id: string;
+  from?: string;
+  to: string[];
+  cc?: string[];
+  subject: string;
+  body_text?: string;
+  body_html?: string;
+  in_reply_to?: string;
+}
+
+export function sendEmail(input: SendEmailInput): Promise<any> {
+  return apiFetch<any>('/api/v1/emails/send', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function tagEmailMessage(id: string, tags: string[]): Promise<any> {
+  return apiFetch<any>(`/api/v1/emails/${id}/tags`, {
+    method: 'PATCH',
+    body: JSON.stringify({ tags }),
+  });
+}

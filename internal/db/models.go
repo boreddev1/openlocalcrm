@@ -6,6 +6,7 @@ package db
 
 import (
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -285,7 +286,7 @@ type EmailMessage struct {
 	ContactID       pgtype.UUID        `json:"contact_id"`
 	DealID          pgtype.UUID        `json:"deal_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	Tags            []byte             `json:"tags"`
+	Tags            json.RawMessage    `json:"tags"`
 }
 
 type IntakeForm struct {
