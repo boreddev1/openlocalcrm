@@ -164,6 +164,138 @@ func (s *Service) MarkAsRead(ctx context.Context, id pgtype.UUID) error {
 	return s.queries.MarkEmailMessageRead(ctx, id)
 }
 
+// SetTags persists the tags for a message and returns the updated row.
+func (s *Service) SetTags(ctx context.Context, id pgtype.UUID, tags []string) (db.EmailMessage, error) {
+	tagsJSON, err := json.Marshal(tags)
+	if err != nil {
+		return db.EmailMessage{}, fmt.Errorf("failed to encode tags: %w", err)
+	}
+	msg, err := s.queries.UpdateEmailMessageTags(ctx, db.UpdateEmailMessageTagsParams{ID: id, Tags: tagsJSON})
+	if err != nil {
+		return db.EmailMessage{}, ErrMessageNotFound
+	}
+	return msg, nil
+}
+
+// SendMessage sends a real email via the account's SMTP server and persists
+// it as an outbound message.
+func (s *Service) SendMessage(ctx context.Context, accountID pgtype.UUID, msg mailclient.OutgoingMessage) (db.EmailMessage, error) {
+	acc, err := s.queries.GetEmailAccountByID(ctx, accountID)
+	if err != nil {
+		return db.EmailMessage{}, ErrAccountNotFound
+	}
+
+	password, err := crypto.DecryptSecret(acc.PasswordEncrypted.String)
+	if err != nil {
+		return db.EmailMessage{}, fmt.Errorf("failed to decrypt account password: %w", err)
+	}
+	if msg.From == "" {
+		msg.From = acc.EmailAddress
+	}
+
+	if err := mailclient.SendMail(mailclient.SMTPConfig{
+		Host:        acc.SmtpHost.String,
+		Port:        int(acc.SmtpPort.Int32),
+		Username:    acc.Username.String,
+		Password:    password,
+		ImplicitTLS: acc.SmtpPort.Int32 == 465,
+	}, msg); err != nil {
+		return db.EmailMessage{}, fmt.Errorf("failed to send email: %w", err)
+	}
+
+	recipientsJSON, err := json.Marshal(msg.To)
+	if err != nil {
+		return db.EmailMessage{}, fmt.Errorf("failed to encode recipients: %w", err)
+	}
+
+	threadID := msg.InReplyTo
+	if threadID == "" {
+		threadID = msg.MessageID
+	}
+	messageID := msg.MessageID
+	if messageID == "" {
+		messageID = fmt.Sprintf("outbound-%d@%s", time.Now().UnixNano(), acc.EmailAddress)
+	}
+	if threadID == "" {
+		threadID = messageID
+	}
+
+	return s.queries.CreateEmailMessage(ctx, db.CreateEmailMessageParams{
+		AccountID:       accountID,
+		ThreadID:        threadID,
+		MessageID:       messageID,
+		InReplyTo:       pgtype.Text{String: msg.InReplyTo, Valid: msg.InReplyTo != ""},
+		Direction:       "OUTBOUND",
+		SenderEmail:     msg.From,
+		RecipientEmails: recipientsJSON,
+		Subject:         msg.Subject,
+		BodyText:        pgtype.Text{String: msg.TextBody, Valid: msg.TextBody != ""},
+		BodyHtml:        pgtype.Text{String: msg.HTMLBody, Valid: msg.HTMLBody != ""},
+		ReceivedAt:      pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		IsRead:          true,
+	})
+}
+
+// SyncAccount performs a real incremental IMAP fetch for the account,
+// ingests any new messages, and advances the account's sync watermark. A
+// failure to ingest one message never aborts the rest of the sync.
+func (s *Service) SyncAccount(ctx context.Context, id pgtype.UUID) ([]db.EmailMessage, error) {
+	acc, err := s.queries.GetEmailAccountByID(ctx, id)
+	if err != nil {
+		return nil, ErrAccountNotFound
+	}
+	if !acc.IsActive {
+		return nil, nil
+	}
+
+	password, err := crypto.DecryptSecret(acc.PasswordEncrypted.String)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt account password: %w", err)
+	}
+
+	result, err := mailclient.FetchNewMessages(mailclient.IMAPConfig{
+		Host:        acc.ImapHost.String,
+		Port:        int(acc.ImapPort.Int32),
+		Username:    acc.Username.String,
+		Password:    password,
+		ImplicitTLS: acc.ImapPort.Int32 == 993,
+	}, uint32(acc.LastUid))
+	if err != nil {
+		return nil, fmt.Errorf("imap sync failed: %w", err)
+	}
+
+	ingested := make([]db.EmailMessage, 0, len(result.Messages))
+	for _, fm := range result.Messages {
+		msg, err := s.IngestMessage(ctx, IngestEmailInput{
+			AccountID:       id,
+			MessageID:       fm.MessageID,
+			InReplyTo:       fm.InReplyTo,
+			SenderEmail:     fm.SenderEmail,
+			SenderName:      fm.SenderName,
+			RecipientEmails: fm.Recipients,
+			Subject:         fm.Subject,
+			BodyText:        fm.TextBody,
+			BodyHTML:        fm.HTMLBody,
+			ReceivedAt:      fm.Date,
+		})
+		if err != nil {
+			// One malformed/duplicate message must not abort the whole sync.
+			continue
+		}
+		ingested = append(ingested, msg)
+	}
+
+	if err := s.queries.UpdateEmailAccountSyncState(ctx, db.UpdateEmailAccountSyncStateParams{
+		ID:         id,
+		LastSyncAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		LastUid:    int64(result.LastUID),
+	}); err != nil {
+		return ingested, fmt.Errorf("failed to update sync state: %w", err)
+	}
+
+	return ingested, nil
+}
+
 // AccountInput describes the fields accepted when creating or updating an
 // email account. Password is always plaintext on the way in and is
 // encrypted via internal/crypto before it ever reaches the database.

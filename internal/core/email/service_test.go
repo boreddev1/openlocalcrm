@@ -11,6 +11,7 @@ import (
 	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
+	"github.com/openlocalcrm/openlocalcrm/internal/mailclient"
 	"github.com/openlocalcrm/openlocalcrm/internal/sse"
 )
 
@@ -253,5 +254,121 @@ func TestTestConnection_HonestFailureOnUnreachableHost(t *testing.T) {
 
 	if err := svc.TestConnection(context.Background(), acc.ID); err == nil {
 		t.Fatal("expected TestConnection to fail honestly against an unreachable host, got nil error")
+	}
+}
+
+func TestSyncAccount_NotFound(t *testing.T) {
+	q := demo.NewEmptyInMemoryQuerier()
+	svc := email.NewService(q, nil, nil, nil)
+
+	var missing pgtype.UUID
+	_ = missing.Scan("99999999-9999-9999-9999-999999999999")
+
+	if _, err := svc.SyncAccount(context.Background(), missing); err != email.ErrAccountNotFound {
+		t.Fatalf("expected ErrAccountNotFound, got %v", err)
+	}
+}
+
+func TestSyncAccount_SkipsInactiveAccount(t *testing.T) {
+	crypto.SetMasterKeyForTest([]byte("0123456789abcdef0123456789abcdef"))
+	t.Cleanup(func() { crypto.SetMasterKeyForTest(nil) })
+
+	q := demo.NewEmptyInMemoryQuerier()
+	svc := email.NewService(q, nil, nil, nil)
+
+	acc, err := svc.CreateAccount(context.Background(), email.AccountInput{
+		Name:         "Inaktiv",
+		EmailAddress: "inaktiv@openlocalcrm.local",
+		Provider:     "IMAP",
+		Username:     "inaktiv@openlocalcrm.local",
+		Password:     "pw",
+	})
+	if err != nil {
+		t.Fatalf("CreateAccount failed: %v", err)
+	}
+	if _, err := svc.UpdateAccount(context.Background(), acc.ID, email.AccountInput{Name: acc.Name, IsActive: false}); err != nil {
+		t.Fatalf("UpdateAccount failed: %v", err)
+	}
+
+	messages, err := svc.SyncAccount(context.Background(), acc.ID)
+	if err != nil {
+		t.Fatalf("expected inactive account sync to be a silent no-op, got error: %v", err)
+	}
+	if messages != nil {
+		t.Fatalf("expected no messages for inactive account, got %v", messages)
+	}
+}
+
+func TestSyncAccount_HonestFailureOnUnreachableHost(t *testing.T) {
+	crypto.SetMasterKeyForTest([]byte("0123456789abcdef0123456789abcdef"))
+	t.Cleanup(func() { crypto.SetMasterKeyForTest(nil) })
+
+	q := demo.NewEmptyInMemoryQuerier()
+	svc := email.NewService(q, nil, nil, nil)
+
+	acc, err := svc.CreateAccount(context.Background(), email.AccountInput{
+		Name:         "Unreachable",
+		EmailAddress: "unreachable@openlocalcrm.local",
+		Provider:     "IMAP",
+		ImapHost:     "127.0.0.1",
+		ImapPort:     1,
+		Username:     "unreachable@openlocalcrm.local",
+		Password:     "pw",
+	})
+	if err != nil {
+		t.Fatalf("CreateAccount failed: %v", err)
+	}
+
+	if _, err := svc.SyncAccount(context.Background(), acc.ID); err == nil {
+		t.Fatal("expected SyncAccount to fail honestly against an unreachable IMAP host")
+	}
+}
+
+func TestSendMessage_AccountNotFound(t *testing.T) {
+	q := demo.NewEmptyInMemoryQuerier()
+	svc := email.NewService(q, nil, nil, nil)
+
+	var missing pgtype.UUID
+	_ = missing.Scan("99999999-9999-9999-9999-999999999999")
+
+	if _, err := svc.SendMessage(context.Background(), missing, mailclient.OutgoingMessage{To: []string{"x@example.com"}}); err != email.ErrAccountNotFound {
+		t.Fatalf("expected ErrAccountNotFound, got %v", err)
+	}
+}
+
+func TestSendMessage_HonestFailureOnUnreachableHost(t *testing.T) {
+	crypto.SetMasterKeyForTest([]byte("0123456789abcdef0123456789abcdef"))
+	t.Cleanup(func() { crypto.SetMasterKeyForTest(nil) })
+
+	q := demo.NewEmptyInMemoryQuerier()
+	svc := email.NewService(q, nil, nil, nil)
+
+	acc, err := svc.CreateAccount(context.Background(), email.AccountInput{
+		Name:         "Unreachable",
+		EmailAddress: "unreachable@openlocalcrm.local",
+		Provider:     "IMAP",
+		SmtpHost:     "127.0.0.1",
+		SmtpPort:     1,
+		Username:     "unreachable@openlocalcrm.local",
+		Password:     "pw",
+	})
+	if err != nil {
+		t.Fatalf("CreateAccount failed: %v", err)
+	}
+
+	_, err = svc.SendMessage(context.Background(), acc.ID, mailclient.OutgoingMessage{
+		To:      []string{"kunde@example.com"},
+		Subject: "Test",
+	})
+	if err == nil {
+		t.Fatal("expected SendMessage to fail honestly against an unreachable SMTP host")
+	}
+
+	msgs, listErr := q.ListEmailMessages(context.Background(), db.ListEmailMessagesParams{Limit: 10})
+	if listErr != nil {
+		t.Fatalf("ListEmailMessages failed: %v", listErr)
+	}
+	if len(msgs) != 0 {
+		t.Fatal("a failed send must never persist an outbound message row")
 	}
 }
