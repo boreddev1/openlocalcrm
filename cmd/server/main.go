@@ -185,6 +185,7 @@ func main() {
 		PubKey:   pubKey,
 		PrivKey:  privKey,
 		DemoMode: isDemoMode,
+		Context:  ctx,
 	})
 
 	srv := &http.Server{
@@ -206,6 +207,8 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
-	_ = srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("[SHUTDOWN_WARNING] Error shutting down HTTP server: %v", err)
+	}
 	log.Println("crm-server stopped.")
 }

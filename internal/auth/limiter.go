@@ -226,15 +226,34 @@ func (rl *RateLimiter) Reset(key string) {
 func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := r.RemoteAddr
-			if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-				parts := strings.Split(forwarded, ",")
-				ip = strings.TrimSpace(parts[0])
-			} else if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
-				ip = realIP
+			remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				remoteHost = r.RemoteAddr
 			}
-			if host, _, err := net.SplitHostPort(ip); err == nil {
-				ip = host
+			remoteIP := net.ParseIP(remoteHost)
+
+			ip := remoteHost
+			// Only trust X-Forwarded-For or X-Real-IP if the immediate connection is from a trusted proxy (loopback or private IP)
+			isLocalOrPrivate := remoteIP != nil && (remoteIP.IsLoopback() || remoteIP.IsPrivate() || remoteIP.IsLinkLocalUnicast())
+			if isLocalOrPrivate {
+				if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+					parts := strings.Split(forwarded, ",")
+					candidate := strings.TrimSpace(parts[0])
+					if host, _, err := net.SplitHostPort(candidate); err == nil {
+						candidate = host
+					}
+					if net.ParseIP(candidate) != nil {
+						ip = candidate
+					}
+				} else if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+					candidate := strings.TrimSpace(realIP)
+					if host, _, err := net.SplitHostPort(candidate); err == nil {
+						candidate = host
+					}
+					if net.ParseIP(candidate) != nil {
+						ip = candidate
+					}
+				}
 			}
 
 			allowed, remaining := limiter.Allow(ip)

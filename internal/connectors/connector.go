@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"fmt"
+	"log"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -74,15 +76,22 @@ func (e *Engine) IngestLead(ctx context.Context, token string, payload LeadIntak
 	// 2. If Deal Title is provided, create associated Deal
 	if payload.DealTitle != "" && e.dealSvc != nil {
 		var val pgtype.Numeric
-		_ = val.Scan(payload.DealValue)
+		if payload.DealValue != "" {
+			if err := val.Scan(payload.DealValue); err != nil {
+				log.Printf("[connector_warning] invalid deal value %q: %v", payload.DealValue, err)
+			}
+		}
 
-		_, _ = e.dealSvc.Create(ctx, systemActor, deal.CreateDealInput{
+		if _, err := e.dealSvc.Create(ctx, systemActor, deal.CreateDealInput{
 			ContactID:   &c.ID,
 			Title:       payload.DealTitle,
 			Value:       val,
 			Stage:       "LEAD",
 			Probability: 25,
-		})
+		}); err != nil {
+			log.Printf("[connector_error] failed creating deal %q for lead: %v", payload.DealTitle, err)
+			return c, fmt.Errorf("failed creating lead deal: %w", err)
+		}
 	}
 
 	return c, nil

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -89,8 +91,12 @@ func (g *Gateway) Generate(ctx context.Context, prompt string, systemInstruction
 		return g.callOllama(ctx, cleanPrompt, cleanSystem)
 	case ProviderOpenAI:
 		return g.callOpenAI(ctx, cleanPrompt, cleanSystem)
+	case ProviderAnthropic:
+		return "", fmt.Errorf("ai provider 'anthropic' ist noch nicht konfiguriert")
+	case ProviderGemini:
+		return "", fmt.Errorf("ai provider 'gemini' ist noch nicht konfiguriert")
 	default:
-		return g.callOllama(ctx, cleanPrompt, cleanSystem)
+		return "", fmt.Errorf("unbekannter AI-Provider: %s", g.cfg.DefaultProvider)
 	}
 }
 
@@ -138,6 +144,7 @@ func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstructi
 
 	resp, err := g.http.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
+		log.Printf("[AI_GATEWAY_NOTICE] OpenAI backend call failed (err: %v); serving simulated fallback response", err)
 		return g.simulateGemmaResponse(prompt, systemInstruction)
 	}
 	defer resp.Body.Close()
@@ -179,7 +186,7 @@ func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstructi
 
 	resp, err := g.http.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		// If Ollama daemon is offline or model is not loaded in unit test environment, fallback gracefully
+		log.Printf("[AI_GATEWAY_NOTICE] Ollama daemon unavailable at %s (err: %v); serving simulated fallback response", g.cfg.OllamaBaseURL, err)
 		return g.simulateGemmaResponse(prompt, systemInstruction)
 	}
 	defer resp.Body.Close()

@@ -26,8 +26,6 @@ services:
       dockerfile: Dockerfile.server
     container_name: crm-demo-server
     restart: unless-stopped
-    ports:
-      - "8080:8080"
     environment:
       - PORT=8080
       - DEMO_MODE=true

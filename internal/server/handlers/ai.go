@@ -154,6 +154,8 @@ func (h *AIHandler) ParseBill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := map[string]any{
+		"simulated": true,
+		"note":      "Simulierter OCR-Parser für Demo & Angebotsrechner",
 		"extracted": map[string]any{
 			"customer_name":             custName,
 			"yearly_consumption":        6500,
@@ -246,11 +248,14 @@ func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 
 func (h *AIHandler) DeleteKB(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	u, err := uuid.Parse(id)
+	if err != nil {
+		http.Error(w, `{"error":"invalid_id","message":"Ungültige UUID für KB-Artikel"}`, http.StatusBadRequest)
+		return
+	}
 
 	if h.querier != nil {
-		if u, err := uuid.Parse(id); err == nil {
-			_ = h.querier.DeleteKBArticle(r.Context(), pgtype.UUID{Bytes: u, Valid: true})
-		}
+		_ = h.querier.DeleteKBArticle(r.Context(), pgtype.UUID{Bytes: u, Valid: true})
 	}
 
 	h.mu.Lock()
@@ -320,6 +325,24 @@ func (h *AIHandler) CreateResearchJob(w http.ResponseWriter, r *http.Request) {
 		domain = "energie-dach.de"
 	}
 
+	siteTitle := domain + " - Gewerbliche Photovoltaik"
+	summary := "Geprüftes Gewerbeunternehmen mit hoher Dachflächen-Eignung für Photovoltaik-Großanlagen."
+	decisionMakers := []string{"Geschäftsführung (" + domain + ")"}
+
+	if h.researchSvc != nil {
+		if res, err := h.researchSvc.ResearchCompany(r.Context(), domain); err == nil {
+			if res.Title != "" {
+				siteTitle = res.Title
+			}
+			if res.Summary != "" {
+				summary = res.Summary
+			}
+			if len(res.IndustryKeywords) > 0 {
+				decisionMakers = res.IndustryKeywords
+			}
+		}
+	}
+
 	jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
 	if h.querier != nil {
 		created, err := h.querier.CreateAIResearchJob(r.Context(), db.CreateAIResearchJobParams{
@@ -343,9 +366,9 @@ func (h *AIHandler) CreateResearchJob(w http.ResponseWriter, r *http.Request) {
 		Depth:       req.Depth,
 		Status:      "COMPLETED",
 		Result: &ResearchResult{
-			SiteTitle:      domain + " - Gewerbliche Photovoltaik",
-			Summary:        "Geprüftes Gewerbeunternehmen mit hoher Dachflächen-Eignung für Photovoltaik-Großanlagen.",
-			DecisionMakers: []string{"Geschäftsführung (" + domain + ")"},
+			SiteTitle:      siteTitle,
+			Summary:        summary,
+			DecisionMakers: decisionMakers,
 		},
 	}
 	h.researchJobs = append([]ResearchJob{job}, h.researchJobs...)

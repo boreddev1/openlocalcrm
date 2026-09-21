@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -11,6 +12,19 @@ import (
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
+
+func isSecureRequest(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); strings.EqualFold(proto, "https") {
+		return true
+	}
+	if strings.EqualFold(os.Getenv("FORCE_SECURE_COOKIES"), "true") {
+		return true
+	}
+	return false
+}
 
 type AuthHandler struct {
 	service *auth.AuthService
@@ -98,9 +112,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Name:     "access_token",
 		Value:    res.Token,
 		Path:     "/",
-		Expires:  time.Now().Add(24 * time.Hour),
+		Expires:  time.Now().Add(auth.AccessTokenDuration),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -111,12 +125,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			Path:     "/api/v1/auth",
 			Expires:  time.Now().Add(30 * 24 * time.Hour),
 			HttpOnly: true,
-			Secure:   r.TLS != nil,
+			Secure:   isSecureRequest(r),
 			SameSite: http.SameSiteStrictMode,
 		})
 	}
 
-	auth.SetCSRFCookie(w, r.TLS != nil)
+	auth.SetCSRFCookie(w, isSecureRequest(r))
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(LoginResponse{
@@ -162,9 +176,9 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		Name:     "access_token",
 		Value:    newToken,
 		Path:     "/",
-		Expires:  time.Now().Add(24 * time.Hour),
+		Expires:  time.Now().Add(auth.AccessTokenDuration),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -175,12 +189,12 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 			Path:     "/api/v1/auth",
 			Expires:  time.Now().Add(30 * 24 * time.Hour),
 			HttpOnly: true,
-			Secure:   r.TLS != nil,
+			Secure:   isSecureRequest(r),
 			SameSite: http.SameSiteStrictMode,
 		})
 	}
 
-	auth.SetCSRFCookie(w, r.TLS != nil)
+	auth.SetCSRFCookie(w, isSecureRequest(r))
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
@@ -215,7 +229,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.SetCookie(w, &http.Cookie{
@@ -225,7 +239,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteStrictMode,
 	})
 	auth.ClearCSRFCookie(w)

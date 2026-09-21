@@ -26,14 +26,10 @@ export function getCookie(name: string): string | null {
 }
 
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
   const headers = new Headers(options.headers || {});
 
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
-  }
-  if (token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
   }
 
   // Attach CSRF Token for mutating requests (Findings #6, #14)
@@ -91,10 +87,9 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
     // ignore
   }
 
-  // Auto-clear invalid token on 401 Unauthorized
+  // Notify session expiry on 401 Unauthorized
   if (res.status === 401 && endpoint !== '/api/v1/auth/login') {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('auth_token');
       window.dispatchEvent(new CustomEvent('auth:logout'));
     }
   }

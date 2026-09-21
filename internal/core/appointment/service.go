@@ -94,14 +94,35 @@ func uuidToStrPtr(u pgtype.UUID) *string {
 	return &str
 }
 
-func (s *Service) List(ctx context.Context) ([]Appointment, error) {
+func (s *Service) List(ctx context.Context, pagination ...int) ([]Appointment, error) {
+	limit := 100
+	offset := 0
+	if len(pagination) > 0 && pagination[0] > 0 {
+		limit = pagination[0]
+		if limit > 500 {
+			limit = 500
+		}
+	}
+	if len(pagination) > 1 && pagination[1] >= 0 {
+		offset = pagination[1]
+	}
+
 	if s.querier != nil {
 		dbApps, err := s.querier.ListAppointments(ctx)
 		if err != nil {
 			return nil, err
 		}
-		result := make([]Appointment, len(dbApps))
-		for i, a := range dbApps {
+		if offset >= len(dbApps) {
+			return []Appointment{}, nil
+		}
+		end := offset + limit
+		if end > len(dbApps) {
+			end = len(dbApps)
+		}
+		paged := dbApps[offset:end]
+
+		result := make([]Appointment, len(paged))
+		for i, a := range paged {
 			idStr := uuid.UUID(a.ID.Bytes).String()
 			result[i] = Appointment{
 				ID:         idStr,
@@ -127,7 +148,14 @@ func (s *Service) List(ctx context.Context) ([]Appointment, error) {
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]Appointment(nil), s.inMem...), nil
+	if offset >= len(s.inMem) {
+		return []Appointment{}, nil
+	}
+	end := offset + limit
+	if end > len(s.inMem) {
+		end = len(s.inMem)
+	}
+	return append([]Appointment(nil), s.inMem[offset:end]...), nil
 }
 
 func (s *Service) GetByID(ctx context.Context, id string) (Appointment, error) {

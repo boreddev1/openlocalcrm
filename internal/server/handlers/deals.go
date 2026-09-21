@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -63,12 +64,23 @@ func (h *DealHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *DealHandler) List(w http.ResponseWriter, r *http.Request) {
 	stage := r.URL.Query().Get("stage")
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	limit, _ := strconv.Atoi(limitStr)
+	offset, _ := strconv.Atoi(offsetStr)
+	if limit <= 0 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
 	var deals []db.Deal
 	var err error
 	if stage != "" {
-		deals, err = h.service.ListByStage(r.Context(), stage)
+		deals, err = h.service.ListByStage(r.Context(), stage, int32(limit), int32(offset))
 	} else {
-		deals, err = h.service.List(r.Context(), 100, 0)
+		deals, err = h.service.List(r.Context(), int32(limit), int32(offset))
 	}
 	if err != nil {
 		http.Error(w, `{"error":"failed to list deals"}`, http.StatusInternalServerError)
@@ -167,7 +179,10 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	val := existing.Value
 	if req.Value != nil {
-		_ = val.Scan(req.Value)
+		if err := val.Scan(req.Value); err != nil {
+			http.Error(w, `{"error":"invalid_value","message":"Ungültiges Zahlenformat für Deal-Volumen"}`, http.StatusBadRequest)
+			return
+		}
 	}
 
 	updated, err := h.service.Update(r.Context(), actorID, deal.UpdateDealInput{

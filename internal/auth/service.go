@@ -43,6 +43,10 @@ type AuthService struct {
 	graceCache sync.Map // oldTokenHash -> rotatedTokenEntry
 }
 
+const (
+	AccessTokenDuration = 30 * time.Minute
+)
+
 var revokedAccessTokens sync.Map // tokenString -> expiresAt time.Time
 
 func RevokeToken(token string, expiresAt time.Time) {
@@ -71,7 +75,7 @@ func (s *AuthService) RevokeAccessToken(token string) {
 		return
 	}
 	claims, err := ValidateAccessToken(token, s.pubKey)
-	expiresAt := time.Now().Add(24 * time.Hour)
+	expiresAt := time.Now().Add(AccessTokenDuration)
 	if err == nil && claims != nil && claims.ExpiresAt != nil {
 		expiresAt = claims.ExpiresAt.Time
 	}
@@ -173,7 +177,7 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 
 	// Generate Access Token (JWT with Ed25519)
 	userID := uuid.UUID(user.ID.Bytes)
-	token, err := GenerateAccessToken(userID, user.Email, user.Role, s.privKey, 24*time.Hour)
+	token, err := GenerateAccessToken(userID, user.Email, user.Role, s.privKey, AccessTokenDuration)
 	if err != nil {
 		return nil, fmt.Errorf("failed generating access token: %w", err)
 	}
@@ -233,7 +237,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ip, use
 	_ = s.querier.DeleteRefreshToken(ctx, tokenHash)
 
 	userID := uuid.UUID(user.ID.Bytes)
-	newToken, err := GenerateAccessToken(userID, user.Email, user.Role, s.privKey, 24*time.Hour)
+	newToken, err := GenerateAccessToken(userID, user.Email, user.Role, s.privKey, AccessTokenDuration)
 	if err != nil {
 		return "", "", fmt.Errorf("failed generating access token: %w", err)
 	}

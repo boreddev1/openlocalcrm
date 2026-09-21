@@ -136,8 +136,30 @@ func (s *Service) UpdateStage(ctx context.Context, actorID, dealID pgtype.UUID, 
 	return deal, nil
 }
 
-func (s *Service) ListByStage(ctx context.Context, stage string) ([]db.Deal, error) {
-	return s.queries.ListDealsByStage(ctx, stage)
+func (s *Service) ListByStage(ctx context.Context, stage string, pagination ...int32) ([]db.Deal, error) {
+	deals, err := s.queries.ListDealsByStage(ctx, stage)
+	if err != nil {
+		return nil, err
+	}
+	limit := int32(100)
+	offset := int32(0)
+	if len(pagination) > 0 && pagination[0] > 0 {
+		limit = pagination[0]
+		if limit > 500 {
+			limit = 500
+		}
+	}
+	if len(pagination) > 1 && pagination[1] >= 0 {
+		offset = pagination[1]
+	}
+	if int(offset) >= len(deals) {
+		return []db.Deal{}, nil
+	}
+	end := int(offset + limit)
+	if end > len(deals) {
+		end = len(deals)
+	}
+	return deals[offset:end], nil
 }
 
 func (s *Service) List(ctx context.Context, limit, offset int32) ([]db.Deal, error) {

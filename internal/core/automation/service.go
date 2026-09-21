@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
@@ -355,7 +357,20 @@ func (s *Service) executeStep(ctx context.Context, step StepDefinition, run Work
 	case "SET_TAG":
 		tag, _ := step.Payload["tag"].(string)
 		log.Printf("[automation] SET_TAG: applying tag %q to %s %s (%s)", tag, run.TargetType, run.TargetID, run.TargetName)
-		// Tag application is persisted via the audit log; real tag service can be wired in future.
+		if s.querier != nil {
+			targetUUID, _ := uuid.Parse(run.TargetID)
+			details, _ := json.Marshal(map[string]any{
+				"tag":         tag,
+				"workflow_id": run.WorkflowID,
+				"run_id":      run.ID,
+			})
+			_, _ = s.querier.CreateAuditLog(ctx, db.CreateAuditLogParams{
+				EntityType: run.TargetType,
+				EntityID:   pgtype.UUID{Bytes: targetUUID, Valid: targetUUID != uuid.Nil},
+				Action:     "TAG_APPLIED",
+				Changes:    details,
+			})
+		}
 		return nil
 
 	case "CREATE_TASK":
@@ -364,22 +379,86 @@ func (s *Service) executeStep(ctx context.Context, step StepDefinition, run Work
 			title = step.Title
 		}
 		priority, _ := step.Payload["priority"].(string)
+		if priority == "" {
+			priority = "MEDIUM"
+		}
 		log.Printf("[automation] CREATE_TASK: %q (priority: %s) for %s %s", title, priority, run.TargetType, run.TargetID)
-		// In a full implementation, this would call TodoService.Create.
+		if s.querier != nil {
+			var contactID, dealID pgtype.UUID
+			if targetUUID, err := uuid.Parse(run.TargetID); err == nil {
+				if strings.EqualFold(run.TargetType, "contact") {
+					contactID = pgtype.UUID{Bytes: targetUUID, Valid: true}
+				} else if strings.EqualFold(run.TargetType, "deal") {
+					dealID = pgtype.UUID{Bytes: targetUUID, Valid: true}
+				}
+			}
+			_, err := s.querier.CreateTodo(ctx, db.CreateTodoParams{
+				Title:       title,
+				Description: pgtype.Text{String: fmt.Sprintf("Automatisch erstellt durch Workflow %s für %s (%s)", run.WorkflowID, run.TargetName, run.TargetType), Valid: true},
+				DueDate:     pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+				Status:      "OPEN",
+				Priority:    priority,
+				ContactID:   contactID,
+				DealID:      dealID,
+			})
+			if err != nil {
+				log.Printf("[automation_error] CREATE_TASK failed: %v", err)
+				return err
+			}
+		}
 		return nil
 
 	case "DRAFT_EMAIL":
 		template, _ := step.Payload["template"].(string)
 		log.Printf("[automation] DRAFT_EMAIL: template %q for %s %s (requires HITL approval)", template, run.TargetType, run.TargetID)
+		if s.querier != nil {
+			targetUUID, _ := uuid.Parse(run.TargetID)
+			details, _ := json.Marshal(map[string]any{
+				"template":    template,
+				"workflow_id": run.WorkflowID,
+				"run_id":      run.ID,
+			})
+			_, _ = s.querier.CreateAuditLog(ctx, db.CreateAuditLogParams{
+				EntityType: run.TargetType,
+				EntityID:   pgtype.UUID{Bytes: targetUUID, Valid: targetUUID != uuid.Nil},
+				Action:     "EMAIL_DRAFTED",
+				Changes:    details,
+			})
+		}
 		return nil
 
 	case "NOTIFY_USER":
+		msg, _ := step.Payload["message"].(string)
+		if msg == "" {
+			msg = fmt.Sprintf("Workflow %s: Schritt %d ausgeführt für %s", run.WorkflowID, step.StepNumber, run.TargetName)
+		}
 		log.Printf("[automation] NOTIFY_USER: sending notification for %s %s", run.TargetType, run.TargetID)
+		if s.querier != nil {
+			var targetUUID pgtype.UUID
+			if u, err := uuid.Parse(run.TargetID); err == nil {
+				targetUUID = pgtype.UUID{Bytes: u, Valid: true}
+			}
+			_, err := s.querier.CreateNotification(ctx, db.CreateNotificationParams{
+				UserID:  targetUUID,
+				Type:    "WORKFLOW_COMPLETED",
+				Title:   step.Title,
+				Message: msg,
+				Link:    pgtype.Text{String: "/automations", Valid: true},
+				IsRead:  false,
+			})
+			if err != nil {
+				log.Printf("[automation_error] NOTIFY_USER failed: %v", err)
+				return err
+			}
+		}
 		return nil
 
 	case "WEBHOOK":
 		url, _ := step.Payload["url"].(string)
 		log.Printf("[automation] WEBHOOK: calling %s for %s %s", url, run.TargetType, run.TargetID)
+		if url == "" {
+			return fmt.Errorf("webhook action requires url payload")
+		}
 		return nil
 
 	default:
