@@ -163,3 +163,23 @@ func Decrypt(encodedCiphertext string) ([]byte, error) {
 
 	return plaintext, nil
 }
+
+// EncryptSecret encrypts a plaintext secret string using AES-256-GCM.
+func EncryptSecret(secret string) (string, error) {
+	if secret == "" {
+		return "", nil
+	}
+	return Encrypt([]byte(secret))
+}
+
+// DecryptSecret decrypts a base64 AES-256-GCM encrypted secret string.
+func DecryptSecret(ciphertext string) (string, error) {
+	if ciphertext == "" {
+		return "", nil
+	}
+	dec, err := Decrypt(ciphertext)
+	if err != nil {
+		return "", err
+	}
+	return string(dec), nil
+}

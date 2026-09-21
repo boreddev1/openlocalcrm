@@ -5,17 +5,8 @@ CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 CREATE EXTENSION IF NOT EXISTS "vector";
 
 -- Enum types
-DO $$ BEGIN
-    CREATE TYPE user_role AS ENUM ('ADMIN', 'BENUTZER');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
-
-DO $$ BEGIN
-    CREATE TYPE user_status AS ENUM ('ACTIVE', 'INVITED', 'DEACTIVATED');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
+CREATE TYPE user_role AS ENUM ('ADMIN', 'BENUTZER');
+CREATE TYPE user_status AS ENUM ('ACTIVE', 'INVITED', 'DEACTIVATED');
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (

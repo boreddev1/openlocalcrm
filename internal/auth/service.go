@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
@@ -194,10 +195,25 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 			}, nil
 		}
 
-		secret := user.TotpSecretEncrypted.String
-		if !ValidateTOTPCode(totpCode, secret) {
+		encryptedSecret := user.TotpSecretEncrypted.String
+		plainSecret, err := crypto.DecryptSecret(encryptedSecret)
+		if err != nil {
 			s.limiter.RecordFailure(rateLimitKey)
 			return nil, ErrInvalidTOTPCode
+		}
+
+		valid, usedStep := ValidateTOTPCodeWithStep(totpCode, plainSecret, user.TotpLastUsedStep)
+		if !valid {
+			s.limiter.RecordFailure(rateLimitKey)
+			return nil, ErrInvalidTOTPCode
+		}
+
+		// Persist used step to prevent replay attacks (F-02)
+		if err := s.querier.UpdateUserTOTPLastUsedStep(ctx, db.UpdateUserTOTPLastUsedStepParams{
+			ID:               user.ID,
+			TotpLastUsedStep: usedStep,
+		}); err != nil {
+			log.Printf("[AUTH] Warning: failed updating totp_last_used_step for user %s: %v", user.Email, err)
 		}
 	}
 
@@ -322,11 +338,17 @@ func (s *AuthService) SetupTOTP(ctx context.Context, userID uuid.UUID) (*TOTPSet
 		return nil, err
 	}
 
-	// Store secret temporarily (not enabled until verified)
+	encryptedSecret, err := crypto.EncryptSecret(secret)
+	if err != nil {
+		return nil, fmt.Errorf("failed encrypting totp secret: %w", err)
+	}
+
+	// Store encrypted secret temporarily (not enabled until verified)
 	err = s.querier.UpdateUserTOTP(ctx, db.UpdateUserTOTPParams{
 		ID:                  pgID,
-		TotpSecretEncrypted: pgtype.Text{String: secret, Valid: true},
+		TotpSecretEncrypted: pgtype.Text{String: encryptedSecret, Valid: true},
 		TotpEnabled:         false,
+		TotpLastUsedStep:    0,
 	})
 	if err != nil {
 		return nil, err
@@ -345,19 +367,26 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, userID uuid.UUID, code str
 		return ErrUserNotFound
 	}
 
-	secret := user.TotpSecretEncrypted.String
-	if secret == "" {
+	encryptedSecret := user.TotpSecretEncrypted.String
+	if encryptedSecret == "" {
 		return errors.New("no TOTP setup found in progress")
 	}
 
-	if !ValidateTOTPCode(code, secret) {
+	plainSecret, err := crypto.DecryptSecret(encryptedSecret)
+	if err != nil {
+		return errors.New("failed decrypting TOTP secret")
+	}
+
+	valid, usedStep := ValidateTOTPCodeWithStep(code, plainSecret, 0)
+	if !valid {
 		return ErrInvalidTOTPCode
 	}
 
 	return s.querier.UpdateUserTOTP(ctx, db.UpdateUserTOTPParams{
 		ID:                  pgID,
-		TotpSecretEncrypted: pgtype.Text{String: secret, Valid: true},
+		TotpSecretEncrypted: pgtype.Text{String: encryptedSecret, Valid: true},
 		TotpEnabled:         true,
+		TotpLastUsedStep:    usedStep,
 	})
 }
 
@@ -382,6 +411,7 @@ func (s *AuthService) DisableTOTP(ctx context.Context, userID uuid.UUID, current
 		ID:                  pgID,
 		TotpSecretEncrypted: pgtype.Text{Valid: false},
 		TotpEnabled:         false,
+		TotpLastUsedStep:    0,
 	})
 }
 

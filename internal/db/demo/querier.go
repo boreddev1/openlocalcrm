@@ -613,6 +613,22 @@ func (q *InMemoryQuerier) UpdateUserTOTP(ctx context.Context, arg db.UpdateUserT
 	}
 	u.TotpSecretEncrypted = arg.TotpSecretEncrypted
 	u.TotpEnabled = arg.TotpEnabled
+	u.TotpLastUsedStep = arg.TotpLastUsedStep
+	u.UpdatedAt = nowTimestamptz()
+	q.users[idStr] = u
+	return nil
+}
+
+func (q *InMemoryQuerier) UpdateUserTOTPLastUsedStep(ctx context.Context, arg db.UpdateUserTOTPLastUsedStepParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	u, ok := q.users[idStr]
+	if !ok {
+		return ErrNotFound
+	}
+	u.TotpLastUsedStep = arg.TotpLastUsedStep
 	u.UpdatedAt = nowTimestamptz()
 	q.users[idStr] = u
 	return nil

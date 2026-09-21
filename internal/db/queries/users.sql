@@ -49,6 +49,11 @@ WHERE id = $1;
 
 -- name: UpdateUserTOTP :exec
 UPDATE users
-SET totp_secret_encrypted = $2, totp_enabled = $3, updated_at = NOW()
+SET totp_secret_encrypted = $2, totp_enabled = $3, totp_last_used_step = $4, updated_at = NOW()
+WHERE id = $1;
+
+-- name: UpdateUserTOTPLastUsedStep :exec
+UPDATE users
+SET totp_last_used_step = $2, updated_at = NOW()
 WHERE id = $1;
 
