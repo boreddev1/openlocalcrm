@@ -9,20 +9,15 @@ export const ReportsPage: React.FC = () => {
     queryFn: () => apiFetch('/api/v1/reports/sales'),
   });
 
-  const forecast = reportData?.forecast || [
-    { month_name: 'Sep 2026', weighted_eur: 42500, committed_eur: 28000, deal_count: 4 },
-    { month_name: 'Okt 2026', weighted_eur: 58000, committed_eur: 35000, deal_count: 6 },
-    { month_name: 'Nov 2026', weighted_eur: 69000, committed_eur: 41000, deal_count: 7 },
-    { month_name: 'Dez 2026', weighted_eur: 84000, committed_eur: 52000, deal_count: 9 },
-  ];
+  const forecast = Array.isArray(reportData?.forecast) ? reportData.forecast : [];
 
   const stats = reportData?.conversion_stats || {
-    total_leads: 28,
-    won_deals: 12,
-    lost_deals: 4,
-    revoked_deals: 1,
-    conversion_rate: 42.8,
-    avg_deal_volume_eur: 19450.0,
+    total_leads: 0,
+    won_deals: 0,
+    lost_deals: 0,
+    revoked_deals: 0,
+    conversion_rate: 0,
+    avg_deal_volume_eur: 0,
   };
 
   const totalCommitted = forecast.reduce((acc: number, f: any) => acc + f.committed_eur, 0);
@@ -67,7 +62,9 @@ export const ReportsPage: React.FC = () => {
             <Award className="w-4 h-4 text-amber-400" /> Wandlungsquote (Lead ➔ Won)
           </div>
           <div className="text-2xl font-bold text-slate-100">{stats.conversion_rate}%</div>
-          <div className="text-[11px] text-emerald-400 font-semibold">+4.2% über Zielkorridor</div>
+          <div className="text-[11px] text-emerald-400 font-semibold">
+            {stats.conversion_rate > 0 ? '+4.2% über Zielkorridor' : 'Noch keine Abschlüsse'}
+          </div>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-2">
@@ -96,38 +93,45 @@ export const ReportsPage: React.FC = () => {
 
           {/* Bar Visualizer */}
           <div className="space-y-4">
-            {forecast.map((f: any, idx: number) => {
-              const maxEUR = 100000;
-              const weightedPct = Math.min((f.weighted_eur / maxEUR) * 100, 100);
-              const committedPct = Math.min((f.committed_eur / maxEUR) * 100, 100);
+            {forecast.length === 0 ? (
+              <div className="py-12 text-center text-sm text-slate-500">
+                Noch keine Deals im Forecast vorhanden. Erstellen Sie Deals, um Umsatzprognosen zu
+                sehen.
+              </div>
+            ) : (
+              forecast.map((f: any, idx: number) => {
+                const maxEUR = 100000;
+                const weightedPct = Math.min((f.weighted_eur / maxEUR) * 100, 100);
+                const committedPct = Math.min((f.committed_eur / maxEUR) * 100, 100);
 
-              return (
-                <div key={idx} className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-200">{f.month_name}</span>
-                    <span className="text-slate-400">
-                      <strong className="text-emerald-400">
-                        {f.committed_eur.toLocaleString('de-DE')} €
-                      </strong>{' '}
-                      gesichert / {f.weighted_eur.toLocaleString('de-DE')} € gewichtet (
-                      {f.deal_count} Deals)
-                    </span>
+                return (
+                  <div key={idx} className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-200">{f.month_name}</span>
+                      <span className="text-slate-400">
+                        <strong className="text-emerald-400">
+                          {f.committed_eur.toLocaleString('de-DE')} €
+                        </strong>{' '}
+                        gesichert / {f.weighted_eur.toLocaleString('de-DE')} € gewichtet (
+                        {f.deal_count} Deals)
+                      </span>
+                    </div>
+                    <div className="h-3 w-full bg-slate-950 rounded-full overflow-hidden flex">
+                      <div
+                        style={{ width: `${committedPct}%` }}
+                        className="bg-emerald-500 rounded-full transition-all duration-500"
+                        title="Gesichert"
+                      />
+                      <div
+                        style={{ width: `${weightedPct - committedPct}%` }}
+                        className="bg-blue-500/60 rounded-r-full transition-all duration-500"
+                        title="Gewichtetes Potenzial"
+                      />
+                    </div>
                   </div>
-                  <div className="h-3 w-full bg-slate-950 rounded-full overflow-hidden flex">
-                    <div
-                      style={{ width: `${committedPct}%` }}
-                      className="bg-emerald-500 rounded-full transition-all duration-500"
-                      title="Gesichert"
-                    />
-                    <div
-                      style={{ width: `${weightedPct - committedPct}%` }}
-                      className="bg-blue-500/60 rounded-r-full transition-all duration-500"
-                      title="Gewichtetes Potenzial"
-                    />
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
 
           <div className="flex items-center gap-6 pt-2 text-xs text-slate-400">

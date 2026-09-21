@@ -22,9 +22,9 @@ func setupAIHandler() *handlers.AIHandler {
 	})
 	obs := ai.NewObservabilityService()
 	triageSvc := ai.NewTriageService(gw)
-	chatSvc := ai.NewChatService(gw, obs)
-	researchSvc := ai.NewResearchService(gw, obs)
 	querier := demo.NewInMemoryQuerier()
+	chatSvc := ai.NewChatService(gw, obs, querier)
+	researchSvc := ai.NewResearchService(gw, obs)
 
 	return handlers.NewAIHandler(triageSvc, chatSvc, researchSvc, obs, gw, querier)
 }
@@ -54,10 +54,10 @@ func TestAIHandler_TriageAndChat(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
-	t.Run("Chat valid", func(t *testing.T) {
+	t.Run("Chat greeting", func(t *testing.T) {
 		reqBody := ai.ChatRequest{
 			Messages: []ai.ChatMessage{
-				{Role: "user", Content: "Hallo OpenLocalCRM"},
+				{Role: "user", Content: "hi"},
 			},
 		}
 		body, _ := json.Marshal(reqBody)
@@ -66,6 +66,53 @@ func TestAIHandler_TriageAndChat(t *testing.T) {
 
 		h.Chat(rec, req)
 		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp ai.ChatResponse
+		err := json.NewDecoder(rec.Body).Decode(&resp)
+		require.NoError(t, err)
+		require.Contains(t, resp.Reply, "Vertriebs-Copilot")
+		require.NotContains(t, resp.Reply, "106.700 €")
+	})
+
+	t.Run("Chat unknown input dd", func(t *testing.T) {
+		reqBody := ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: "dd"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.Chat(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp ai.ChatResponse
+		err := json.NewDecoder(rec.Body).Decode(&resp)
+		require.NoError(t, err)
+		require.Contains(t, resp.Reply, "nicht genau verstanden")
+		require.NotContains(t, resp.Reply, "106.700 €")
+	})
+
+	t.Run("Chat pipeline summary with action card", func(t *testing.T) {
+		reqBody := ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: "Fasse die Pipeline zusammen"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.Chat(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp ai.ChatResponse
+		err := json.NewDecoder(rec.Body).Decode(&resp)
+		require.NoError(t, err)
+		require.NotEmpty(t, resp.Reply)
+		require.NotNil(t, resp.ActionCard)
+		require.Equal(t, "/deals", resp.ActionCard.Route)
 	})
 
 	t.Run("Chat invalid json", func(t *testing.T) {

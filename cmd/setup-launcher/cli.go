@@ -119,7 +119,7 @@ BEFEHLE:
   --version, -v                     Version anzeigen
 
 INSTALLATIONS-OPTIONEN:
-  --version, --tag TAG              Zu installierende Version / Release-Tag (Standard: v0.9)
+  --version, --tag TAG              Zu installierende Version / Release-Tag (Standard: v1.0.1)
   --list-versions                   Alle verfügbaren Release-Tags von GitHub anzeigen
   --port PORT                       Web-Port festlegen (Standard: 80, Ausweich: 8080)
   --admin-email EMAIL               E-Mail-Adresse für das Admin-Konto (Standard: admin@openlocalcrm.local)

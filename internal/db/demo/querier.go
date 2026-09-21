@@ -68,8 +68,8 @@ func nowTimestamptz() pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 }
 
-func NewInMemoryQuerier() *InMemoryQuerier {
-	q := &InMemoryQuerier{
+func NewEmptyInMemoryQuerier() *InMemoryQuerier {
+	return &InMemoryQuerier{
 		users:          make(map[string]db.User),
 		companies:      make(map[string]db.Company),
 		contacts:       make(map[string]db.Contact),
@@ -89,6 +89,10 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 		workflows:      make(map[string]db.Workflow),
 		workflowRuns:   make(map[string]db.WorkflowRun),
 	}
+}
+
+func NewInMemoryQuerier() *InMemoryQuerier {
+	q := NewEmptyInMemoryQuerier()
 
 	hash, err := auth.HashPassword("demo123")
 	if err != nil {
@@ -425,6 +429,28 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 		StepsJson:   []byte(`[{"title":"Reaktivierungs-Todo für Account Manager erstellen","action_type":"CREATE_TASK"}]`),
 		CreatedAt:   nowTimestamptz(),
 		UpdatedAt:   nowTimestamptz(),
+	}
+
+	// Workflow Runs (Demo mode)
+	q.workflowRuns["run-101"] = db.WorkflowRun{
+		ID:          "run-101",
+		WorkflowID:  "wf-1",
+		TargetID:    uuidToStr(cont1ID),
+		TargetType:  "CONTACT",
+		TargetName:  "Dr. Michael Weber",
+		Status:      "WAITING_APPROVAL",
+		CurrentStep: 2,
+		StartedAt:   nowTimestamptz(),
+	}
+	q.workflowRuns["run-102"] = db.WorkflowRun{
+		ID:          "run-102",
+		WorkflowID:  "wf-2",
+		TargetID:    uuidToStr(deal2ID),
+		TargetType:  "DEAL",
+		TargetName:  "30 kWp Gewerbedach Solaranlage",
+		Status:      "COMPLETED",
+		CurrentStep: 2,
+		StartedAt:   nowTimestamptz(),
 	}
 
 	return q

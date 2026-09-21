@@ -75,10 +75,11 @@ export const DealsPage: React.FC = () => {
   });
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
 
-  const { data: deals = [] } = useQuery<Deal[]>({
+  const { data: rawDeals = [] } = useQuery<Deal[]>({
     queryKey: ['deals'],
     queryFn: () => apiFetch('/api/v1/deals'),
   });
+  const deals = Array.isArray(rawDeals) ? rawDeals : [];
 
   const createMutation = useMutation({
     mutationFn: (newDeal: any) =>

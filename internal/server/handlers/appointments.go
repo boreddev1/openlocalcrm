@@ -28,6 +28,10 @@ func (h *AppointmentHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if apps == nil {
+		apps = []appointment.Appointment{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(apps)
 }

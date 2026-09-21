@@ -107,16 +107,79 @@ func TestCopilotChatService(t *testing.T) {
 	obs := ai.NewObservabilityService()
 	chatSvc := ai.NewChatService(gw, obs)
 
-	resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
-		Messages: []ai.ChatMessage{
-			{Role: "user", Content: "Was ist der aktuelle Status von Dr. Weber?"},
-		},
-		Context: "Deals Pipeline: 5 open deals",
+	t.Run("greeting hi does not return static deal volume", func(t *testing.T) {
+		resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: "hi"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !contains(resp.Reply, "Vertriebs-Copilot") {
+			t.Fatalf("expected greeting reply, got: %s", resp.Reply)
+		}
+		if contains(resp.Reply, "106.700 €") {
+			t.Fatalf("greeting should never contain hardcoded fake pipeline volume")
+		}
 	})
-	if err != nil {
-		t.Fatalf("expected successful chat response, got: %v", err)
-	}
-	if resp.Reply == "" {
-		t.Fatalf("expected non-empty copilot response")
-	}
+
+	t.Run("gibberish dd does not return static deal volume", func(t *testing.T) {
+		resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: "dd"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !contains(resp.Reply, "nicht genau verstanden") {
+			t.Fatalf("expected helpful fallback for unknown input, got: %s", resp.Reply)
+		}
+		if contains(resp.Reply, "106.700 €") {
+			t.Fatalf("dd input should never contain hardcoded fake pipeline volume")
+		}
+	})
+
+	t.Run("pipeline summary returns action card", func(t *testing.T) {
+		resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: "Fasse die Pipeline zusammen"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.ActionCard == nil || resp.ActionCard.Route != "/deals" {
+			t.Fatalf("expected action card with /deals, got: %+v", resp.ActionCard)
+		}
+	})
+
+	t.Run("workflow request returns automations action card", func(t *testing.T) {
+		resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: "Workflow für Neukunden anlegen"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.ActionCard == nil || resp.ActionCard.Route != "/automations" {
+			t.Fatalf("expected action card with /automations, got: %+v", resp.ActionCard)
+		}
+	})
+
+	t.Run("legal BGB 355 advice", func(t *testing.T) {
+		resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: "Wie ist die Widerrufsfrist nach § 355 BGB?"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !contains(resp.Reply, "14 Tage") {
+			t.Fatalf("expected 14 days legal advice, got: %s", resp.Reply)
+		}
+	})
 }

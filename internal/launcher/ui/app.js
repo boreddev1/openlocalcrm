@@ -442,7 +442,7 @@ async function startSetup() {
   savedAdminPassword = document.getElementById('admin-password').value;
 
   const versionSelect = document.getElementById('install-version');
-  const selectedVersion = versionSelect ? versionSelect.value : 'v1.0.0';
+  const selectedVersion = versionSelect ? versionSelect.value : 'v1.0.1';
 
   const payload = {
     admin_email: document.getElementById('admin-email').value,

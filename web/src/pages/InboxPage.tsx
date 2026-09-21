@@ -116,11 +116,13 @@ export const InboxPage: React.FC = () => {
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
 
   // Email messages with interactive local tags
-  const [emailTags, setEmailTags] = useState<Record<string, string[]>>({
-    'msg-1': ['PV-Interessent', 'Dringend'],
-    'msg-2': ['Widerruf § 355', 'Dringend'],
-    'msg-3': ['Wärmepumpe'],
+  const [emailTags, setEmailTags] = useState<Record<string, string[]>>({});
+
+  const { data: healthData } = useQuery<any>({
+    queryKey: ['health'],
+    queryFn: () => apiFetch('/api/v1/health'),
   });
+  const isDemo = healthData?.demo_mode === true;
 
   const { data: rawMessages = [], isLoading } = useQuery<any[]>({
     queryKey: ['emails'],
@@ -225,9 +227,13 @@ export const InboxPage: React.FC = () => {
       if (currentSecurityAnalysis?.hasInjection) {
         draft = `Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Nachricht. Ihre Mitteilung wurde empfangen und an unsere zuständige Fachabteilung weitergeleitet.\n\nMit freundlichen Grüßen,\nIhr OpenLocalCRM Kundenservice`;
       } else if (toneProfile === 'friendly') {
-        draft = `Guten Tag ${selectedMessage.sender_name?.String || 'Herr Dr. Weber'},\n\nvielen Dank für Ihre Anfrage bezüglich der PV-Anlage für Ihre Halle. Wir haben Ihre Anforderungen (30 kWp + 20 kWh Speicher) aufgenommen und erstellen Ihnen gerne eine individuelle Wirtschaftlichkeitsberechnung.\n\nWann passt Ihnen ein kurzer Vor-Ort-Termin zur Dachbegehung?\n\nHerzliche Grüße,\nIhr OpenLocalCRM Vertriebsteam`;
+        const sender =
+          selectedMessage.sender_name?.String || selectedMessage.sender_name || 'Interessent';
+        draft = `Guten Tag ${sender},\n\nvielen Dank für Ihre Anfrage bezüglich der PV-Anlage für Ihre Halle. Wir haben Ihre Anforderungen (30 kWp + 20 kWh Speicher) aufgenommen und erstellen Ihnen gerne eine individuelle Wirtschaftlichkeitsberechnung.\n\nWann passt Ihnen ein kurzer Vor-Ort-Termin zur Dachbegehung?\n\nHerzliche Grüße,\nIhr OpenLocalCRM Vertriebsteam`;
       } else if (toneProfile === 'concise') {
-        draft = `Hallo ${selectedMessage.sender_name?.String || 'Herr Dr. Weber'},\n\nvielen Dank für die Anfrage. Wir kalkulieren die 30 kWp PV-Anlage inkl. Speicher für Sie. Bitte teilen Sie uns mit, ob bereits Statikunterlagen vorliegen.\n\nBeste Grüße,\nOpenLocalCRM Vertrieb`;
+        const sender =
+          selectedMessage.sender_name?.String || selectedMessage.sender_name || 'Interessent';
+        draft = `Hallo ${sender},\n\nvielen Dank für die Anfrage. Wir kalkulieren die 30 kWp PV-Anlage inkl. Speicher für Sie. Bitte teilen Sie uns mit, ob bereits Statikunterlagen vorliegen.\n\nBeste Grüße,\nOpenLocalCRM Vertrieb`;
       } else {
         draft = `Sehr geehrte Damen und Herren,\n\nwir bedanken uns für Ihre geschätzte Kontaktaufnahme. Anbei bestätigen wir den Eingang Ihrer Anfrage für das 30 kWp PV-Projekt.\n\nMit freundlichen Grüßen,\nOpenLocalCRM Vertrieb`;
       }
@@ -250,7 +256,7 @@ export const InboxPage: React.FC = () => {
   // Filter messages by tag
   const filteredMessages = messages.filter((msg) => {
     if (selectedTagFilter === 'ALL') return true;
-    const tags = emailTags[msg.id] || (msg.id.includes('1') ? ['PV-Interessent'] : []);
+    const tags = emailTags[msg.id] || [];
     return tags.includes(selectedTagFilter);
   });
 
@@ -268,15 +274,17 @@ export const InboxPage: React.FC = () => {
             Prompt-Injection-Schutz und Gemma 12B Triage
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsDemoModalOpen(true)}
-            className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-xl text-xs transition-colors shadow-sm cursor-pointer"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Test-E-Mail simulieren</span>
-          </button>
-        </div>
+        {isDemo && (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsDemoModalOpen(true)}
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-xl text-xs transition-colors shadow-sm cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Test-E-Mail simulieren</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {feedbackBanner && (

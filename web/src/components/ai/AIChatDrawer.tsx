@@ -75,7 +75,7 @@ export const AIChatDrawer: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({
           messages: [...messages, userMsg].map((m) => ({ role: m.role, content: m.content })),
-          context: '5 aktive Deals (106.700 € Pipeline-Volumen), 3 Kontakte in Frankfurt',
+          context: '',
         }),
       });
 
@@ -113,7 +113,7 @@ export const AIChatDrawer: React.FC = () => {
   const quickChips = [
     '⚡ Workflow für PV-Leads anlegen',
     '🏷️ Tag "Gewerbe-PV" erstellen',
-    '🤝 Deal für Dr. Weber anlegen',
+    '🤝 Neuen Deal anlegen',
     '📝 E-Mail-Vorlage generieren',
     'Fasse die Pipeline zusammen',
   ];

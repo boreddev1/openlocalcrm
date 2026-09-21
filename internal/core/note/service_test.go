@@ -18,8 +18,8 @@ func TestNoteServiceCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(initialNotes) != 3 {
-		t.Fatalf("expected 3 initial notes, got %d", len(initialNotes))
+	if len(initialNotes) != 0 {
+		t.Fatalf("expected 0 initial notes, got %d", len(initialNotes))
 	}
 
 	// 2. Create note validation

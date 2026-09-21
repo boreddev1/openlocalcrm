@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -55,15 +56,21 @@ func NewGateway(cfg GatewayConfig) *Gateway {
 	if cfg.DefaultProvider == "" {
 		cfg.DefaultProvider = ProviderOllama
 	}
+	timeout := 30 * time.Second
+	if tStr := os.Getenv("OLLAMA_TIMEOUT_SECONDS"); tStr != "" {
+		if tSec, err := strconv.Atoi(tStr); err == nil && tSec > 0 {
+			timeout = time.Duration(tSec) * time.Second
+		}
+	}
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
-			Timeout: 200 * time.Millisecond,
+			Timeout: 2 * time.Second,
 		}).DialContext,
 	}
 	return &Gateway{
 		cfg:   cfg,
 		guard: NewGuard(),
-		http:  &http.Client{Transport: transport, Timeout: 1500 * time.Millisecond},
+		http:  &http.Client{Transport: transport, Timeout: timeout},
 	}
 }
 
@@ -82,13 +89,17 @@ func (g *Gateway) Generate(ctx context.Context, prompt string, systemInstruction
 }
 
 func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstruction string) (string, error) {
-	reqBody, _ := json.Marshal(map[string]any{
+	reqMap := map[string]any{
 		"model":  g.cfg.OllamaModel,
 		"prompt": prompt,
 		"system": systemInstruction,
 		"stream": false,
-		"format": "json",
-	})
+	}
+	if strings.Contains(strings.ToLower(systemInstruction), "json") {
+		reqMap["format"] = "json"
+	}
+
+	reqBody, _ := json.Marshal(reqMap)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", g.cfg.OllamaBaseURL+"/api/generate", bytes.NewReader(reqBody))
 	if err != nil {
@@ -124,7 +135,20 @@ func (g *Gateway) simulateGemmaResponse(prompt string, systemInstruction string)
 	}
 
 	if strings.Contains(systemInstruction, "Copilot") || strings.Contains(systemInstruction, "Vertriebsassistent") {
-		return "Die aktuelle Deal-Pipeline umfasst ein Volumen von ca. 106.700 € über 5 aktive Deals mit solider Abschlusswahrscheinlichkeit.", nil
+		lower := strings.ToLower(prompt)
+		if strings.Contains(lower, "hi") || strings.Contains(lower, "hallo") || strings.Contains(lower, "guten tag") || strings.Contains(lower, "hey") || strings.Contains(lower, "wer bist du") {
+			return "Hallo! Ich bin Ihr OpenLocalCRM Vertriebs-Copilot. Ich unterstütze Sie bei Kundenkontakten, Pipeline-Deals, E-Mail-Kommunikation und automatisierten Vertriebsabläufen. Wie kann ich Ihnen heute helfen?", nil
+		}
+		if strings.Contains(lower, "pipeline") || strings.Contains(lower, "deal") || strings.Contains(lower, "umsatz") {
+			return "Gerne unterstütze ich Sie bei Ihrer Pipeline. Sie können Ihre Verkaufschancen einsehen, neue Deals anlegen und Abschlusswahrscheinlichkeiten pflegen.", nil
+		}
+		if strings.Contains(lower, "workflow") || strings.Contains(lower, "automation") {
+			return "Sie können automatisierte Workflows für Lead-Qualifizierung und Follow-Ups erstellen. Nutzen Sie dazu gerne den Bereich Automationen.", nil
+		}
+		if strings.Contains(lower, "kontakt") || strings.Contains(lower, "kunde") {
+			return "Im Adressbuch können Sie Kunden und Leads verwalten sowie Adressdaten und Energieprofile pflegen.", nil
+		}
+		return "Ich stehe als KI-Vertriebs-Copilot bereit. Wie kann ich Sie bei Ihren Deals, Kontakten oder Automatisierungen unterstützen? Nutzen Sie gerne die Schnellbefehle für häufige Aktionen.", nil
 	}
 
 	// Deterministic Gemma 12B JSON mock generator

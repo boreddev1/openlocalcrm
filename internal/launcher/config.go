@@ -211,7 +211,7 @@ func GenerateEnvContentWithExisting(cfg SetupConfig, existing map[string]string)
 		if existing != nil && existing["OPENLOCALCRM_VERSION"] != "" {
 			version = existing["OPENLOCALCRM_VERSION"]
 		} else {
-			version = "v1.0.0"
+			version = "v1.0.1"
 		}
 	}
 
