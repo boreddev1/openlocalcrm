@@ -23,7 +23,7 @@ func TestDemoKBEmbeddingCreateListAndSearch(t *testing.T) {
 	ctx := context.Background()
 	q := demo.NewEmptyInMemoryQuerier()
 
-	model := pgtype.Text{String: "nomic-embed-text", Valid: true}
+	model := pgtype.Text{String: "qwen3-embedding:0.6b", Valid: true}
 	a1, err := q.CreateKBArticle(ctx, db.CreateKBArticleParams{
 		Title:          "PV Handbuch",
 		Category:       "Solar",
@@ -39,7 +39,7 @@ func TestDemoKBEmbeddingCreateListAndSearch(t *testing.T) {
 	if !a1.Indexed {
 		t.Fatal("expected created article to be indexed when an embedding is stored")
 	}
-	if a1.EmbeddingModel.String != "nomic-embed-text" {
+	if a1.EmbeddingModel.String != "qwen3-embedding:0.6b" {
 		t.Fatalf("expected real embedding model, got %q", a1.EmbeddingModel.String)
 	}
 
@@ -122,7 +122,7 @@ func TestDemoKBUpdateEmbedding(t *testing.T) {
 	if err := q.UpdateKBArticleEmbedding(ctx, db.UpdateKBArticleEmbeddingParams{
 		ID:             a.ID,
 		Embedding:      vecLiteral(0, 0, 1),
-		EmbeddingModel: pgtype.Text{String: "nomic-embed-text", Valid: true},
+		EmbeddingModel: pgtype.Text{String: "qwen3-embedding:0.6b", Valid: true},
 	}); err != nil {
 		t.Fatalf("update embedding failed: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestDemoKBUpdateEmbedding(t *testing.T) {
 	if !got.Indexed {
 		t.Fatal("expected article to be indexed after embedding update")
 	}
-	if got.EmbeddingModel.String != "nomic-embed-text" {
+	if got.EmbeddingModel.String != "qwen3-embedding:0.6b" {
 		t.Fatalf("expected embedding model persisted, got %q", got.EmbeddingModel.String)
 	}
 }

@@ -21,17 +21,17 @@ func newFakeAIGateway(t *testing.T, response string) *ai.Gateway {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/api/embeddings") {
-			_ = json.NewEncoder(w).Encode(map[string]any{"embedding": unitVector(768)})
+			_ = json.NewEncoder(w).Encode(map[string]any{"embedding": unitVector(1024)})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"response": response})
 	}))
 	t.Cleanup(srv.Close)
 	return ai.NewGateway(ai.GatewayConfig{
-		DefaultProvider:      ai.ProviderOllama,
-		OllamaBaseURL:        srv.URL,
-		OllamaModel:          "test-model",
-		OllamaEmbeddingModel: "nomic-embed-text",
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+		EmbeddingModel:  "qwen3-embedding:0.6b",
 	})
 }
 

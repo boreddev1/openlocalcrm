@@ -301,7 +301,7 @@ func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"embedding_unavailable","message":"Embedding konnte nicht erzeugt werden: `+err.Error()+`"}`, http.StatusBadGateway)
 		return
 	}
-	embeddingModel := h.gateway.GetConfig().OllamaEmbeddingModel
+	embeddingModel := h.gateway.GetConfig().EmbeddingModel
 	doc.EmbeddingModel = embeddingModel
 	doc.Indexed = true
 

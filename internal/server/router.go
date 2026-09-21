@@ -184,7 +184,9 @@ func NewRouter(cfg Config) http.Handler {
 		aiGateway := ai.NewGateway(ai.GatewayConfig{
 			DefaultProvider: ai.Provider(aiProvider),
 			OllamaBaseURL:   aiBaseURL,
+			AIBaseURL:       os.Getenv("AI_BASE_URL"),
 			OllamaModel:     aiModel,
+			EmbeddingModel:  os.Getenv("AI_EMBEDDING_MODEL"),
 			APIKey:          aiAPIKey,
 		})
 		triageSvc := ai.NewTriageService(aiGateway, obsSvc)

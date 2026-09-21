@@ -152,10 +152,12 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// A9: verify the configured embedding model matches the fixed pgvector(768)
+	// A9: verify the configured embedding model matches the fixed pgvector(1024)
 	// schema before serving. A dimension mismatch is a hard configuration error
-	// (resizing requires an explicit migration); an unreachable backend — e.g.
-	// CI/E2E without a local Ollama — only warns and disables semantic search.
+	// (resizing requires an explicit migration); an unreachable backend or a
+	// provider without an embeddings API — e.g. CI/E2E without a local Ollama —
+	// only warns and disables semantic search, every later embedding call
+	// returns the same honest error.
 	embeddingCtx, cancelEmbeddingCheck := context.WithTimeout(ctx, 5*time.Second)
 	embeddingErr := ai.ValidateEmbeddingModelFromEnv(embeddingCtx)
 	cancelEmbeddingCheck()
@@ -163,7 +165,7 @@ func main() {
 		if errors.Is(embeddingErr, ai.ErrEmbeddingDimensionMismatch) {
 			log.Fatalf("[FATAL] Embedding-Konfiguration ungültig: %v", embeddingErr)
 		}
-		log.Printf("[WARN] Embedding-Modell nicht erreichbar, semantische Suche deaktiviert: %v", embeddingErr)
+		log.Printf("[WARN] Embedding-Modell nicht erreichbar oder ohne Embedding-Support, semantische Suche deaktiviert: %v", embeddingErr)
 	}
 
 	// Ed25519 Keys

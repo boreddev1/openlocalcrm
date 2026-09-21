@@ -46,9 +46,9 @@ func newEmbeddingGateway(t *testing.T, vec []float32) *ai.Gateway {
 	}))
 	t.Cleanup(srv.Close)
 	return ai.NewGateway(ai.GatewayConfig{
-		DefaultProvider:      ai.ProviderOllama,
-		OllamaBaseURL:        srv.URL,
-		OllamaEmbeddingModel: "nomic-embed-text",
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		EmbeddingModel:  "qwen3-embedding:0.6b",
 	})
 }
 
@@ -59,9 +59,9 @@ func newFailingEmbeddingGateway(t *testing.T) *ai.Gateway {
 	}))
 	t.Cleanup(srv.Close)
 	return ai.NewGateway(ai.GatewayConfig{
-		DefaultProvider:      ai.ProviderOllama,
-		OllamaBaseURL:        srv.URL,
-		OllamaEmbeddingModel: "nomic-embed-text",
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		EmbeddingModel:  "qwen3-embedding:0.6b",
 	})
 }
 
@@ -76,7 +76,7 @@ func setupKBHandler(t *testing.T, gw *ai.Gateway) (*handlers.AIHandler, *demo.In
 }
 
 func TestKBHandler_CreateKBEmbedsAndReportsRealIndex(t *testing.T) {
-	h, _ := setupKBHandler(t, newEmbeddingGateway(t, unitVector(768)))
+	h, _ := setupKBHandler(t, newEmbeddingGateway(t, unitVector(1024)))
 	doc := handlers.KBArticle{Title: "PV Handbuch", Category: "Solar", Content: "Photovoltaik Montage"}
 	body, _ := json.Marshal(doc)
 	req := httptest.NewRequest(http.MethodPost, "/api/ai/kb", bytes.NewReader(body))
@@ -88,13 +88,13 @@ func TestKBHandler_CreateKBEmbedsAndReportsRealIndex(t *testing.T) {
 	var created handlers.KBArticle
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&created))
 	require.True(t, created.Indexed, "expected honestly indexed article")
-	require.Equal(t, "nomic-embed-text", created.EmbeddingModel)
+	require.Equal(t, "qwen3-embedding:0.6b", created.EmbeddingModel)
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/ai/kb", nil)
 	listRec := httptest.NewRecorder()
 	h.ListKB(listRec, listReq)
 	require.Equal(t, http.StatusOK, listRec.Code)
-	require.Contains(t, listRec.Body.String(), "nomic-embed-text")
+	require.Contains(t, listRec.Body.String(), "qwen3-embedding:0.6b")
 }
 
 func TestKBHandler_CreateKBFailsHonestlyWhenEmbeddingUnavailable(t *testing.T) {
@@ -116,12 +116,12 @@ func TestKBHandler_CreateKBFailsHonestlyWhenEmbeddingUnavailable(t *testing.T) {
 }
 
 func TestKBHandler_ListKBReturnsRealIndexStatusAndNoFabricatedChunks(t *testing.T) {
-	gw := newEmbeddingGateway(t, unitVector(768))
+	gw := newEmbeddingGateway(t, unitVector(1024))
 	h, querier := setupKBHandler(t, gw)
 	_, err := querier.CreateKBArticle(context.Background(), db.CreateKBArticleParams{
 		Title: "Indexiert", Category: "Solar", Content: "Text", Tags: []string{}, Author: "System",
 		Embedding:      embeddingVecLiteral(1, 0, 0),
-		EmbeddingModel: pgtype.Text{String: "nomic-embed-text", Valid: true},
+		EmbeddingModel: pgtype.Text{String: "qwen3-embedding:0.6b", Valid: true},
 	})
 	require.NoError(t, err)
 	_, err = querier.CreateKBArticle(context.Background(), db.CreateKBArticleParams{
@@ -139,11 +139,11 @@ func TestKBHandler_ListKBReturnsRealIndexStatusAndNoFabricatedChunks(t *testing.
 	require.NotContains(t, body, `"chunks_count":4`)
 	require.Contains(t, body, `"indexed":true`)
 	require.Contains(t, body, `"indexed":false`)
-	require.Contains(t, body, `"embedding_model":"nomic-embed-text"`)
+	require.Contains(t, body, `"embedding_model":"qwen3-embedding:0.6b"`)
 }
 
 func TestKBHandler_SearchKBEmptyQueryIs400(t *testing.T) {
-	h, _ := setupKBHandler(t, newEmbeddingGateway(t, unitVector(768)))
+	h, _ := setupKBHandler(t, newEmbeddingGateway(t, unitVector(1024)))
 
 	for _, target := range []string{"/api/ai/kb/search", "/api/ai/kb/search?q=", "/api/ai/kb/search?q=%20%20"} {
 		req := httptest.NewRequest(http.MethodGet, target, nil)
@@ -154,18 +154,18 @@ func TestKBHandler_SearchKBEmptyQueryIs400(t *testing.T) {
 }
 
 func TestKBHandler_SearchKBRanksIndexedArticles(t *testing.T) {
-	h, querier := setupKBHandler(t, newEmbeddingGateway(t, unitVector(768)))
+	h, querier := setupKBHandler(t, newEmbeddingGateway(t, unitVector(1024)))
 	ctx := context.Background()
 	_, err := querier.CreateKBArticle(ctx, db.CreateKBArticleParams{
 		Title: "Nah", Category: "Solar", Content: "pv", Tags: []string{}, Author: "System",
-		Embedding:      paddedVec(768, 1),
-		EmbeddingModel: pgtype.Text{String: "nomic-embed-text", Valid: true},
+		Embedding:      paddedVec(1024, 1),
+		EmbeddingModel: pgtype.Text{String: "qwen3-embedding:0.6b", Valid: true},
 	})
 	require.NoError(t, err)
 	_, err = querier.CreateKBArticle(ctx, db.CreateKBArticleParams{
 		Title: "Fern", Category: "Solar", Content: "eeg", Tags: []string{}, Author: "System",
-		Embedding:      paddedVec(768, 0, 1),
-		EmbeddingModel: pgtype.Text{String: "nomic-embed-text", Valid: true},
+		Embedding:      paddedVec(1024, 0, 1),
+		EmbeddingModel: pgtype.Text{String: "qwen3-embedding:0.6b", Valid: true},
 	})
 	require.NoError(t, err)
 	// not indexed, must be excluded
