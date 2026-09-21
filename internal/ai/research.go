@@ -27,6 +27,10 @@ type CompanyResearchResult struct {
 	ResearchedAt     time.Time `json:"researched_at"`
 }
 
+type CompanyResearcher interface {
+	ResearchCompany(ctx context.Context, domain string) (CompanyResearchResult, error)
+}
+
 type ResearchService struct {
 	gateway    *Gateway
 	httpClient *http.Client
@@ -122,6 +126,10 @@ func (s *ResearchService) ResearchCompany(ctx context.Context, domain string) (C
 
 	targetURL := "https://" + cleanDomain
 	title, metaDesc, rawContent := s.scrapeWebsite(ctx, targetURL)
+
+	if strings.TrimSpace(metaDesc) == "" && strings.TrimSpace(rawContent) == "" {
+		return CompanyResearchResult{}, fmt.Errorf("%w: keine verwertbaren Recherchedaten für %s", ErrUpstreamUnavailable, cleanDomain)
+	}
 
 	// Build prompt for Gemma 12B with prompt injection isolation
 	prompt := fmt.Sprintf(

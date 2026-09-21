@@ -2,8 +2,11 @@ package ai_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
@@ -331,9 +334,8 @@ func TestCopilotChatService(t *testing.T) {
 		}
 	})
 
-	t.Run("research intent uses real research service data", func(t *testing.T) {
-		researchPayload := `{"summary":"Echte Recherche-Zusammenfassung","industry_keywords":["Handwerk"]}`
-		srv := fakeOllamaServer(t, http.StatusOK, researchPayload)
+	t.Run("research intent uses injected researcher data", func(t *testing.T) {
+		srv := fakeOllamaServer(t, http.StatusOK, "Antwort")
 		gw := ai.NewGateway(ai.GatewayConfig{
 			DefaultProvider: ai.ProviderOllama,
 			OllamaBaseURL:   srv.URL,
@@ -341,8 +343,12 @@ func TestCopilotChatService(t *testing.T) {
 		})
 		obs := ai.NewObservabilityService()
 		querier := demo.NewInMemoryQuerier()
-		researchSvc := ai.NewResearchService(gw, obs)
-		chatWithDB := ai.NewChatService(gw, obs, researchSvc, querier)
+		researcher := fakeResearcher{result: ai.CompanyResearchResult{
+			Domain:           "baeckerei-passa.de",
+			Summary:          "Echte Recherche-Zusammenfassung",
+			IndustryKeywords: []string{"Handwerk"},
+		}}
+		chatWithDB := ai.NewChatService(gw, obs, researcher, querier)
 
 		prompt := "kannst du die Bäckerei passa als kunden anlegen und die meta information recherchieren?"
 		resp, err := chatWithDB.Chat(ctx, ai.ChatRequest{
@@ -365,10 +371,47 @@ func TestCopilotChatService(t *testing.T) {
 			t.Fatalf("unexpected error on confirmation: %v", err)
 		}
 		if !contains(respConfirmed.Reply, "Echte Recherche-Zusammenfassung") {
-			t.Errorf("expected real research summary in reply, got: %s", respConfirmed.Reply)
+			t.Errorf("expected injected research summary in reply, got: %s", respConfirmed.Reply)
 		}
 		if contains(respConfirmed.Reply, "Recherchierte Unternehmensdaten") {
 			t.Errorf("must not fabricate research data, got: %s", respConfirmed.Reply)
+		}
+	})
+
+	t.Run("research failure yields honest keine Recherchedaten reply", func(t *testing.T) {
+		srv := fakeOllamaServer(t, http.StatusOK, "Antwort")
+		gw := ai.NewGateway(ai.GatewayConfig{
+			DefaultProvider: ai.ProviderOllama,
+			OllamaBaseURL:   srv.URL,
+			OllamaModel:     "gemma2:12b",
+		})
+		obs := ai.NewObservabilityService()
+		querier := demo.NewInMemoryQuerier()
+		researcher := fakeResearcher{err: ai.ErrUpstreamUnavailable}
+		chatWithDB := ai.NewChatService(gw, obs, researcher, querier)
+
+		prompt := "kannst du die Bäckerei passa als kunden anlegen und die meta information recherchieren?"
+		resp, err := chatWithDB.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: prompt},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		respConfirmed, err := chatWithDB.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: prompt},
+				{Role: "assistant", Content: resp.Reply},
+				{Role: "user", Content: "Ja, bitte ausführen und bestätigen."},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error on confirmation: %v", err)
+		}
+		if !contains(respConfirmed.Reply, "keine Recherchedaten") {
+			t.Errorf("expected honest 'keine Recherchedaten' notice, got: %s", respConfirmed.Reply)
 		}
 	})
 
@@ -396,9 +439,24 @@ func TestCopilotChatService(t *testing.T) {
 	})
 }
 
-func TestResearchCompanyUpstreamFailureDoesNotFabricate(t *testing.T) {
+type fakeResearcher struct {
+	result ai.CompanyResearchResult
+	err    error
+}
+
+func (f fakeResearcher) ResearchCompany(ctx context.Context, domain string) (ai.CompanyResearchResult, error) {
+	return f.result, f.err
+}
+
+func TestResearchCompanyNoUsableSourceDoesNotCallGateway(t *testing.T) {
 	ctx := context.Background()
-	srv := fakeOllamaServer(t, http.StatusInternalServerError, "")
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": `{"summary":"Erfundene Zusammenfassung"}`})
+	}))
+	t.Cleanup(srv.Close)
 	gw := ai.NewGateway(ai.GatewayConfig{
 		DefaultProvider: ai.ProviderOllama,
 		OllamaBaseURL:   srv.URL,
@@ -408,39 +466,19 @@ func TestResearchCompanyUpstreamFailureDoesNotFabricate(t *testing.T) {
 
 	res, err := svc.ResearchCompany(ctx, "example.invalid")
 	if err == nil {
-		t.Fatalf("expected honest error on research gateway failure, got result: %+v", res)
+		t.Fatalf("expected honest error when no usable scraped source, got result: %+v", res)
 	}
 	if !errors.Is(err, ai.ErrUpstreamUnavailable) {
 		t.Fatalf("expected ErrUpstreamUnavailable, got: %v", err)
+	}
+	if atomic.LoadInt32(&calls) != 0 {
+		t.Fatalf("gateway.Generate must not be called without usable source, got %d calls", calls)
 	}
 	if res.Summary != "" {
 		t.Fatalf("must not fabricate research summary, got: %q", res.Summary)
 	}
 	if len(res.IndustryKeywords) != 0 {
 		t.Fatalf("must not fabricate industry keywords, got: %v", res.IndustryKeywords)
-	}
-}
-
-func TestResearchCompanyReturnsModelData(t *testing.T) {
-	ctx := context.Background()
-	payload := `{"summary":"Modell-Zusammenfassung","industry_keywords":["Solar","Handwerk"]}`
-	srv := fakeOllamaServer(t, http.StatusOK, payload)
-	gw := ai.NewGateway(ai.GatewayConfig{
-		DefaultProvider: ai.ProviderOllama,
-		OllamaBaseURL:   srv.URL,
-		OllamaModel:     "test-model",
-	})
-	svc := ai.NewResearchService(gw, ai.NewObservabilityService())
-
-	res, err := svc.ResearchCompany(ctx, "example.invalid")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.Summary != "Modell-Zusammenfassung" {
-		t.Fatalf("expected model summary, got: %q", res.Summary)
-	}
-	if len(res.IndustryKeywords) != 2 || res.IndustryKeywords[0] != "Solar" || res.IndustryKeywords[1] != "Handwerk" {
-		t.Fatalf("expected model keywords, got: %v", res.IndustryKeywords)
 	}
 }
 

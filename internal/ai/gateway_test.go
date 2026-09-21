@@ -26,6 +26,17 @@ func fakeOllamaServer(t *testing.T, status int, response string) *httptest.Serve
 	return srv
 }
 
+func fakeRawServer(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 func TestGatewayGenerateOllamaSuccess(t *testing.T) {
 	srv := fakeOllamaServer(t, http.StatusOK, "Echte Modellantwort")
 	gw := ai.NewGateway(ai.GatewayConfig{
@@ -94,6 +105,91 @@ func TestGatewayGenerateOpenAIStatusErrorReturnsHonestError(t *testing.T) {
 	got, err := gw.Generate(context.Background(), "Hallo", "")
 	if err == nil {
 		t.Fatalf("expected honest error on provider failure, got fabricated reply: %q", got)
+	}
+	if !errors.Is(err, ai.ErrUpstreamUnavailable) {
+		t.Fatalf("expected ErrUpstreamUnavailable, got: %v", err)
+	}
+}
+
+func TestGatewayGenerateOpenAISuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": "OpenAI Antwort"}},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOpenAI,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "gpt-4o-mini",
+	})
+
+	got, err := gw.Generate(context.Background(), "Hallo", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "OpenAI Antwort" {
+		t.Fatalf("expected OpenAI response, got: %q", got)
+	}
+}
+
+func TestGatewayGenerateInvalidBaseURLReturnsHonestError(t *testing.T) {
+	const invalidURL = "http://bad url/"
+
+	t.Run("ollama", func(t *testing.T) {
+		gw := ai.NewGateway(ai.GatewayConfig{
+			DefaultProvider: ai.ProviderOllama,
+			OllamaBaseURL:   invalidURL,
+			OllamaModel:     "test-model",
+		})
+		if _, err := gw.Generate(context.Background(), "Hallo", ""); !errors.Is(err, ai.ErrUpstreamUnavailable) {
+			t.Fatalf("expected ErrUpstreamUnavailable for invalid base URL, got: %v", err)
+		}
+	})
+
+	t.Run("openai", func(t *testing.T) {
+		gw := ai.NewGateway(ai.GatewayConfig{
+			DefaultProvider: ai.ProviderOpenAI,
+			OllamaBaseURL:   invalidURL,
+			OllamaModel:     "gpt-4o-mini",
+		})
+		if _, err := gw.Generate(context.Background(), "Hallo", ""); !errors.Is(err, ai.ErrUpstreamUnavailable) {
+			t.Fatalf("expected ErrUpstreamUnavailable for invalid base URL, got: %v", err)
+		}
+	})
+}
+
+func TestGatewayGenerateOllamaNonJSONReturnsHonestError(t *testing.T) {
+	srv := fakeRawServer(t, http.StatusOK, "this is not json")
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+	})
+
+	got, err := gw.Generate(context.Background(), "Hallo", "")
+	if err == nil {
+		t.Fatalf("expected honest error on unparseable upstream body, got: %q", got)
+	}
+	if !errors.Is(err, ai.ErrUpstreamUnavailable) {
+		t.Fatalf("expected ErrUpstreamUnavailable, got: %v", err)
+	}
+}
+
+func TestGatewayGenerateOpenAINonJSONReturnsHonestError(t *testing.T) {
+	srv := fakeRawServer(t, http.StatusOK, "this is not json")
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOpenAI,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "gpt-4o-mini",
+	})
+
+	got, err := gw.Generate(context.Background(), "Hallo", "")
+	if err == nil {
+		t.Fatalf("expected honest error on unparseable upstream body, got: %q", got)
 	}
 	if !errors.Is(err, ai.ErrUpstreamUnavailable) {
 		t.Fatalf("expected ErrUpstreamUnavailable, got: %v", err)

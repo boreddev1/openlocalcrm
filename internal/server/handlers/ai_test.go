@@ -42,6 +42,20 @@ func newFailingAIGateway(t *testing.T, status int) *ai.Gateway {
 	})
 }
 
+func newNonJSONAIGateway(t *testing.T) *ai.Gateway {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("this is not json"))
+	}))
+	t.Cleanup(srv.Close)
+	return ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+	})
+}
+
 func setupAIHandlerWithGateway(t *testing.T, gw *ai.Gateway) *handlers.AIHandler {
 	t.Helper()
 	obs := ai.NewObservabilityService()
@@ -86,6 +100,17 @@ func TestAIHandler_TriageAndChat(t *testing.T) {
 
 	t.Run("TriageEmail upstream failure is 502", func(t *testing.T) {
 		h := setupAIHandlerWithGateway(t, newFailingAIGateway(t, http.StatusInternalServerError))
+		reqBody := handlers.TriageRequest{Sender: "kunde@solar.de", Subject: "Angebot", Body: "Bitte Angebot."}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/triage", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.TriageEmail(rec, req)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+	})
+
+	t.Run("TriageEmail non-JSON upstream is 502", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newNonJSONAIGateway(t))
 		reqBody := handlers.TriageRequest{Sender: "kunde@solar.de", Subject: "Angebot", Body: "Bitte Angebot."}
 		body, _ := json.Marshal(reqBody)
 		req := httptest.NewRequest(http.MethodPost, "/api/ai/triage", bytes.NewReader(body))

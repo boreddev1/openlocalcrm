@@ -42,11 +42,11 @@ type ChatResponse struct {
 type ChatService struct {
 	gateway     *Gateway
 	obsSvc      *ObservabilityService
-	researchSvc *ResearchService
+	researchSvc CompanyResearcher
 	querier     db.Querier
 }
 
-func NewChatService(gateway *Gateway, obsSvc *ObservabilityService, researchSvc *ResearchService, querier ...db.Querier) *ChatService {
+func NewChatService(gateway *Gateway, obsSvc *ObservabilityService, researchSvc CompanyResearcher, querier ...db.Querier) *ChatService {
 	svc := &ChatService{
 		gateway:     gateway,
 		obsSvc:      obsSvc,

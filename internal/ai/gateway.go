@@ -140,7 +140,7 @@ func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstructi
 	reqBody, _ := json.Marshal(reqMap)
 	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(reqBody))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: openai request build failed: %v", ErrUpstreamUnavailable, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if g.cfg.APIKey != "" {
@@ -164,10 +164,14 @@ func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstructi
 		} `json:"choices"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: openai response decode failed: %v", ErrUpstreamUnavailable, err)
 	}
 	if len(res.Choices) > 0 {
-		return g.guard.ValidateOutput(res.Choices[0].Message.Content)
+		out, err := g.guard.ValidateOutput(res.Choices[0].Message.Content)
+		if err != nil {
+			return "", fmt.Errorf("%w: openai output validation failed: %v", ErrUpstreamUnavailable, err)
+		}
+		return out, nil
 	}
 	return "", fmt.Errorf("%w: openai backend returned no choices", ErrUpstreamUnavailable)
 }
@@ -187,7 +191,7 @@ func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstructi
 
 	req, err := http.NewRequestWithContext(ctx, "POST", g.cfg.OllamaBaseURL+"/api/generate", bytes.NewReader(reqBody))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: ollama request build failed: %v", ErrUpstreamUnavailable, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -204,8 +208,12 @@ func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstructi
 		Response string `json:"response"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: ollama response decode failed: %v", ErrUpstreamUnavailable, err)
 	}
 
-	return g.guard.ValidateOutput(res.Response)
+	out, err := g.guard.ValidateOutput(res.Response)
+	if err != nil {
+		return "", fmt.Errorf("%w: ollama output validation failed: %v", ErrUpstreamUnavailable, err)
+	}
+	return out, nil
 }
