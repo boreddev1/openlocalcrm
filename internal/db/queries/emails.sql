@@ -10,9 +10,11 @@ INSERT INTO email_accounts (
     smtp_port,
     username,
     password_encrypted,
-    is_active
+    is_active,
+    account_type,
+    owner_user_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 RETURNING *;
 
@@ -25,9 +27,32 @@ ORDER BY name ASC;
 SELECT * FROM email_accounts
 WHERE id = $1 LIMIT 1;
 
+-- name: UpdateEmailAccount :one
+UPDATE email_accounts
+SET name = $2,
+    imap_host = $3,
+    imap_port = $4,
+    smtp_host = $5,
+    smtp_port = $6,
+    username = $7,
+    password_encrypted = $8,
+    is_active = $9,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: DeleteEmailAccount :exec
+DELETE FROM email_accounts
+WHERE id = $1;
+
 -- name: UpdateEmailAccountLastSynced :exec
 UPDATE email_accounts
 SET last_synced_at = $2, updated_at = NOW()
+WHERE id = $1;
+
+-- name: UpdateEmailAccountSyncState :exec
+UPDATE email_accounts
+SET last_sync_at = $2, last_uid = $3, last_synced_at = $2, updated_at = NOW()
 WHERE id = $1;
 
 -- name: CreateEmailMessage :one
@@ -70,6 +95,12 @@ WHERE id = $1 LIMIT 1;
 UPDATE email_messages
 SET is_read = TRUE
 WHERE id = $1;
+
+-- name: UpdateEmailMessageTags :one
+UPDATE email_messages
+SET tags = $2
+WHERE id = $1
+RETURNING *;
 
 -- name: CreateEmailAttachment :one
 INSERT INTO email_attachments (

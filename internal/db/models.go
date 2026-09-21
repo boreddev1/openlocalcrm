@@ -251,6 +251,10 @@ type EmailAccount struct {
 	LastSyncedAt      pgtype.Timestamptz `json:"last_synced_at"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	AccountType       string             `json:"account_type"`
+	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
+	LastSyncAt        pgtype.Timestamptz `json:"last_sync_at"`
+	LastUid           int64              `json:"last_uid"`
 }
 
 type EmailAttachment struct {
@@ -281,6 +285,7 @@ type EmailMessage struct {
 	ContactID       pgtype.UUID        `json:"contact_id"`
 	DealID          pgtype.UUID        `json:"deal_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	Tags            []byte             `json:"tags"`
 }
 
 type IntakeForm struct {

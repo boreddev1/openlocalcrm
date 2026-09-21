@@ -2,20 +2,17 @@ package email
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
+	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
+	"github.com/openlocalcrm/openlocalcrm/internal/mailclient"
 	"github.com/openlocalcrm/openlocalcrm/internal/sse"
 	"github.com/openlocalcrm/openlocalcrm/internal/storage"
 )
@@ -167,65 +164,137 @@ func (s *Service) MarkAsRead(ctx context.Context, id pgtype.UUID) error {
 	return s.queries.MarkEmailMessageRead(ctx, id)
 }
 
-// EncryptPassword encrypts a plaintext password using AES-256-GCM.
-func EncryptPassword(plainText string, key []byte) (string, error) {
-	if len(key) == 0 {
-		return "", errors.New("encryption key is empty")
-	}
-	k := key
-	if len(k) != 32 {
-		h := sha256.Sum256(key)
-		k = h[:]
-	}
-	block, err := aes.NewCipher(k)
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", err
-	}
-	sealed := gcm.Seal(nonce, nonce, []byte(plainText), nil)
-	return hex.EncodeToString(sealed), nil
+// AccountInput describes the fields accepted when creating or updating an
+// email account. Password is always plaintext on the way in and is
+// encrypted via internal/crypto before it ever reaches the database.
+type AccountInput struct {
+	Name         string
+	EmailAddress string
+	Provider     string
+	ImapHost     string
+	ImapPort     int32
+	SmtpHost     string
+	SmtpPort     int32
+	Username     string
+	Password     string
+	IsActive     bool
+	AccountType  string
+	OwnerUserID  pgtype.UUID
 }
 
-// DecryptPassword decrypts a hex-encoded AES-256-GCM encrypted password.
-func DecryptPassword(cipherHex string, key []byte) (string, error) {
-	if cipherHex == "" {
-		return "", nil
-	}
-	if len(key) == 0 {
-		return "", errors.New("decryption key is empty")
-	}
-	k := key
-	if len(k) != 32 {
-		h := sha256.Sum256(key)
-		k = h[:]
-	}
-	data, err := hex.DecodeString(cipherHex)
+// CreateAccount creates a new email account with its password encrypted at
+// rest.
+func (s *Service) CreateAccount(ctx context.Context, input AccountInput) (db.EmailAccount, error) {
+	encrypted, err := crypto.EncryptSecret(input.Password)
 	if err != nil {
-		return "", err
+		return db.EmailAccount{}, fmt.Errorf("failed to encrypt password: %w", err)
 	}
-	block, err := aes.NewCipher(k)
+
+	accountType := input.AccountType
+	if accountType == "" {
+		accountType = "personal"
+	}
+
+	return s.queries.CreateEmailAccount(ctx, db.CreateEmailAccountParams{
+		Name:              input.Name,
+		EmailAddress:      input.EmailAddress,
+		Provider:          input.Provider,
+		ImapHost:          pgtype.Text{String: input.ImapHost, Valid: input.ImapHost != ""},
+		ImapPort:          pgtype.Int4{Int32: input.ImapPort, Valid: input.ImapPort != 0},
+		SmtpHost:          pgtype.Text{String: input.SmtpHost, Valid: input.SmtpHost != ""},
+		SmtpPort:          pgtype.Int4{Int32: input.SmtpPort, Valid: input.SmtpPort != 0},
+		Username:          pgtype.Text{String: input.Username, Valid: input.Username != ""},
+		PasswordEncrypted: pgtype.Text{String: encrypted, Valid: encrypted != ""},
+		IsActive:          true,
+		AccountType:       accountType,
+		OwnerUserID:       input.OwnerUserID,
+	})
+}
+
+// ListAccounts returns every email account. Passwords remain encrypted;
+// callers must never decrypt them for display.
+func (s *Service) ListAccounts(ctx context.Context) ([]db.EmailAccount, error) {
+	return s.queries.ListEmailAccounts(ctx)
+}
+
+// GetAccount returns a single email account by ID.
+func (s *Service) GetAccount(ctx context.Context, id pgtype.UUID) (db.EmailAccount, error) {
+	acc, err := s.queries.GetEmailAccountByID(ctx, id)
 	if err != nil {
-		return "", err
+		return db.EmailAccount{}, ErrAccountNotFound
 	}
-	gcm, err := cipher.NewGCM(block)
+	return acc, nil
+}
+
+// UpdateAccount updates an existing email account. If input.Password is
+// non-empty, the stored credential is rotated; otherwise the existing
+// encrypted password is kept.
+func (s *Service) UpdateAccount(ctx context.Context, id pgtype.UUID, input AccountInput) (db.EmailAccount, error) {
+	existing, err := s.queries.GetEmailAccountByID(ctx, id)
 	if err != nil {
-		return "", err
+		return db.EmailAccount{}, ErrAccountNotFound
 	}
-	if len(data) < gcm.NonceSize() {
-		return "", errors.New("ciphertext too short")
+
+	encrypted := existing.PasswordEncrypted
+	if input.Password != "" {
+		enc, err := crypto.EncryptSecret(input.Password)
+		if err != nil {
+			return db.EmailAccount{}, fmt.Errorf("failed to encrypt password: %w", err)
+		}
+		encrypted = pgtype.Text{String: enc, Valid: enc != ""}
 	}
-	nonce := data[:gcm.NonceSize()]
-	ciphertext := data[gcm.NonceSize():]
-	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
+
+	return s.queries.UpdateEmailAccount(ctx, db.UpdateEmailAccountParams{
+		ID:                id,
+		Name:              input.Name,
+		ImapHost:          pgtype.Text{String: input.ImapHost, Valid: input.ImapHost != ""},
+		ImapPort:          pgtype.Int4{Int32: input.ImapPort, Valid: input.ImapPort != 0},
+		SmtpHost:          pgtype.Text{String: input.SmtpHost, Valid: input.SmtpHost != ""},
+		SmtpPort:          pgtype.Int4{Int32: input.SmtpPort, Valid: input.SmtpPort != 0},
+		Username:          pgtype.Text{String: input.Username, Valid: input.Username != ""},
+		PasswordEncrypted: encrypted,
+		IsActive:          input.IsActive,
+	})
+}
+
+// DeleteAccount permanently removes an email account.
+func (s *Service) DeleteAccount(ctx context.Context, id pgtype.UUID) error {
+	return s.queries.DeleteEmailAccount(ctx, id)
+}
+
+// TestConnection performs a live IMAP login and SMTP AUTH check against the
+// account's configured servers, returning an honest error on any failure —
+// never a fabricated success.
+func (s *Service) TestConnection(ctx context.Context, id pgtype.UUID) error {
+	acc, err := s.queries.GetEmailAccountByID(ctx, id)
 	if err != nil {
-		return "", err
+		return ErrAccountNotFound
 	}
-	return string(plain), nil
+
+	password, err := crypto.DecryptSecret(acc.PasswordEncrypted.String)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt account password: %w", err)
+	}
+
+	if err := mailclient.TestLogin(mailclient.IMAPConfig{
+		Host:        acc.ImapHost.String,
+		Port:        int(acc.ImapPort.Int32),
+		Username:    acc.Username.String,
+		Password:    password,
+		ImplicitTLS: acc.ImapPort.Int32 == 993,
+	}); err != nil {
+		return fmt.Errorf("imap connection test failed: %w", err)
+	}
+
+	if err := mailclient.TestAuth(mailclient.SMTPConfig{
+		Host:        acc.SmtpHost.String,
+		Port:        int(acc.SmtpPort.Int32),
+		Username:    acc.Username.String,
+		Password:    password,
+		ImplicitTLS: acc.SmtpPort.Int32 == 465,
+	}); err != nil {
+		return fmt.Errorf("smtp connection test failed: %w", err)
+	}
+
+	return nil
 }

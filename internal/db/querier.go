@@ -49,6 +49,7 @@ type Querier interface {
 	DeleteCompany(ctx context.Context, id pgtype.UUID) error
 	DeleteContact(ctx context.Context, id pgtype.UUID) error
 	DeleteDeal(ctx context.Context, id pgtype.UUID) error
+	DeleteEmailAccount(ctx context.Context, id pgtype.UUID) error
 	DeleteKBArticle(ctx context.Context, id pgtype.UUID) error
 	DeleteNote(ctx context.Context, id pgtype.UUID) error
 	DeleteRefreshToken(ctx context.Context, tokenHash string) error
@@ -106,7 +107,10 @@ type Querier interface {
 	UpdateContact(ctx context.Context, arg UpdateContactParams) (Contact, error)
 	UpdateDeal(ctx context.Context, arg UpdateDealParams) (Deal, error)
 	UpdateDealStage(ctx context.Context, arg UpdateDealStageParams) (Deal, error)
+	UpdateEmailAccount(ctx context.Context, arg UpdateEmailAccountParams) (EmailAccount, error)
 	UpdateEmailAccountLastSynced(ctx context.Context, arg UpdateEmailAccountLastSyncedParams) error
+	UpdateEmailAccountSyncState(ctx context.Context, arg UpdateEmailAccountSyncStateParams) error
+	UpdateEmailMessageTags(ctx context.Context, arg UpdateEmailMessageTagsParams) (EmailMessage, error)
 	UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, error)
 	UpdateTodo(ctx context.Context, arg UpdateTodoParams) (Todo, error)
 	UpdateTodoStatus(ctx context.Context, arg UpdateTodoStatusParams) (Todo, error)
