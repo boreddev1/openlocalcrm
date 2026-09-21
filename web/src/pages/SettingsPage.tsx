@@ -57,7 +57,9 @@ export const SettingsPage: React.FC = () => {
   const [users, setUsers] = useState<TeamUser[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
-  const [inviteRole, setInviteRole] = useState<'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE'>('BENUTZER');
+  const [inviteRole, setInviteRole] = useState<'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE'>(
+    'BENUTZER',
+  );
   const [userMsg, setUserMsg] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null,
   );
@@ -353,7 +355,9 @@ export const SettingsPage: React.FC = () => {
       a.download = `openlocalcrm-settings-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      setSettingsStatus('Systemeinstellungen erfolgreich als openlocalcrm-settings.json exportiert.');
+      setSettingsStatus(
+        'Systemeinstellungen erfolgreich als openlocalcrm-settings.json exportiert.',
+      );
     } catch (err: any) {
       alert(`Export der Einstellungen fehlgeschlagen: ${err.message || err}`);
     } finally {
@@ -372,7 +376,9 @@ export const SettingsPage: React.FC = () => {
         throw new Error('Ungültiges Einstellungsformat: Root muss ein JSON-Objekt sein.');
       }
       if (!parsed.ai && !parsed.admin && !parsed.system && !parsed.backup) {
-        throw new Error('Ungültiges Einstellungsformat. Mindestens ein Konfigurationsabschnitt (ai, admin, system, backup) erforderlich.');
+        throw new Error(
+          'Ungültiges Einstellungsformat. Mindestens ein Konfigurationsabschnitt (ai, admin, system, backup) erforderlich.',
+        );
       }
       if (parsed.ai && (typeof parsed.ai !== 'object' || Array.isArray(parsed.ai))) {
         throw new Error('Ungültiges Format für "ai": Objekt erwartet.');
@@ -401,8 +407,12 @@ export const SettingsPage: React.FC = () => {
         body: JSON.stringify(parsed),
       });
 
-      setSettingsStatus(res.message || 'Einstellungen erfolgreich importiert! Bei Rebuild werden diese übernommen.');
-      alert('Einstellungen erfolgreich übernommen! Wenn Sie den Container neu bauen oder den Launcher nutzen, bleiben diese Einstellungen aktiv.');
+      setSettingsStatus(
+        res.message || 'Einstellungen erfolgreich importiert! Bei Rebuild werden diese übernommen.',
+      );
+      alert(
+        'Einstellungen erfolgreich übernommen! Wenn Sie den Container neu bauen oder den Launcher nutzen, bleiben diese Einstellungen aktiv.',
+      );
     } catch (err: any) {
       alert(`Fehler beim Importieren der Einstellungen: ${err.message || err}`);
     } finally {
@@ -723,7 +733,9 @@ export const SettingsPage: React.FC = () => {
                   <label className="block text-xs font-semibold text-slate-300">
                     Connector API Secret Bearer-Token (X-Connector-Token)
                   </label>
-                  <span className="text-[10px] text-slate-500">Konfigurierbar via CONNECTOR_API_TOKEN</span>
+                  <span className="text-[10px] text-slate-500">
+                    Konfigurierbar via CONNECTOR_API_TOKEN
+                  </span>
                 </div>
                 <div className="flex gap-2">
                   <input
@@ -1117,7 +1129,11 @@ export const SettingsPage: React.FC = () => {
                 </label>
                 <select
                   value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as 'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE')}
+                  onChange={(e) =>
+                    setInviteRole(
+                      e.target.value as 'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE',
+                    )
+                  }
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                 >
                   <option value="BENUTZER">Benutzer (Standard)</option>
@@ -1311,10 +1327,13 @@ export const SettingsPage: React.FC = () => {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                    <Sliders className="w-4 h-4 text-amber-400" /> Schnelleinstellungen Export & Import (ohne DB-Dump)
+                    <Sliders className="w-4 h-4 text-amber-400" /> Schnelleinstellungen Export &
+                    Import (ohne DB-Dump)
                   </h4>
                   <p className="text-xs text-slate-400 mt-1">
-                    Sichern Sie AI-Provider-Konfiguration, API-Keys, Web-Port und Admin-Benutzer separat, um Instanzen bei Rebuilds oder Neuinstallationen blitzschnell ohne alte Datenbankleichen wiederherzustellen.
+                    Sichern Sie AI-Provider-Konfiguration, API-Keys, Web-Port und Admin-Benutzer
+                    separat, um Instanzen bei Rebuilds oder Neuinstallationen blitzschnell ohne alte
+                    Datenbankleichen wiederherzustellen.
                   </p>
                 </div>
               </div>
@@ -1332,7 +1351,9 @@ export const SettingsPage: React.FC = () => {
                     <Download className="w-4 h-4 text-amber-400" /> Konfiguration exportieren
                   </div>
                   <p className="text-xs text-slate-400">
-                    Lädt eine portable <code className="text-amber-300">openlocalcrm-settings.json</code> mit Ihren aktuellen KI-Modellen, Endpoints und System-Flags herunter.
+                    Lädt eine portable{' '}
+                    <code className="text-amber-300">openlocalcrm-settings.json</code> mit Ihren
+                    aktuellen KI-Modellen, Endpoints und System-Flags herunter.
                   </p>
                   <button
                     onClick={handleExportSettings}
@@ -1349,7 +1370,8 @@ export const SettingsPage: React.FC = () => {
                     <Upload className="w-4 h-4 text-emerald-400" /> Konfiguration importieren
                   </div>
                   <p className="text-xs text-slate-400">
-                    Stellt KI-, Admin- und Port-Parameter aus einer vorhandenen <code className="text-emerald-300">openlocalcrm-settings.json</code> wieder her.
+                    Stellt KI-, Admin- und Port-Parameter aus einer vorhandenen{' '}
+                    <code className="text-emerald-300">openlocalcrm-settings.json</code> wieder her.
                   </p>
                   <label className="w-full py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-xs font-bold rounded-lg flex items-center justify-center gap-2 cursor-pointer transition-colors">
                     <Upload className="w-3.5 h-3.5" />
