@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { apiFetch } from '../api/client';
 import {
   Webhook,
@@ -56,7 +57,9 @@ export const SettingsPage: React.FC = () => {
   const [users, setUsers] = useState<TeamUser[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
-  const [inviteRole, setInviteRole] = useState<'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE'>('BENUTZER');
+  const [inviteRole, setInviteRole] = useState<'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE'>(
+    'BENUTZER',
+  );
   const [userMsg, setUserMsg] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null,
   );
@@ -184,6 +187,7 @@ export const SettingsPage: React.FC = () => {
   // --- 2FA TOTP State (§2.2) ---
   const [totpEnabled, setTotpEnabled] = useState(false);
   const [totpSecret, setTotpSecret] = useState('');
+  const [totpUrl, setTotpUrl] = useState('');
   const [totpCodeInput, setTotpCodeInput] = useState('');
   const [totpStatus, setTotpStatus] = useState<{
     type: 'success' | 'error';
@@ -196,6 +200,7 @@ export const SettingsPage: React.FC = () => {
         method: 'POST',
       });
       setTotpSecret(res.secret);
+      setTotpUrl(res.url);
       setTotpEnabled(false);
       setTotpCodeInput('');
       setTotpStatus({
@@ -350,7 +355,9 @@ export const SettingsPage: React.FC = () => {
       a.download = `openlocalcrm-settings-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      setSettingsStatus('Systemeinstellungen erfolgreich als openlocalcrm-settings.json exportiert.');
+      setSettingsStatus(
+        'Systemeinstellungen erfolgreich als openlocalcrm-settings.json exportiert.',
+      );
     } catch (err: any) {
       alert(`Export der Einstellungen fehlgeschlagen: ${err.message || err}`);
     } finally {
@@ -365,8 +372,31 @@ export const SettingsPage: React.FC = () => {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      if (!parsed.ai && !parsed.admin && !parsed.system) {
-        throw new Error('Ungültiges Einstellungsformat. Erwartet openlocalcrm-settings.json.');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Ungültiges Einstellungsformat: Root muss ein JSON-Objekt sein.');
+      }
+      if (!parsed.ai && !parsed.admin && !parsed.system && !parsed.backup) {
+        throw new Error(
+          'Ungültiges Einstellungsformat. Mindestens ein Konfigurationsabschnitt (ai, admin, system, backup) erforderlich.',
+        );
+      }
+      if (parsed.ai && (typeof parsed.ai !== 'object' || Array.isArray(parsed.ai))) {
+        throw new Error('Ungültiges Format für "ai": Objekt erwartet.');
+      }
+      if (parsed.ai?.provider && typeof parsed.ai.provider !== 'string') {
+        throw new Error('Ungültiges Format für "ai.provider": String erwartet.');
+      }
+      if (parsed.ai?.model && typeof parsed.ai.model !== 'string') {
+        throw new Error('Ungültiges Format für "ai.model": String erwartet.');
+      }
+      if (parsed.admin && (typeof parsed.admin !== 'object' || Array.isArray(parsed.admin))) {
+        throw new Error('Ungültiges Format für "admin": Objekt erwartet.');
+      }
+      if (parsed.admin?.email && typeof parsed.admin.email !== 'string') {
+        throw new Error('Ungültiges Format für "admin.email": String erwartet.');
+      }
+      if (parsed.system && (typeof parsed.system !== 'object' || Array.isArray(parsed.system))) {
+        throw new Error('Ungültiges Format für "system": Objekt erwartet.');
       }
 
       setIsImportingSettings(true);
@@ -377,8 +407,12 @@ export const SettingsPage: React.FC = () => {
         body: JSON.stringify(parsed),
       });
 
-      setSettingsStatus(res.message || 'Einstellungen erfolgreich importiert! Bei Rebuild werden diese übernommen.');
-      alert('Einstellungen erfolgreich übernommen! Wenn Sie den Container neu bauen oder den Launcher nutzen, bleiben diese Einstellungen aktiv.');
+      setSettingsStatus(
+        res.message || 'Einstellungen erfolgreich importiert! Bei Rebuild werden diese übernommen.',
+      );
+      alert(
+        'Einstellungen erfolgreich übernommen! Wenn Sie den Container neu bauen oder den Launcher nutzen, bleiben diese Einstellungen aktiv.',
+      );
     } catch (err: any) {
       alert(`Fehler beim Importieren der Einstellungen: ${err.message || err}`);
     } finally {
@@ -462,7 +496,9 @@ export const SettingsPage: React.FC = () => {
     }, 1000);
   };
 
-  const token = 'openlocalcrm-secret-connector-token';
+  const [connectorToken, setConnectorToken] = useState(() => {
+    return localStorage.getItem('connector_api_token') || 'demo-connector-token';
+  });
   const webhookUrl = `${window.location.origin}/api/v1/connectors/lead-intake`;
 
   const copyToClipboard = (text: string) => {
@@ -471,11 +507,38 @@ export const SettingsPage: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleTestWebhook = () => {
-    setTestWebhookStatus(
-      'Test-Lead erfolgreich über Webhook eingespeist! Neuer Kontakt "Sabine Mustermann" angelegt.',
-    );
-    setTimeout(() => setTestWebhookStatus(null), 5000);
+  const handleTestWebhook = async () => {
+    try {
+      setTestWebhookStatus('Sende Test-Lead an Webhook...');
+      const payload = {
+        name: 'Sabine Mustermann (Test-Lead)',
+        email: `sabine.mustermann+${Date.now()}@example.de`,
+        phone: '+49 89 12345678',
+        company: 'Mustermann Solar GmbH',
+        source: 'Website-Kontaktformular',
+        notes: 'Interesse an PV-Anlage und Wärmepumpe.',
+        deal_value: 18500,
+      };
+      const res = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Connector-Token': connectorToken,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setTestWebhookStatus(
+        `Test-Lead erfolgreich über Webhook eingespeist! Kontakt-ID: ${data.contact_id || 'angelegt'}.`,
+      );
+    } catch (err: any) {
+      setTestWebhookStatus(`Fehler beim Senden des Test-Leads: ${err.message}`);
+    }
+    setTimeout(() => setTestWebhookStatus(null), 7000);
   };
 
   return (
@@ -666,15 +729,33 @@ export const SettingsPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Connector API Secret Bearer-Token
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Connector API Secret Bearer-Token (X-Connector-Token)
+                  </label>
+                  <span className="text-[10px] text-slate-500">
+                    Konfigurierbar via CONNECTOR_API_TOKEN
+                  </span>
+                </div>
                 <div className="flex gap-2">
                   <input
-                    readOnly
-                    value={token}
-                    className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-300"
+                    value={connectorToken}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setConnectorToken(val);
+                      localStorage.setItem('connector_api_token', val);
+                    }}
+                    placeholder="Connector API Token (z.B. demo-connector-token)"
+                    className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-300 focus:outline-none focus:border-emerald-500"
                   />
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(connectorToken)}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Kopieren
+                  </button>
                 </div>
               </div>
             </div>
@@ -948,15 +1029,29 @@ export const SettingsPage: React.FC = () => {
                   YubiKey.
                 </p>
               </div>
-              <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center gap-3">
-                <QrCode className="w-16 h-16 text-slate-200" />
+              <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center gap-4">
+                {totpUrl ? (
+                  <div className="p-2 bg-white rounded-lg flex items-center justify-center shadow-md">
+                    <QRCodeSVG value={totpUrl} size={110} level="M" />
+                  </div>
+                ) : (
+                  <div className="w-[110px] h-[110px] bg-slate-900 border border-dashed border-slate-800 rounded-lg flex items-center justify-center">
+                    <QrCode className="w-12 h-12 text-slate-500" />
+                  </div>
+                )}
                 <div className="text-xs text-slate-400">
                   <div className="font-semibold text-slate-200">OpenLocalCRM: Admin</div>
                   <div>Algorithmus: SHA-1 (6 Digits)</div>
                   <div>Periode: 30s</div>
-                  <div className="font-mono text-[10px] text-emerald-400 mt-1">
-                    Key: {totpSecret.slice(0, 8)}...
-                  </div>
+                  {totpSecret ? (
+                    <div className="font-mono text-[10px] text-emerald-400 mt-1">
+                      Key: {totpSecret.slice(0, 8)}...
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-slate-500 mt-1">
+                      Klicken Sie auf &quot;Neu generieren&quot; für QR-Code
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1034,7 +1129,11 @@ export const SettingsPage: React.FC = () => {
                 </label>
                 <select
                   value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as 'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE')}
+                  onChange={(e) =>
+                    setInviteRole(
+                      e.target.value as 'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE',
+                    )
+                  }
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                 >
                   <option value="BENUTZER">Benutzer (Standard)</option>
@@ -1228,10 +1327,13 @@ export const SettingsPage: React.FC = () => {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                    <Sliders className="w-4 h-4 text-amber-400" /> Schnelleinstellungen Export & Import (ohne DB-Dump)
+                    <Sliders className="w-4 h-4 text-amber-400" /> Schnelleinstellungen Export &
+                    Import (ohne DB-Dump)
                   </h4>
                   <p className="text-xs text-slate-400 mt-1">
-                    Sichern Sie AI-Provider-Konfiguration, API-Keys, Web-Port und Admin-Benutzer separat, um Instanzen bei Rebuilds oder Neuinstallationen blitzschnell ohne alte Datenbankleichen wiederherzustellen.
+                    Sichern Sie AI-Provider-Konfiguration, API-Keys, Web-Port und Admin-Benutzer
+                    separat, um Instanzen bei Rebuilds oder Neuinstallationen blitzschnell ohne alte
+                    Datenbankleichen wiederherzustellen.
                   </p>
                 </div>
               </div>
@@ -1249,7 +1351,9 @@ export const SettingsPage: React.FC = () => {
                     <Download className="w-4 h-4 text-amber-400" /> Konfiguration exportieren
                   </div>
                   <p className="text-xs text-slate-400">
-                    Lädt eine portable <code className="text-amber-300">openlocalcrm-settings.json</code> mit Ihren aktuellen KI-Modellen, Endpoints und System-Flags herunter.
+                    Lädt eine portable{' '}
+                    <code className="text-amber-300">openlocalcrm-settings.json</code> mit Ihren
+                    aktuellen KI-Modellen, Endpoints und System-Flags herunter.
                   </p>
                   <button
                     onClick={handleExportSettings}
@@ -1266,7 +1370,8 @@ export const SettingsPage: React.FC = () => {
                     <Upload className="w-4 h-4 text-emerald-400" /> Konfiguration importieren
                   </div>
                   <p className="text-xs text-slate-400">
-                    Stellt KI-, Admin- und Port-Parameter aus einer vorhandenen <code className="text-emerald-300">openlocalcrm-settings.json</code> wieder her.
+                    Stellt KI-, Admin- und Port-Parameter aus einer vorhandenen{' '}
+                    <code className="text-emerald-300">openlocalcrm-settings.json</code> wieder her.
                   </p>
                   <label className="w-full py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-xs font-bold rounded-lg flex items-center justify-center gap-2 cursor-pointer transition-colors">
                     <Upload className="w-3.5 h-3.5" />
@@ -1395,7 +1500,7 @@ export const SettingsPage: React.FC = () => {
               <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
                 <Server className="w-4 h-4 text-emerald-400" /> Server-Architektur
               </div>
-              <div className="text-sm font-bold text-slate-100">Go 1.23 + Caddy + Chi</div>
+              <div className="text-sm font-bold text-slate-100">Go 1.26 + Caddy + Chi</div>
               <div className="text-xs text-slate-500">
                 Single-Tenant Standalone Binary (&lt; 420 MB RAM Budget)
               </div>

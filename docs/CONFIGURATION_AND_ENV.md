@@ -19,8 +19,11 @@ Dieses Handbuch beschreibt alle Konfigurationsparameter, Umgebungsvariablen (`.e
 | `DEMO_MODE` | `false` | Nein | Bei `true` wird der In-Memory RAM Querier gestartet; keine externe DB nötig |
 | `INITIAL_ADMIN_EMAIL` | `admin@openlocalcrm.local` | Nein | E-Mail des initialen Administrators |
 | `INITIAL_ADMIN_PASSWORD` | — | Nein | Initiales Passwort für den Admin beim Erststart (wird sonst sicher generiert) |
+| `INITIAL_ADMIN_FIRST_NAME` | `Admin` | Nein | Vorname des initialen Administrators |
+| `INITIAL_ADMIN_LAST_NAME` | `User` | Nein | Nachname des initialen Administrators |
 | `STORAGE_PATH` | `/data/storage` | Nein | Lokales Verzeichnis für Dateiuploads & E-Mail-Anhänge (Kompatibilitäts-Alias: `STORAGE_LOCAL_DIR`) |
 | `JWT_SECRET_KEY_PATH` | `/app/keys/ed25519.key` | Ja (Prod) | Pfad zum persistenten Ed25519-Schlüssel (Kompatibilitäts-Alias: `JWT_PRIVATE_KEY_PATH`) |
+| `FORCE_SECURE_COOKIES` | `false` | Nein | Erzwingt `Secure=true` für Session-Cookies (z.B. hinter extern terminierenden SSL-Proxies) |
 | `CONNECTOR_API_TOKEN` | — | Ja (Prod) | Geheimer API-Schlüssel für Lead-Intake Webhooks (Bearer Auth) |
 | `AI_PROVIDER` | `ollama` | Nein | KI-Inferenz-Provider (`ollama`, `openai`, `gemini`) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Nein | URL der lokalen Ollama-Instanz |

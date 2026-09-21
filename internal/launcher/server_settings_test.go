@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestServerSettingsEndpoints(t *testing.T) {
@@ -204,5 +205,6 @@ OPENLOCALCRM_VERSION=v1.0.2
 		if resp["success"] != true {
 			t.Errorf("expected success true, got %v", resp["success"])
 		}
+		time.Sleep(200 * time.Millisecond)
 	})
 }

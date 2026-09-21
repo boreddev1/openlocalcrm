@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
@@ -43,6 +44,7 @@ type Config struct {
 	AIProvider string
 	AIModel    string
 	AIBaseURL  string
+	Context    context.Context
 }
 
 func NewRouter(cfg Config) http.Handler {
@@ -88,13 +90,24 @@ func NewRouter(cfg Config) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// Public API health endpoint with demo_mode and AI config indicators
+	// Defense-in-depth app layer security headers
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	// Public API health endpoint with demo_mode, go_version and AI config indicators
 	r.Get("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":      "healthy",
 			"system":      "openlocalcrm-v3",
 			"version":     "3.0.0",
+			"go_version":  "1.26.0",
 			"demo_mode":   cfg.DemoMode,
 			"ai_provider": aiProvider,
 			"ai_model":    aiModel,
@@ -149,6 +162,8 @@ func NewRouter(cfg Config) http.Handler {
 	var userH *handlers.UserHandler
 	var backupH *handlers.BackupHandler
 	var settingsH *handlers.SettingsHandler
+	var authLimiter *auth.RateLimiter
+	var aiLimiter *auth.RateLimiter
 
 	if cfg.DB != nil {
 		auditSvc := audit.NewService(cfg.DB)
@@ -182,7 +197,19 @@ func NewRouter(cfg Config) http.Handler {
 		}
 		connectorEngine := connectors.NewEngine(contactSvc, dealSvc, connectorToken)
 
-		authH = handlers.NewAuthHandler(cfg.DB, cfg.PrivKey, cfg.PubKey)
+		authLimiter = auth.NewRateLimiter(20, time.Minute, 5*time.Minute)
+		aiLimiter = auth.NewRateLimiter(30, time.Minute, 2*time.Minute)
+
+		if cfg.Context != nil {
+			go func() {
+				<-cfg.Context.Done()
+				authLimiter.Stop()
+				aiLimiter.Stop()
+			}()
+		}
+
+		authSvc := auth.NewAuthService(cfg.DB, cfg.PrivKey, cfg.PubKey, authLimiter)
+		authH = handlers.NewAuthHandlerWithService(authSvc)
 		contactH = handlers.NewContactHandler(contactSvc)
 		companyH = handlers.NewCompanyHandler(companySvc)
 		dealH = handlers.NewDealHandler(dealSvc)
@@ -198,9 +225,24 @@ func NewRouter(cfg Config) http.Handler {
 		settingsH = handlers.NewSettingsHandler()
 	}
 
-	// Rate limiters for sensitive operations (Findings #8, #34)
-	authLimiter := auth.NewRateLimiter(20, time.Minute, 5*time.Minute)
-	aiLimiter := auth.NewRateLimiter(30, time.Minute, 2*time.Minute)
+	if authLimiter == nil {
+		authLimiter = auth.NewRateLimiter(20, time.Minute, 5*time.Minute)
+		if cfg.Context != nil {
+			go func() {
+				<-cfg.Context.Done()
+				authLimiter.Stop()
+			}()
+		}
+	}
+	if aiLimiter == nil {
+		aiLimiter = auth.NewRateLimiter(30, time.Minute, 2*time.Minute)
+		if cfg.Context != nil {
+			go func() {
+				<-cfg.Context.Done()
+				aiLimiter.Stop()
+			}()
+		}
+	}
 
 	// API v1 group
 	r.Route("/api/v1", func(api chi.Router) {

@@ -1,13 +1,46 @@
+# Version control & tooling
 .git
 .github
 .gemini
 .superpowers
+docs/superpowers/
+.vscode
+.idea
+.DS_Store
+
+# Dependencies & build outputs
 node_modules
 web/node_modules
 web/dist
 bin
 dist-bin
+tmp
+coverage
+coverage.out
 test-results
 playwright-report
+playwright/.auth/
+web/playwright/
 *.tmp
 *.log
+*.exe
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Data, backups & database dumps
+data/
+storage/
+backups/
+user-errors/
+*.db
+*.sqlite
+*.dump
+*.sql
+!internal/db/migrations/*.sql
+!internal/db/queries/*.sql
+!migrations/*.sql

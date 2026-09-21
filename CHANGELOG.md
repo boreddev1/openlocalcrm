@@ -5,6 +5,39 @@ Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/) 
 
 ---
 
+## [1.0.5] - 2026-09-21
+
+### Behoben & Gehärtet (Repo Review Round 2 Remediation)
+- **Sicherheit & Auth:**
+  - `localStorage` JWT-Bereinigung: Tokens werden nicht mehr im Web Storage gespeichert; Authentifizierung und CSRF-Handling erfolgen ausschließlich zustandslos über HttpOnly-Cookies (`credentials: 'include'`) und `/api/v1/me`.
+  - `.dockerignore` strikt gehärtet gegen Secret-Leaks (`.env`, `.env.*`, `backups/`, `data/`, SQL-Dumps ausgeschlossen).
+  - Dynamisches Cookie-Flag `Secure` mit Unterstützung für `X-Forwarded-Proto: https` und `FORCE_SECURE_COOKIES`.
+  - Cookie-Gültigkeitsdauer auf `AccessTokenDuration` (30 Minuten) synchron zum Ed25519-Token verkürzt.
+  - `RateLimitMiddleware` gegen IP-Spoofing abgesichert: Header wie `X-Forwarded-For` und `X-Real-IP` werden nur bei Verbindungen über vertrauenswürdige Loopback-/Private-Netzwerke akzeptiert.
+  - Standard-Sicherheits-Header auf App-Ebene verankert (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`).
+  - Direkte Portexposition `8080:8080` in `docker-compose.demo.yml` entfernt; Routing erfolgt isoliert über Caddy.
+- **KI-Gateway & Observability:**
+  - Kontrollierter Failsafe-Modus bei unkonfigurierten KI-Providern (`anthropic`, `gemini`); strukturierte Transparenzlogs (`[AI_GATEWAY_NOTICE]`) bei Simulations-Fallbacks.
+  - `ParseBill` liefert Transparenzflag `simulated: true` aus.
+  - Strikte UUID-Validierung bei Wissensdatenbank-Löschungen (`DeleteKB`).
+  - Fehlerprüfung bei automatischer Firmenerstellung in Chat-Absichten.
+  - Reale KI-Firmenrecherche via `ResearchCompany` statt Dummy-Payload.
+- **Automatisierungs-Engine:**
+  - Reale Ausführung von Workflow-Aktionen: `CREATE_TASK` erstellt persistente Aufgaben, `NOTIFY_USER` generiert In-App Benachrichtigungen, `SET_TAG` erfasst Audit-Trail.
+- **API, Paginierung & Backup-Integrität:**
+  - Paginierungs-Unterstützung (`limit` und `offset`) für `/api/v1/appointments` und phasengefilterte Deals `/api/v1/deals?stage=...`.
+  - Vollständige Fehlererkennung bei Backup-Restore-Drills (`/api/v1/backup/drill` meldet Tabellenfehler strikt mit HTTP 500).
+  - Streaming-Export `/api/v1/backup/export` in 1.000er Batches ohne Speicherüberlauf oder stille Datenabschneidung.
+  - Validierung von `deal_value` auf gültige Fließkommazahlen im Service und Webhook-Connector.
+- **Frontend & Einstellungen:**
+  - Interaktive QR-Code-Darstellung für 2FA-TOTP via `qrcode.react` (`QRCodeSVG`).
+  - Echter REST-Payload-Versand für Webhook Lead-Intake Tests im Konnektor-Tab.
+  - Konfigurierbarer API-Bearer-Token für externe Lead-Quellen.
+  - Schema- und Typprüfung beim Einstellungs-Import (`handleImportSettings`).
+  - Korrektur der Versionsanzeige auf Go 1.26 in den System-Informationen.
+
+---
+
 ## [1.0.4] - 2026-09-21
 
 ### Behoben & Gehärtet (Security Audit & Repo Review)

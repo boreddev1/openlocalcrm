@@ -41,18 +41,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // Check active session on mount if token is present
-    const token = localStorage.getItem('auth_token');
-    if (!token) {
-      setUser(null);
-      setLoading(false);
-      return;
-    }
-
+    // Check active session on mount via HttpOnly cookie
     apiFetch<UserSession>('/api/v1/me')
       .then((session) => setUser(session))
       .catch(() => {
-        localStorage.removeItem('auth_token');
         setUser(null);
       })
       .finally(() => setLoading(false));
@@ -81,8 +73,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     }
 
-    if (res && res.token && res.user) {
-      localStorage.setItem('auth_token', res.token);
+    if (res && res.user) {
       setUser(res.user);
       return { totpRequired: false };
     }
@@ -92,7 +83,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     apiFetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => {});
-    localStorage.removeItem('auth_token');
     setUser(null);
   };
 

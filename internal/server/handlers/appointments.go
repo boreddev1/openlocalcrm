@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -22,7 +23,12 @@ func NewAppointmentHandler(svc *appointment.Service) *AppointmentHandler {
 }
 
 func (h *AppointmentHandler) List(w http.ResponseWriter, r *http.Request) {
-	apps, err := h.svc.List(r.Context())
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	limit, _ := strconv.Atoi(limitStr)
+	offset, _ := strconv.Atoi(offsetStr)
+
+	apps, err := h.svc.List(r.Context(), limit, offset)
 	if err != nil {
 		http.Error(w, `{"error":"failed to list appointments"}`, http.StatusInternalServerError)
 		return

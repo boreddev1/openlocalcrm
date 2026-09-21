@@ -414,12 +414,19 @@ func (s *ChatService) handleActionableIntent(ctx context.Context, msg string) (s
 			}
 			customJSON, _ := json.Marshal(customData)
 
-			_, _ = s.querier.CreateCompany(ctx, db.CreateCompanyParams{
+			_, err := s.querier.CreateCompany(ctx, db.CreateCompanyParams{
 				Name:           name,
 				Domain:         pgtype.Text{String: domain, Valid: true},
 				AddressCountry: pgtype.Text{String: "DE", Valid: true},
 				CustomFields:   customJSON,
 			})
+			if err != nil {
+				return fmt.Sprintf("Fehler beim Anlegen von **%s** im CRM-System: %v", name, err), &ActionCard{
+					Title: fmt.Sprintf("Unternehmen manuell anlegen (%s)", name),
+					Badge: "Fehler",
+					Route: "/companies",
+				}
+			}
 		}
 
 		reply := fmt.Sprintf("Ich habe **%s** erfolgreich als neuen Kunden im CRM-System angelegt!", name)
