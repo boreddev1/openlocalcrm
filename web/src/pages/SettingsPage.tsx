@@ -25,6 +25,7 @@ import {
   AlertCircle,
   Users,
   UserPlus,
+  Upload,
 } from 'lucide-react';
 
 interface TeamUser {
@@ -329,6 +330,60 @@ export const SettingsPage: React.FC = () => {
       URL.revokeObjectURL(url);
     } catch (err: any) {
       alert(`Export fehlgeschlagen: ${err.message}`);
+    }
+  };
+
+  // --- Portable Settings State (§v1.0.2) ---
+  const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
+  const [isExportingSettings, setIsExportingSettings] = useState(false);
+  const [isImportingSettings, setIsImportingSettings] = useState(false);
+
+  const handleExportSettings = async () => {
+    setIsExportingSettings(true);
+    setSettingsStatus(null);
+    try {
+      const data = await apiFetch<any>('/api/v1/settings/export');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `openlocalcrm-settings-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setSettingsStatus('Systemeinstellungen erfolgreich als openlocalcrm-settings.json exportiert.');
+    } catch (err: any) {
+      alert(`Export der Einstellungen fehlgeschlagen: ${err.message || err}`);
+    } finally {
+      setIsExportingSettings(false);
+    }
+  };
+
+  const handleImportSettings = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed.ai && !parsed.admin && !parsed.system) {
+        throw new Error('Ungültiges Einstellungsformat. Erwartet openlocalcrm-settings.json.');
+      }
+
+      setIsImportingSettings(true);
+      setSettingsStatus(null);
+
+      const res = await apiFetch<any>('/api/v1/settings/import', {
+        method: 'POST',
+        body: JSON.stringify(parsed),
+      });
+
+      setSettingsStatus(res.message || 'Einstellungen erfolgreich importiert! Bei Rebuild werden diese übernommen.');
+      alert('Einstellungen erfolgreich übernommen! Wenn Sie den Container neu bauen oder den Launcher nutzen, bleiben diese Einstellungen aktiv.');
+    } catch (err: any) {
+      alert(`Fehler beim Importieren der Einstellungen: ${err.message || err}`);
+    } finally {
+      setIsImportingSettings(false);
+      e.target.value = '';
     }
   };
 
@@ -1163,6 +1218,66 @@ export const SettingsPage: React.FC = () => {
                   <ShieldCheck className="w-3.5 h-3.5" />{' '}
                   {isDrilling ? 'Prüfung läuft...' : 'Restore-Drill ausführen'}
                 </button>
+              </div>
+            </div>
+
+            {/* Portable Settings (Export/Import without DB dump) (§v1.0.2) */}
+            <div className="border-t border-slate-800 pt-6">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-amber-400" /> Schnelleinstellungen Export & Import (ohne DB-Dump)
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Sichern Sie AI-Provider-Konfiguration, API-Keys, Web-Port und Admin-Benutzer separat, um Instanzen bei Rebuilds oder Neuinstallationen blitzschnell ohne alte Datenbankleichen wiederherzustellen.
+                  </p>
+                </div>
+              </div>
+
+              {settingsStatus && (
+                <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
+                  <Check className="w-4 h-4" />
+                  {settingsStatus}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
+                  <div className="text-xs font-bold text-slate-200 flex items-center gap-2">
+                    <Download className="w-4 h-4 text-amber-400" /> Konfiguration exportieren
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Lädt eine portable <code className="text-amber-300">openlocalcrm-settings.json</code> mit Ihren aktuellen KI-Modellen, Endpoints und System-Flags herunter.
+                  </p>
+                  <button
+                    onClick={handleExportSettings}
+                    disabled={isExportingSettings}
+                    className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    {isExportingSettings ? 'Exportiere...' : 'Einstellungen exportieren (.json)'}
+                  </button>
+                </div>
+
+                <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
+                  <div className="text-xs font-bold text-slate-200 flex items-center gap-2">
+                    <Upload className="w-4 h-4 text-emerald-400" /> Konfiguration importieren
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Stellt KI-, Admin- und Port-Parameter aus einer vorhandenen <code className="text-emerald-300">openlocalcrm-settings.json</code> wieder her.
+                  </p>
+                  <label className="w-full py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-xs font-bold rounded-lg flex items-center justify-center gap-2 cursor-pointer transition-colors">
+                    <Upload className="w-3.5 h-3.5" />
+                    {isImportingSettings ? 'Importiere...' : 'Einstellungen importieren (.json)'}
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={handleImportSettings}
+                      disabled={isImportingSettings}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
               </div>
             </div>
           </div>

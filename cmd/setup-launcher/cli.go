@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -80,6 +81,10 @@ func ExecuteCommand(args []string, baseDir string, out io.Writer) (bool, int) {
 		return true, handleReset(args[1:], baseDir, out)
 	case "admin":
 		return true, handleAdmin(args[1:], baseDir, out)
+	case "export-settings":
+		return true, handleExportSettings(args[1:], baseDir, out)
+	case "import-settings":
+		return true, handleImportSettings(args[1:], baseDir, out)
 	default:
 		fmt.Fprintf(out, "Unbekannter Befehl: %s\nNutzen Sie 'openlocalcrm --help' für verfügbare Befehle.\n", cmd)
 		return true, 2
@@ -113,13 +118,16 @@ BEFEHLE:
   update                            CRM-Dateien & Container auf neueste Version aktualisieren
   versions                          Verfügbare Release-Tags und Versionen anzeigen
   backup [create|list|restore FILE] Datenbank-Sicherungen erstellen, anzeigen oder einspielen
+  export-settings [DATEI]           Einstellungen (KI, Admin, Port) als JSON exportieren
+  import-settings DATEI             Einstellungen aus JSON importieren (ohne DB-Restore)
   reset [-f, --force]               Vollständiger Factory Reset (Datenbank, Volumes, .env löschen)
   admin password EMAIL NEUES_PW     Administrator-Passwort in PostgreSQL zurücksetzen
   --help, -h                        Diese Hilfe anzeigen
   --version, -v                     Version anzeigen
 
 INSTALLATIONS-OPTIONEN:
-  --version, --tag TAG              Zu installierende Version / Release-Tag (Standard: v1.0.1)
+  --settings-file DATEI             Einstellungen vorab aus settings.json importieren
+  --version, --tag TAG              Zu installierende Version / Release-Tag (Standard: v1.0.2)
   --list-versions                   Alle verfügbaren Release-Tags von GitHub anzeigen
   --port PORT                       Web-Port festlegen (Standard: 80, Ausweich: 8080)
   --admin-email EMAIL               E-Mail-Adresse für das Admin-Konto (Standard: admin@openlocalcrm.local)
@@ -214,12 +222,15 @@ func handleInstall(args []string, baseDir string, out io.Writer) int {
 	}
 
 	nonInteractive := false
+	dryRun := false
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == "-y" || arg == "--yes" || arg == "--non-interactive":
 			nonInteractive = true
+		case arg == "--dry-run" || arg == "--config-only":
+			dryRun = true
 		case arg == "--demo":
 			cfg.IsDemoMode = true
 		case arg == "--port" && i+1 < len(args):
@@ -261,6 +272,52 @@ func handleInstall(args []string, baseDir string, out io.Writer) int {
 			cfg.AIAPIKey = args[i]
 		case strings.HasPrefix(arg, "--ai-key="):
 			cfg.AIAPIKey = strings.TrimPrefix(arg, "--ai-key=")
+		case (arg == "--settings-file" || arg == "--settings") && i+1 < len(args):
+			i++
+			if s, err := launcher.LoadSettingsFromFile(args[i]); err == nil {
+				cfg.AdminEmail = s.Admin.Email
+				if s.Admin.Password != "" {
+					cfg.AdminPassword = s.Admin.Password
+				}
+				if s.System.Port > 0 {
+					cfg.Port = s.System.Port
+				}
+				if s.AI.Provider != "" {
+					cfg.AIProvider = s.AI.Provider
+				}
+				if s.AI.BaseURL != "" {
+					cfg.AIBaseURL = s.AI.BaseURL
+				}
+				if s.AI.Model != "" {
+					cfg.AIModel = s.AI.Model
+				}
+				if s.AI.APIKey != "" {
+					cfg.AIAPIKey = s.AI.APIKey
+				}
+			}
+		case strings.HasPrefix(arg, "--settings-file="):
+			file := strings.TrimPrefix(arg, "--settings-file=")
+			if s, err := launcher.LoadSettingsFromFile(file); err == nil {
+				cfg.AdminEmail = s.Admin.Email
+				if s.Admin.Password != "" {
+					cfg.AdminPassword = s.Admin.Password
+				}
+				if s.System.Port > 0 {
+					cfg.Port = s.System.Port
+				}
+				if s.AI.Provider != "" {
+					cfg.AIProvider = s.AI.Provider
+				}
+				if s.AI.BaseURL != "" {
+					cfg.AIBaseURL = s.AI.BaseURL
+				}
+				if s.AI.Model != "" {
+					cfg.AIModel = s.AI.Model
+				}
+				if s.AI.APIKey != "" {
+					cfg.AIAPIKey = s.AI.APIKey
+				}
+			}
 		case arg == "--list-versions" || arg == "--versions":
 			return handleVersionsList(baseDir, out)
 		case (arg == "--version" || arg == "--tag" || arg == "--release") && i+1 < len(args):
@@ -276,7 +333,7 @@ func handleInstall(args []string, baseDir string, out io.Writer) int {
 	}
 
 	if cfg.Version == "" {
-		cfg.Version = "v1.0.0"
+		cfg.Version = "v1.0.2"
 	}
 
 	if cfg.AdminPassword == "" {
@@ -305,10 +362,12 @@ func handleInstall(args []string, baseDir string, out io.Writer) int {
 	fmt.Fprintf(out, "KI-Anbindung:    %s\n", cfg.AIProvider)
 	fmt.Fprintln(out, "------------------------------------------------------------------------------")
 
-	// Ensure project files exist for selected version if missing
-	updater := launcher.NewUpdater(baseDir)
-	if err := updater.EnsureProjectFilesForVersion(context.Background(), cfg.Version, false, nil); err != nil {
-		fmt.Fprintf(out, "⚠️  Hinweis zur Projektdateien-Bereitstellung: %v\n", err)
+	if !dryRun {
+		// Ensure project files exist for selected version if missing
+		updater := launcher.NewUpdater(baseDir)
+		if err := updater.EnsureProjectFilesForVersion(context.Background(), cfg.Version, false, nil); err != nil {
+			fmt.Fprintf(out, "⚠️  Hinweis zur Projektdateien-Bereitstellung: %v\n", err)
+		}
 	}
 
 	// Write docker-compose, caddyfile, .env
@@ -318,6 +377,11 @@ func handleInstall(args []string, baseDir string, out io.Writer) int {
 	if err := launcher.WriteConfigAndDirectories(baseDir, cfg); err != nil {
 		fmt.Fprintf(out, "❌ Fehler beim Schreiben der Konfiguration: %v\n", err)
 		return 1
+	}
+
+	if dryRun {
+		fmt.Fprintln(out, "ℹ️  Dry-Run: Konfigurationsdateien wurden erfolgreich vorbereitet.")
+		return 0
 	}
 
 	engine := launcher.NewEngine(baseDir)
@@ -616,5 +680,56 @@ func handleVersionsList(baseDir string, out io.Writer) int {
 	}
 	_ = w.Flush()
 	fmt.Fprintln(out)
+	return 0
+}
+
+func handleExportSettings(args []string, baseDir string, out io.Writer) int {
+	targetFile := filepath.Join(baseDir, "openlocalcrm-settings.json")
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		targetFile = args[0]
+	}
+
+	settings, err := launcher.ExportSettingsFromEnv(baseDir)
+	if err != nil {
+		fmt.Fprintf(out, "❌ Fehler beim Exportieren der Einstellungen: %v\n", err)
+		return 1
+	}
+
+	if err := launcher.SaveSettingsToFile(targetFile, settings); err != nil {
+		fmt.Fprintf(out, "❌ Fehler beim Speichern der Datei '%s': %v\n", targetFile, err)
+		return 1
+	}
+
+	fmt.Fprintf(out, "✅ Einstellungen erfolgreich nach '%s' exportiert.\n", targetFile)
+	fmt.Fprintf(out, "   • KI:    %s (%s @ %s)\n", settings.AI.Provider, settings.AI.Model, settings.AI.BaseURL)
+	fmt.Fprintf(out, "   • Admin: %s\n", settings.Admin.Email)
+	fmt.Fprintf(out, "   • Port:  %d\n", settings.System.Port)
+	return 0
+}
+
+func handleImportSettings(args []string, baseDir string, out io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(out, "❌ Fehler: Bitte Pfad zur Einstellungsdatei angeben.")
+		fmt.Fprintln(out, "   Beispiel: openlocalcrm import-settings openlocalcrm-settings.json")
+		return 1
+	}
+
+	settingsFile := args[0]
+	settings, err := launcher.LoadSettingsFromFile(settingsFile)
+	if err != nil {
+		fmt.Fprintf(out, "❌ Fehler beim Laden von '%s': %v\n", settingsFile, err)
+		return 1
+	}
+
+	if err := launcher.ImportSettingsToEnv(baseDir, settings, true); err != nil {
+		fmt.Fprintf(out, "❌ Fehler beim Importieren in .env: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(out, "✅ Einstellungen aus '%s' erfolgreich importiert:\n", settingsFile)
+	fmt.Fprintf(out, "   • KI:    %s (%s @ %s)\n", settings.AI.Provider, settings.AI.Model, settings.AI.BaseURL)
+	fmt.Fprintf(out, "   • Admin: %s\n", settings.Admin.Email)
+	fmt.Fprintf(out, "   • Port:  %d\n", settings.System.Port)
+	fmt.Fprintln(out, "   Tipp: Führen Sie 'openlocalcrm restart' aus, um die neuen Einstellungen zu aktivieren.")
 	return 0
 }

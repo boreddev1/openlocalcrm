@@ -106,6 +106,7 @@ func NewRouter(cfg Config) http.Handler {
 	var noteH *handlers.NoteHandler
 	var userH *handlers.UserHandler
 	var backupH *handlers.BackupHandler
+	var settingsH *handlers.SettingsHandler
 
 	if cfg.DB != nil {
 		auditSvc := audit.NewService(cfg.DB)
@@ -146,6 +147,7 @@ func NewRouter(cfg Config) http.Handler {
 		exportH = handlers.NewExportHandler(exportSvc)
 		userH = handlers.NewUserHandler(cfg.DB)
 		backupH = handlers.NewBackupHandler(cfg.DB)
+		settingsH = handlers.NewSettingsHandler()
 	}
 
 	// API v1 group
@@ -201,6 +203,15 @@ func NewRouter(cfg Config) http.Handler {
 					br.Use(auth.RequireRole("ADMIN"))
 					br.Post("/drill", backupH.Drill)
 					br.Get("/export", backupH.Export)
+				})
+			}
+
+			// Protected Settings Endpoints (Export & Import without DB dump)
+			if settingsH != nil {
+				protected.Route("/settings", func(sr chi.Router) {
+					sr.Use(auth.RequireRole("ADMIN"))
+					sr.Get("/export", settingsH.ExportSettings)
+					sr.Post("/import", settingsH.ImportSettings)
 				})
 			}
 
