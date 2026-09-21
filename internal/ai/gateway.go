@@ -74,6 +74,10 @@ func NewGateway(cfg GatewayConfig) *Gateway {
 	}
 }
 
+func (g *Gateway) GetConfig() GatewayConfig {
+	return g.cfg
+}
+
 // Generate sends a prompt to the configured LLM backend with automatic PII sanitization and prompt guards
 func (g *Gateway) Generate(ctx context.Context, prompt string, systemInstruction string) (string, error) {
 	// 1. Sanitize input prompt for PII (IBAN, Credit Cards, Secrets)
@@ -82,10 +86,70 @@ func (g *Gateway) Generate(ctx context.Context, prompt string, systemInstruction
 	switch g.cfg.DefaultProvider {
 	case ProviderOllama:
 		return g.callOllama(ctx, cleanPrompt, systemInstruction)
+	case ProviderOpenAI:
+		return g.callOpenAI(ctx, cleanPrompt, systemInstruction)
 	default:
-		// Fallback/Simulated high-quality model response for Gemma 12B schema verification
-		return g.simulateGemmaResponse(cleanPrompt, systemInstruction)
+		return g.callOllama(ctx, cleanPrompt, systemInstruction)
 	}
+}
+
+func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstruction string) (string, error) {
+	baseURL := g.cfg.OllamaBaseURL
+	if baseURL == "" || strings.Contains(baseURL, "11434") {
+		baseURL = "https://api.openai.com/v1"
+	}
+	model := g.cfg.OllamaModel
+	if model == "" || model == "gemma4:12b" {
+		model = "gpt-4o"
+	}
+
+	messages := []map[string]string{}
+	if systemInstruction != "" {
+		messages = append(messages, map[string]string{
+			"role":    "system",
+			"content": systemInstruction,
+		})
+	}
+	messages = append(messages, map[string]string{
+		"role":    "user",
+		"content": prompt,
+	})
+
+	reqMap := map[string]any{
+		"model":    model,
+		"messages": messages,
+	}
+
+	reqBody, _ := json.Marshal(reqMap)
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(reqBody))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if g.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+g.cfg.APIKey)
+	}
+
+	resp, err := g.http.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return g.simulateGemmaResponse(prompt, systemInstruction)
+	}
+	defer resp.Body.Close()
+
+	var res struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", err
+	}
+	if len(res.Choices) > 0 {
+		return g.guard.ValidateOutput(res.Choices[0].Message.Content)
+	}
+	return g.simulateGemmaResponse(prompt, systemInstruction)
 }
 
 func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstruction string) (string, error) {
@@ -135,8 +199,15 @@ func (g *Gateway) simulateGemmaResponse(prompt string, systemInstruction string)
 	}
 
 	if strings.Contains(systemInstruction, "Copilot") || strings.Contains(systemInstruction, "Vertriebsassistent") {
-		lower := strings.ToLower(prompt)
-		if strings.Contains(lower, "hi") || strings.Contains(lower, "hallo") || strings.Contains(lower, "guten tag") || strings.Contains(lower, "hey") || strings.Contains(lower, "wer bist du") {
+		// Isolate the actual user query from conversation history to prevent matching previous assistant greetings
+		userMsg := prompt
+		if idx := strings.LastIndex(prompt, "USER:"); idx != -1 {
+			userMsg = prompt[idx+5:]
+		}
+		lower := strings.ToLower(strings.TrimSpace(userMsg))
+
+		if lower == "hi" || lower == "hallo" || lower == "hey" || lower == "servus" || lower == "moin" ||
+			strings.HasPrefix(lower, "hi ") || strings.HasPrefix(lower, "hallo ") || strings.HasPrefix(lower, "guten tag") || strings.HasPrefix(lower, "guten morgen") || strings.Contains(lower, "wer bist du") {
 			return "Hallo! Ich bin Ihr OpenLocalCRM Vertriebs-Copilot. Ich unterstütze Sie bei Kundenkontakten, Pipeline-Deals, E-Mail-Kommunikation und automatisierten Vertriebsabläufen. Wie kann ich Ihnen heute helfen?", nil
 		}
 		if strings.Contains(lower, "pipeline") || strings.Contains(lower, "deal") || strings.Contains(lower, "umsatz") {

@@ -38,6 +38,23 @@ export const AIAssistantPage: React.FC = () => {
   const [selectedAuditLog, setSelectedAuditLog] = useState<any>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
 
+  const { data: healthData } = useQuery<any>({
+    queryKey: ['health'],
+    queryFn: () => apiFetch('/api/v1/health'),
+    staleTime: 60000,
+  });
+
+  const formatModelBadge = (m?: string) => {
+    if (!m) return 'Mistral';
+    const lower = m.toLowerCase();
+    if (lower.startsWith('mistral')) return 'Mistral';
+    if (lower.includes('gemma')) return 'Gemma 12B';
+    if (lower.includes('gpt-4')) return 'GPT-4o';
+    if (lower.includes('claude')) return 'Claude';
+    return m.split(':')[0].toUpperCase();
+  };
+  const activeModel = formatModelBadge(healthData?.ai_model);
+
   // --- TAB 1: Chat Copilot State ---
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<any[]>([
@@ -69,6 +86,7 @@ export const AIAssistantPage: React.FC = () => {
         queryClient.invalidateQueries({ queryKey: ['automations'] });
         queryClient.invalidateQueries({ queryKey: ['deals'] });
         queryClient.invalidateQueries({ queryKey: ['contacts'] });
+        queryClient.invalidateQueries({ queryKey: ['companies'] });
         queryClient.invalidateQueries({ queryKey: ['emails'] });
       }
     },
@@ -254,7 +272,7 @@ export const AIAssistantPage: React.FC = () => {
             <ShieldCheck className="w-3.5 h-3.5" /> Prompt Guards Aktiv
           </span>
           <span className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-semibold rounded-full">
-            <Cpu className="w-3.5 h-3.5" /> Gemma 12B (Lokal)
+            <Cpu className="w-3.5 h-3.5" /> {activeModel} (Lokal)
           </span>
         </div>
       </div>
@@ -410,7 +428,7 @@ export const AIAssistantPage: React.FC = () => {
             {chatMutation.isPending && (
               <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium py-2">
                 <Sparkles className="w-4 h-4 animate-spin" />
-                <span>Gemma 12B formuliert Antwort...</span>
+                <span>{activeModel} formuliert Antwort...</span>
               </div>
             )}
           </div>

@@ -43,7 +43,7 @@ type ExportedSettings struct {
 	System     SystemSettings `json:"system"`
 }
 
-const DefaultVersion = "v1.0.2"
+const DefaultVersion = "v1.0.3"
 
 // ExportSettingsFromEnv extracts settings from .env in baseDir into an ExportedSettings struct.
 func ExportSettingsFromEnv(baseDir string) (*ExportedSettings, error) {

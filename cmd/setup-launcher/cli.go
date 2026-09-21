@@ -127,7 +127,7 @@ BEFEHLE:
 
 INSTALLATIONS-OPTIONEN:
   --settings-file DATEI             Einstellungen vorab aus settings.json importieren
-  --version, --tag TAG              Zu installierende Version / Release-Tag (Standard: v1.0.2)
+  --version, --tag TAG              Zu installierende Version / Release-Tag (Standard: v1.0.3)
   --list-versions                   Alle verfügbaren Release-Tags von GitHub anzeigen
   --port PORT                       Web-Port festlegen (Standard: 80, Ausweich: 8080)
   --admin-email EMAIL               E-Mail-Adresse für das Admin-Konto (Standard: admin@openlocalcrm.local)
@@ -333,7 +333,7 @@ func handleInstall(args []string, baseDir string, out io.Writer) int {
 	}
 
 	if cfg.Version == "" {
-		cfg.Version = "v1.0.2"
+		cfg.Version = "v1.0.3"
 	}
 
 	if cfg.AdminPassword == "" {

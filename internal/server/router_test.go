@@ -42,6 +42,29 @@ func TestHealthEndpoint(t *testing.T) {
 	if resp["status"] != "healthy" {
 		t.Fatalf("expected healthy status, got %v", resp["status"])
 	}
+	if resp["ai_model"] == nil || resp["ai_model"] == "" {
+		t.Errorf("expected non-empty ai_model in health check, got %v", resp["ai_model"])
+	}
+	if resp["ai_provider"] == nil || resp["ai_provider"] == "" {
+		t.Errorf("expected non-empty ai_provider in health check, got %v", resp["ai_provider"])
+	}
+
+	// Custom model test
+	rCustom := server.NewRouter(server.Config{
+		SSEHub:     sse.NewHub(),
+		PubKey:     pubKey,
+		PrivKey:    privKey,
+		AIProvider: "ollama",
+		AIModel:    "mistral",
+	})
+	reqCustom := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	recCustom := httptest.NewRecorder()
+	rCustom.ServeHTTP(recCustom, reqCustom)
+	var respCustom map[string]any
+	_ = json.NewDecoder(recCustom.Body).Decode(&respCustom)
+	if respCustom["ai_model"] != "mistral" {
+		t.Errorf("expected mistral model, got %v", respCustom["ai_model"])
+	}
 }
 
 func TestAuthenticatedRoute(t *testing.T) {
@@ -144,13 +167,13 @@ func TestSettingsEndpoints(t *testing.T) {
 		t.Fatalf("failed decoding exported settings: %v", err)
 	}
 
-	if exported["version"] != "v1.0.2" {
-		t.Errorf("expected version v1.0.2, got %v", exported["version"])
+	if exported["version"] != "v1.0.3" {
+		t.Errorf("expected version v1.0.3, got %v", exported["version"])
 	}
 
 	// POST /api/v1/settings/import
 	importPayload := []byte(`{
-		"version": "v1.0.2",
+		"version": "v1.0.3",
 		"ai": {
 			"provider": "ollama",
 			"ollama_base_url": "http://localhost:11434",

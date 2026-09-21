@@ -33,18 +33,52 @@ import (
 )
 
 type Config struct {
-	DB       db.Querier
-	SSEHub   *sse.Hub
-	Storage  storage.StorageService
-	PubKey   ed25519.PublicKey
-	PrivKey  ed25519.PrivateKey
-	DemoMode bool
+	DB         db.Querier
+	SSEHub     *sse.Hub
+	Storage    storage.StorageService
+	PubKey     ed25519.PublicKey
+	PrivKey    ed25519.PrivateKey
+	DemoMode   bool
+	AIProvider string
+	AIModel    string
+	AIBaseURL  string
 }
 
 func NewRouter(cfg Config) http.Handler {
 	if cfg.PubKey == nil {
 		panic("server: cryptographic public key (PubKey) is required")
 	}
+
+	aiProvider := cfg.AIProvider
+	if aiProvider == "" {
+		aiProvider = os.Getenv("AI_PROVIDER")
+	}
+	if aiProvider == "" {
+		aiProvider = "ollama"
+	}
+
+	aiBaseURL := cfg.AIBaseURL
+	if aiBaseURL == "" {
+		aiBaseURL = os.Getenv("OLLAMA_BASE_URL")
+	}
+	if aiBaseURL == "" {
+		aiBaseURL = os.Getenv("AI_BASE_URL")
+	}
+	if aiBaseURL == "" {
+		aiBaseURL = "http://localhost:11434"
+	}
+
+	aiModel := cfg.AIModel
+	if aiModel == "" {
+		aiModel = os.Getenv("OLLAMA_MODEL")
+	}
+	if aiModel == "" {
+		aiModel = os.Getenv("AI_MODEL")
+	}
+	if aiModel == "" {
+		aiModel = "mistral"
+	}
+	aiAPIKey := os.Getenv("AI_API_KEY")
 
 	r := chi.NewRouter()
 
@@ -53,14 +87,17 @@ func NewRouter(cfg Config) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// Public API health endpoint with demo_mode indicator
+	// Public API health endpoint with demo_mode and AI config indicators
 	r.Get("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status":    "healthy",
-			"system":    "openlocalcrm-v3",
-			"version":   "3.0.0",
-			"demo_mode": cfg.DemoMode,
+			"status":      "healthy",
+			"system":      "openlocalcrm-v3",
+			"version":     "3.0.0",
+			"demo_mode":   cfg.DemoMode,
+			"ai_provider": aiProvider,
+			"ai_model":    aiModel,
+			"ai_base_url": aiBaseURL,
 		})
 	})
 
@@ -121,8 +158,10 @@ func NewRouter(cfg Config) http.Handler {
 
 		obsSvc := ai.NewObservabilityService()
 		aiGateway := ai.NewGateway(ai.GatewayConfig{
-			DefaultProvider: ai.ProviderOllama,
-			OllamaModel:     "gemma4:12b",
+			DefaultProvider: ai.Provider(aiProvider),
+			OllamaBaseURL:   aiBaseURL,
+			OllamaModel:     aiModel,
+			APIKey:          aiAPIKey,
 		})
 		triageSvc := ai.NewTriageService(aiGateway)
 		chatSvc := ai.NewChatService(aiGateway, obsSvc, cfg.DB)

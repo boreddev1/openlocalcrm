@@ -12,7 +12,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { apiFetch } from '../../api/client';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 interface ActionCard {
   type: string;
@@ -38,12 +38,29 @@ export const AIChatDrawer: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const { data: healthData } = useQuery<any>({
+    queryKey: ['health'],
+    queryFn: () => apiFetch('/api/v1/health'),
+    staleTime: 60000,
+  });
+
+  const formatModelBadge = (m?: string) => {
+    if (!m) return 'Mistral';
+    const lower = m.toLowerCase();
+    if (lower.startsWith('mistral')) return 'Mistral';
+    if (lower.includes('gemma')) return 'Gemma 12B';
+    if (lower.includes('gpt-4')) return 'GPT-4o';
+    if (lower.includes('claude')) return 'Claude';
+    return m.split(':')[0].toUpperCase();
+  };
+  const activeModel = formatModelBadge(healthData?.ai_model);
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'm-welcome',
       role: 'assistant',
       content:
-        'Hallo! Ich bin Ihr OpenLocalCRM KI-Vertriebs-Copilot (Gemma 12B). Sie können mich direkt anweisen, Automatisierungen (§6.4), Tags, Deals oder E-Mail-Vorlagen im System anzulegen.',
+        'Hallo! Ich bin Ihr OpenLocalCRM KI-Vertriebs-Copilot. Sie können mich direkt anweisen, Kunden oder Firmen anzulegen, Recherchen durchzuführen, Deals oder Workflows im System zu erstellen.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -93,6 +110,7 @@ export const AIChatDrawer: React.FC = () => {
         queryClient.invalidateQueries({ queryKey: ['automations'] });
         queryClient.invalidateQueries({ queryKey: ['deals'] });
         queryClient.invalidateQueries({ queryKey: ['contacts'] });
+        queryClient.invalidateQueries({ queryKey: ['companies'] });
         queryClient.invalidateQueries({ queryKey: ['emails'] });
       }
     } catch {
@@ -151,7 +169,7 @@ export const AIChatDrawer: React.FC = () => {
                 <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
                   OpenLocalCRM KI-Copilot
                   <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 font-mono">
-                    Gemma 12B
+                    {activeModel}
                   </span>
                 </div>
                 <div className="text-[10px] text-slate-400 flex items-center gap-1">
@@ -244,7 +262,7 @@ export const AIChatDrawer: React.FC = () => {
             {loading && (
               <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium py-1">
                 <Sparkles className="w-4 h-4 animate-spin" />
-                <span>Gemma 12B führt Anweisung aus...</span>
+                <span>{activeModel} führt Anweisung aus...</span>
               </div>
             )}
             <div ref={messagesEndRef} />
