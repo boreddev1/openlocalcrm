@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,12 +18,22 @@ import (
 )
 
 type KBArticle struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Category    string `json:"category"`
-	Source      string `json:"source"`
-	Content     string `json:"content"`
-	ChunksCount int    `json:"chunks_count"`
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Category       string `json:"category"`
+	Source         string `json:"source"`
+	Content        string `json:"content"`
+	EmbeddingModel string `json:"embedding_model"`
+	Indexed        bool   `json:"indexed"`
+}
+
+type KBSearchResult struct {
+	ID             string  `json:"id"`
+	Title          string  `json:"title"`
+	Category       string  `json:"category"`
+	Content        string  `json:"content"`
+	EmbeddingModel string  `json:"embedding_model"`
+	Distance       float64 `json:"distance"`
 }
 
 type ResearchJob struct {
@@ -227,12 +238,13 @@ func (h *AIHandler) ListKB(w http.ResponseWriter, r *http.Request) {
 		res := make([]KBArticle, len(dbArticles))
 		for i, a := range dbArticles {
 			res[i] = KBArticle{
-				ID:          uuid.UUID(a.ID.Bytes).String(),
-				Title:       a.Title,
-				Category:    a.Category,
-				Content:     a.Content,
-				Source:      a.Author,
-				ChunksCount: 4,
+				ID:             uuid.UUID(a.ID.Bytes).String(),
+				Title:          a.Title,
+				Category:       a.Category,
+				Content:        a.Content,
+				Source:         a.Author,
+				EmbeddingModel: a.EmbeddingModel.String,
+				Indexed:        a.Indexed,
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -252,6 +264,19 @@ func (h *AIHandler) ListKB(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(articles)
 }
 
+func formatEmbeddingVector(vec []float32) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, v := range vec {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatFloat(float64(v), 'g', -1, 32))
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
 func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 	var doc KBArticle
 	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
@@ -259,26 +284,46 @@ func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if doc.ChunksCount == 0 {
-		words := len(strings.Fields(doc.Content))
-		doc.ChunksCount = words/150 + 1
+	if strings.TrimSpace(doc.Content) == "" {
+		http.Error(w, `{"error":"content_required","message":"Wissensinhalt darf nicht leer sein"}`, http.StatusBadRequest)
+		return
 	}
+
+	if h.gateway == nil {
+		http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+		return
+	}
+
+	// Generate the real embedding first. Never persist a half-created article
+	// and never fabricate an index status.
+	vec, err := h.gateway.GenerateEmbedding(r.Context(), doc.Content)
+	if err != nil {
+		http.Error(w, `{"error":"embedding_unavailable","message":"Embedding konnte nicht erzeugt werden: `+err.Error()+`"}`, http.StatusBadGateway)
+		return
+	}
+	embeddingModel := h.gateway.GetConfig().OllamaEmbeddingModel
+	doc.EmbeddingModel = embeddingModel
+	doc.Indexed = true
 
 	if h.querier != nil {
 		created, err := h.querier.CreateKBArticle(r.Context(), db.CreateKBArticleParams{
-			Title:    doc.Title,
-			Category: doc.Category,
-			Content:  doc.Content,
-			Tags:     []string{doc.Category},
-			Author:   "System",
+			Title:          doc.Title,
+			Category:       doc.Category,
+			Content:        doc.Content,
+			Tags:           []string{doc.Category},
+			Author:         "System",
+			Embedding:      formatEmbeddingVector(vec),
+			EmbeddingModel: pgtype.Text{String: embeddingModel, Valid: true},
 		})
-		if err == nil {
-			doc.ID = uuid.UUID(created.ID.Bytes).String()
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(doc)
+		if err != nil {
+			http.Error(w, `{"error":"persist_failed","message":"Wissensdokument konnte nicht gespeichert werden"}`, http.StatusInternalServerError)
 			return
 		}
+		doc.ID = uuid.UUID(created.ID.Bytes).String()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(doc)
+		return
 	}
 
 	h.mu.Lock()
@@ -290,6 +335,68 @@ func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(doc)
+}
+
+// SearchKB performs a real semantic search over the pgvector index using the
+// query embedding from the configured backend. An embedding failure is reported
+// honestly as 502; no fallback result is invented.
+func (h *AIHandler) SearchKB(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		http.Error(w, `{"error":"query_required","message":"Suchbegriff 'q' fehlt"}`, http.StatusBadRequest)
+		return
+	}
+
+	limit := 10
+	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+		if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	if h.gateway == nil {
+		http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+		return
+	}
+
+	vec, err := h.gateway.GenerateEmbedding(r.Context(), query)
+	if err != nil {
+		http.Error(w, `{"error":"embedding_unavailable","message":"Embedding konnte nicht erzeugt werden: `+err.Error()+`"}`, http.StatusBadGateway)
+		return
+	}
+
+	if h.querier == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]KBSearchResult{})
+		return
+	}
+
+	rows, err := h.querier.SearchKBArticlesByEmbedding(r.Context(), db.SearchKBArticlesByEmbeddingParams{
+		Embedding:  formatEmbeddingVector(vec),
+		LimitCount: int32(limit),
+	})
+	if err != nil {
+		http.Error(w, `{"error":"search_failed","message":"Semantische Suche fehlgeschlagen"}`, http.StatusInternalServerError)
+		return
+	}
+
+	res := make([]KBSearchResult, len(rows))
+	for i, a := range rows {
+		res[i] = KBSearchResult{
+			ID:             uuid.UUID(a.ID.Bytes).String(),
+			Title:          a.Title,
+			Category:       a.Category,
+			Content:        a.Content,
+			EmbeddingModel: a.EmbeddingModel.String,
+			Distance:       a.Distance,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 func (h *AIHandler) DeleteKB(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -19,13 +20,18 @@ func newFakeAIGateway(t *testing.T, response string) *ai.Gateway {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/api/embeddings") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"embedding": unitVector(768)})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"response": response})
 	}))
 	t.Cleanup(srv.Close)
 	return ai.NewGateway(ai.GatewayConfig{
-		DefaultProvider: ai.ProviderOllama,
-		OllamaBaseURL:   srv.URL,
-		OllamaModel:     "test-model",
+		DefaultProvider:      ai.ProviderOllama,
+		OllamaBaseURL:        srv.URL,
+		OllamaModel:          "test-model",
+		OllamaEmbeddingModel: "nomic-embed-text",
 	})
 }
 

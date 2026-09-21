@@ -626,9 +626,13 @@ export const AIAssistantPage: React.FC = () => {
                         {entry.source || 'Manuelle Eingabe'}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1 text-emerald-400 font-mono font-semibold">
+                    <div
+                      className={`flex items-center gap-1 font-mono font-semibold ${entry.indexed ? 'text-emerald-400' : 'text-slate-500'}`}
+                    >
                       <Layers className="w-3 h-3" />
-                      <span>{entry.chunks_count || 1} Chunks</span>
+                      <span>
+                        {entry.indexed ? entry.embedding_model || 'indexiert' : 'nicht indexiert'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -960,7 +964,7 @@ export const AIAssistantPage: React.FC = () => {
                 <textarea
                   required
                   rows={5}
-                  placeholder="Inhalt einfügen... Wird automatisch in Chunks aufgeteilt und strukturiert indexiert."
+                  placeholder="Inhalt einfügen... Wird als Embedding generiert und semantisch indexiert."
                   value={kbForm.content}
                   onChange={(e) => setKbForm({ ...kbForm, content: e.target.value })}
                   className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500 leading-relaxed"
@@ -971,10 +975,7 @@ export const AIAssistantPage: React.FC = () => {
               <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between text-[11px] text-emerald-400">
                 <span className="flex items-center gap-1.5 font-medium">
                   <Layers className="w-3.5 h-3.5" />
-                  Strukturierte Aufbereitung & Indexierung
-                </span>
-                <span className="font-mono font-bold">
-                  {Math.max(1, Math.ceil(kbForm.content.length / 250))} Chunks
+                  Semantische Indexierung als 768-dimensionales Embedding
                 </span>
               </div>
 

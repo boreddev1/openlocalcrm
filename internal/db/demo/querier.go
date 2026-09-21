@@ -3,8 +3,10 @@ package demo
 import (
 	"context"
 	"errors"
+	"math"
 	"math/big"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1767,48 +1769,169 @@ func (q *InMemoryQuerier) ListRecentCallActivities(ctx context.Context, limit in
 }
 
 // --- Knowledge Base ---
-func (q *InMemoryQuerier) CreateKBArticle(ctx context.Context, arg db.CreateKBArticleParams) (db.KnowledgeBaseArticle, error) {
+
+func kbRowFromArticle(a db.KnowledgeBaseArticle) db.ListKBArticlesRow {
+	return db.ListKBArticlesRow{
+		ID:             a.ID,
+		Title:          a.Title,
+		Category:       a.Category,
+		Content:        a.Content,
+		Tags:           a.Tags,
+		Author:         a.Author,
+		EmbeddingModel: a.EmbeddingModel,
+		Indexed:        strings.TrimSpace(a.Embedding) != "",
+		CreatedAt:      a.CreatedAt,
+		UpdatedAt:      a.UpdatedAt,
+	}
+}
+
+func parseVectorLiteral(s string) ([]float64, error) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "[")
+	s = strings.TrimSuffix(s, "]")
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(s, ",")
+	vec := make([]float64, len(parts))
+	for i, p := range parts {
+		v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
+		if err != nil {
+			return nil, err
+		}
+		vec[i] = v
+	}
+	return vec, nil
+}
+
+func cosineDistance(a, b []float64) float64 {
+	if len(a) == 0 || len(a) != len(b) {
+		return 1
+	}
+	var dot, normA, normB float64
+	for i := range a {
+		dot += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	if normA == 0 || normB == 0 {
+		return 1
+	}
+	return 1 - dot/(math.Sqrt(normA)*math.Sqrt(normB))
+}
+
+func (q *InMemoryQuerier) CreateKBArticle(ctx context.Context, arg db.CreateKBArticleParams) (db.CreateKBArticleRow, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	id := newUUID()
 	article := db.KnowledgeBaseArticle{
-		ID:        id,
-		Title:     arg.Title,
-		Category:  arg.Category,
-		Content:   arg.Content,
-		Tags:      arg.Tags,
-		Author:    arg.Author,
-		CreatedAt: nowTimestamptz(),
-		UpdatedAt: nowTimestamptz(),
+		ID:             id,
+		Title:          arg.Title,
+		Category:       arg.Category,
+		Content:        arg.Content,
+		Tags:           arg.Tags,
+		Author:         arg.Author,
+		Embedding:      arg.Embedding,
+		EmbeddingModel: arg.EmbeddingModel,
+		CreatedAt:      nowTimestamptz(),
+		UpdatedAt:      nowTimestamptz(),
 	}
 	q.kbArticles[uuidToStr(id)] = article
-	return article, nil
+	return db.CreateKBArticleRow(kbRowFromArticle(article)), nil
 }
 
-func (q *InMemoryQuerier) GetKBArticleByID(ctx context.Context, id pgtype.UUID) (db.KnowledgeBaseArticle, error) {
+func (q *InMemoryQuerier) GetKBArticleByID(ctx context.Context, id pgtype.UUID) (db.GetKBArticleByIDRow, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	a, ok := q.kbArticles[uuidToStr(id)]
 	if !ok {
-		return db.KnowledgeBaseArticle{}, ErrNotFound
+		return db.GetKBArticleByIDRow{}, ErrNotFound
 	}
-	return a, nil
+	return db.GetKBArticleByIDRow(kbRowFromArticle(a)), nil
 }
 
-func (q *InMemoryQuerier) ListKBArticles(ctx context.Context) ([]db.KnowledgeBaseArticle, error) {
+func (q *InMemoryQuerier) ListKBArticles(ctx context.Context) ([]db.ListKBArticlesRow, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
-	var list []db.KnowledgeBaseArticle
+	list := make([]db.ListKBArticlesRow, 0, len(q.kbArticles))
 	for _, a := range q.kbArticles {
-		list = append(list, a)
+		list = append(list, kbRowFromArticle(a))
 	}
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
 	})
 	return list, nil
+}
+
+func (q *InMemoryQuerier) UpdateKBArticleEmbedding(ctx context.Context, arg db.UpdateKBArticleEmbeddingParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	article, ok := q.kbArticles[idStr]
+	if !ok {
+		return ErrNotFound
+	}
+	article.Embedding = arg.Embedding
+	article.EmbeddingModel = arg.EmbeddingModel
+	article.UpdatedAt = nowTimestamptz()
+	q.kbArticles[idStr] = article
+	return nil
+}
+
+func (q *InMemoryQuerier) SearchKBArticlesByEmbedding(ctx context.Context, arg db.SearchKBArticlesByEmbeddingParams) ([]db.SearchKBArticlesByEmbeddingRow, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	queryVec, err := parseVectorLiteral(arg.Embedding)
+	if err != nil {
+		return nil, err
+	}
+
+	type scored struct {
+		article  db.KnowledgeBaseArticle
+		distance float64
+	}
+	matches := make([]scored, 0, len(q.kbArticles))
+	for _, a := range q.kbArticles {
+		if strings.TrimSpace(a.Embedding) == "" {
+			continue
+		}
+		vec, err := parseVectorLiteral(a.Embedding)
+		if err != nil {
+			continue
+		}
+		matches = append(matches, scored{article: a, distance: cosineDistance(queryVec, vec)})
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].distance < matches[j].distance
+	})
+
+	limit := int(arg.LimitCount)
+	if limit <= 0 || limit > len(matches) {
+		limit = len(matches)
+	}
+	rows := make([]db.SearchKBArticlesByEmbeddingRow, 0, limit)
+	for _, m := range matches[:limit] {
+		base := kbRowFromArticle(m.article)
+		rows = append(rows, db.SearchKBArticlesByEmbeddingRow{
+			ID:             base.ID,
+			Title:          base.Title,
+			Category:       base.Category,
+			Content:        base.Content,
+			Tags:           base.Tags,
+			Author:         base.Author,
+			EmbeddingModel: base.EmbeddingModel,
+			Indexed:        base.Indexed,
+			CreatedAt:      base.CreatedAt,
+			UpdatedAt:      base.UpdatedAt,
+			Distance:       m.distance,
+		})
+	}
+	return rows, nil
 }
 
 func (q *InMemoryQuerier) DeleteKBArticle(ctx context.Context, id pgtype.UUID) error {

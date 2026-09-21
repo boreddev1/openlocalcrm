@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
@@ -149,6 +151,20 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// A9: verify the configured embedding model matches the fixed pgvector(768)
+	// schema before serving. A dimension mismatch is a hard configuration error
+	// (resizing requires an explicit migration); an unreachable backend — e.g.
+	// CI/E2E without a local Ollama — only warns and disables semantic search.
+	embeddingCtx, cancelEmbeddingCheck := context.WithTimeout(ctx, 5*time.Second)
+	embeddingErr := ai.ValidateEmbeddingModelFromEnv(embeddingCtx)
+	cancelEmbeddingCheck()
+	if embeddingErr != nil {
+		if errors.Is(embeddingErr, ai.ErrEmbeddingDimensionMismatch) {
+			log.Fatalf("[FATAL] Embedding-Konfiguration ungültig: %v", embeddingErr)
+		}
+		log.Printf("[WARN] Embedding-Modell nicht erreichbar, semantische Suche deaktiviert: %v", embeddingErr)
+	}
 
 	// Ed25519 Keys
 	pubKey, privKey, err := loadOrGenerateKey(jwtKeyPath, isDemoMode)

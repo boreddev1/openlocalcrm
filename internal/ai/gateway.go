@@ -19,6 +19,16 @@ import (
 // honest error instead of inventing a response.
 var ErrUpstreamUnavailable = errors.New("KI-Dienst nicht erreichbar")
 
+// ErrEmbeddingDimensionMismatch signals that the embedding backend returned a
+// vector whose dimensions do not match the fixed pgvector column width. It is a
+// configuration error, not a transient upstream failure, and must never be
+// silently truncated or padded.
+var ErrEmbeddingDimensionMismatch = errors.New("Embedding-Dimension passt nicht zum Schema")
+
+// EmbeddingDimensions is the fixed width of the knowledge_base_articles.embedding
+// pgvector column. A model whose output differs requires an explicit migration.
+const EmbeddingDimensions = 768
+
 type Provider string
 
 const (
@@ -36,7 +46,11 @@ type GatewayConfig struct {
 	DefaultProvider Provider
 	OllamaBaseURL   string
 	OllamaModel     string // e.g. "gemma2:12b"
-	APIKey          string
+	// OllamaEmbeddingModel is the embedding model used for semantic search.
+	// Resolved from config, then OLLAMA_EMBEDDING_MODEL, defaulting to
+	// "nomic-embed-text" (768 dimensions).
+	OllamaEmbeddingModel string
+	APIKey               string
 }
 
 type Gateway struct {
@@ -60,8 +74,22 @@ func NewGateway(cfg GatewayConfig) *Gateway {
 			cfg.OllamaModel = "gemma4:12b"
 		}
 	}
+	if cfg.OllamaEmbeddingModel == "" {
+		if envModel := os.Getenv("OLLAMA_EMBEDDING_MODEL"); envModel != "" {
+			cfg.OllamaEmbeddingModel = envModel
+		} else {
+			cfg.OllamaEmbeddingModel = "nomic-embed-text"
+		}
+	}
 	if cfg.DefaultProvider == "" {
-		cfg.DefaultProvider = ProviderOllama
+		if envProvider := os.Getenv("AI_PROVIDER"); envProvider != "" {
+			cfg.DefaultProvider = Provider(envProvider)
+		} else {
+			cfg.DefaultProvider = ProviderOllama
+		}
+	}
+	if cfg.APIKey == "" {
+		cfg.APIKey = os.Getenv("AI_API_KEY")
 	}
 	timeout := 30 * time.Second
 	if tStr := os.Getenv("OLLAMA_TIMEOUT_SECONDS"); tStr != "" {
@@ -216,4 +244,132 @@ func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstructi
 		return "", fmt.Errorf("%w: ollama output validation failed: %v", ErrUpstreamUnavailable, err)
 	}
 	return out, nil
+}
+
+// GenerateEmbedding returns a real embedding vector for the given text from the
+// configured provider. Every transport, status, or decode failure is wrapped with
+// ErrUpstreamUnavailable. A vector whose length differs from EmbeddingDimensions
+// yields ErrEmbeddingDimensionMismatch; the vector is never silently truncated,
+// padded, or invented.
+func (g *Gateway) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	switch g.cfg.DefaultProvider {
+	case ProviderOllama:
+		return g.embedOllama(ctx, text)
+	case ProviderOpenAI:
+		return g.embedOpenAI(ctx, text)
+	default:
+		return nil, fmt.Errorf("%w: embedding für AI-Provider '%s' ist nicht implementiert", ErrUpstreamUnavailable, g.cfg.DefaultProvider)
+	}
+}
+
+// ValidateEmbeddingModel probes the embedding backend once and reports whether it
+// is reachable and returns vectors of the schema's fixed dimension. It is intended
+// for a startup self-check.
+func (g *Gateway) ValidateEmbeddingModel(ctx context.Context) error {
+	_, err := g.GenerateEmbedding(ctx, "dimension-check")
+	return err
+}
+
+// ValidateEmbeddingModelFromEnv builds a gateway from environment configuration
+// and probes the embedding backend. It lets cmd/server perform the startup check
+// using the exact same model resolution as the runtime gateway.
+func ValidateEmbeddingModelFromEnv(ctx context.Context) error {
+	return NewGateway(GatewayConfig{}).ValidateEmbeddingModel(ctx)
+}
+
+func (g *Gateway) checkEmbeddingDimensions(vec []float32) error {
+	if len(vec) != EmbeddingDimensions {
+		return fmt.Errorf("%w: Modell %q liefert %d Dimensionen, erwartet %d",
+			ErrEmbeddingDimensionMismatch, g.cfg.OllamaEmbeddingModel, len(vec), EmbeddingDimensions)
+	}
+	return nil
+}
+
+func (g *Gateway) embedOllama(ctx context.Context, text string) ([]float32, error) {
+	reqMap := map[string]any{
+		"model":  g.cfg.OllamaEmbeddingModel,
+		"prompt": text,
+	}
+	reqBody, _ := json.Marshal(reqMap)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", g.cfg.OllamaBaseURL+"/api/embeddings", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("%w: ollama embedding request build failed: %v", ErrUpstreamUnavailable, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: ollama embedding request failed: %v", ErrUpstreamUnavailable, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: ollama embedding backend returned HTTP %d", ErrUpstreamUnavailable, resp.StatusCode)
+	}
+
+	// /api/embeddings returns {"embedding":[...]}; the newer /api/embed returns
+	// {"embeddings":[[...]]}. Accept both without changing the target endpoint.
+	var res struct {
+		Embedding  []float32   `json:"embedding"`
+		Embeddings [][]float32 `json:"embeddings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("%w: ollama embedding decode failed: %v", ErrUpstreamUnavailable, err)
+	}
+	vec := res.Embedding
+	if len(vec) == 0 && len(res.Embeddings) > 0 {
+		vec = res.Embeddings[0]
+	}
+	if err := g.checkEmbeddingDimensions(vec); err != nil {
+		return nil, err
+	}
+	return vec, nil
+}
+
+func (g *Gateway) embedOpenAI(ctx context.Context, text string) ([]float32, error) {
+	baseURL := g.cfg.OllamaBaseURL
+	if baseURL == "" || strings.Contains(baseURL, "11434") {
+		baseURL = "https://api.openai.com/v1"
+	}
+
+	reqMap := map[string]any{
+		"model": g.cfg.OllamaEmbeddingModel,
+		"input": text,
+	}
+	reqBody, _ := json.Marshal(reqMap)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/embeddings", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("%w: openai embedding request build failed: %v", ErrUpstreamUnavailable, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if g.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+g.cfg.APIKey)
+	}
+
+	resp, err := g.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: openai embedding request failed: %v", ErrUpstreamUnavailable, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: openai embedding backend returned HTTP %d", ErrUpstreamUnavailable, resp.StatusCode)
+	}
+
+	var res struct {
+		Data []struct {
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("%w: openai embedding decode failed: %v", ErrUpstreamUnavailable, err)
+	}
+	if len(res.Data) == 0 {
+		return nil, fmt.Errorf("%w: openai embedding backend returned no data", ErrUpstreamUnavailable)
+	}
+	vec := res.Data[0].Embedding
+	if err := g.checkEmbeddingDimensions(vec); err != nil {
+		return nil, err
+	}
+	return vec, nil
 }

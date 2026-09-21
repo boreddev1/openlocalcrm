@@ -402,6 +402,7 @@ func NewRouter(cfg Config) http.Handler {
 					air.Post("/research/company", aiH.ResearchCompany)
 					air.Get("/observability", aiH.GetObservability)
 					air.Post("/parse-bill", aiH.ParseBill)
+					air.Get("/kb/search", aiH.SearchKB)
 					air.Get("/kb", aiH.ListKB)
 					air.Post("/kb", aiH.CreateKB)
 					air.Delete("/kb/{id}", aiH.DeleteKB)

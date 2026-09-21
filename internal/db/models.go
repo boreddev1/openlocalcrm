@@ -299,14 +299,16 @@ type IntakeForm struct {
 }
 
 type KnowledgeBaseArticle struct {
-	ID        pgtype.UUID        `json:"id"`
-	Title     string             `json:"title"`
-	Category  string             `json:"category"`
-	Content   string             `json:"content"`
-	Tags      []string           `json:"tags"`
-	Author    string             `json:"author"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID             pgtype.UUID        `json:"id"`
+	Title          string             `json:"title"`
+	Category       string             `json:"category"`
+	Content        string             `json:"content"`
+	Tags           []string           `json:"tags"`
+	Author         string             `json:"author"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Embedding      string             `json:"embedding"`
+	EmbeddingModel pgtype.Text        `json:"embedding_model"`
 }
 
 type Note struct {
