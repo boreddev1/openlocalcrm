@@ -15,6 +15,8 @@ import (
 
 var (
 	ErrAppointmentNotFound = errors.New("appointment not found")
+	ErrInvalidTimeRange    = errors.New("end time must be after start time")
+	ErrMissingTitle        = errors.New("appointment title is required")
 )
 
 type Appointment struct {
@@ -166,6 +168,13 @@ func (s *Service) GetByID(ctx context.Context, id string) (Appointment, error) {
 }
 
 func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateAppointmentInput) (Appointment, error) {
+	if input.Title == "" {
+		return Appointment{}, ErrMissingTitle
+	}
+	if !input.EndTime.IsZero() && !input.StartTime.IsZero() && !input.EndTime.After(input.StartTime) {
+		return Appointment{}, ErrInvalidTimeRange
+	}
+
 	appType := input.Type
 	if appType == "" {
 		appType = "CONSULTATION"
@@ -248,6 +257,10 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateA
 }
 
 func (s *Service) Update(ctx context.Context, app Appointment) (Appointment, error) {
+	if !app.EndTime.IsZero() && !app.StartTime.IsZero() && !app.EndTime.After(app.StartTime) {
+		return Appointment{}, ErrInvalidTimeRange
+	}
+
 	if s.querier != nil {
 		if u, err := uuid.Parse(app.ID); err == nil {
 			updated, err := s.querier.UpdateAppointment(ctx, db.UpdateAppointmentParams{
@@ -290,7 +303,9 @@ func (s *Service) Update(ctx context.Context, app Appointment) (Appointment, err
 func (s *Service) Delete(ctx context.Context, id string) error {
 	if s.querier != nil {
 		if u, err := uuid.Parse(id); err == nil {
-			_ = s.querier.DeleteAppointment(ctx, pgtype.UUID{Bytes: u, Valid: true})
+			if err := s.querier.DeleteAppointment(ctx, pgtype.UUID{Bytes: u, Valid: true}); err != nil {
+				return fmt.Errorf("failed to delete appointment: %w", err)
+			}
 		}
 	}
 

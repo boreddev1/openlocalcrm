@@ -73,7 +73,7 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=${DB_USER:-postgres}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-crm_pass}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set in .env}
       - POSTGRES_DB=${DB_NAME:-openlocalcrm}
     volumes:
       - pg_data:/var/lib/postgresql/data

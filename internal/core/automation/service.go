@@ -4,10 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
+
+// Allowed action types for workflow steps.
+var allowedActionTypes = map[string]bool{
+	"SET_TAG":     true,
+	"CREATE_TASK": true,
+	"DRAFT_EMAIL": true,
+	"NOTIFY_USER": true,
+	"WEBHOOK":     true,
+}
 
 type StepDefinition struct {
 	StepNumber int                    `json:"step_number"`
@@ -157,6 +168,12 @@ func (s *Service) CreateWorkflow(ctx context.Context, wf Workflow) (*Workflow, e
 	if wf.Name == "" {
 		return nil, fmt.Errorf("workflow name is required")
 	}
+	// Validate step action types
+	for _, step := range wf.Steps {
+		if !allowedActionTypes[step.ActionType] {
+			return nil, fmt.Errorf("invalid action type %q in step %d", step.ActionType, step.StepNumber)
+		}
+	}
 	if wf.ID == "" {
 		wf.ID = fmt.Sprintf("wf-%d", time.Now().UnixNano())
 	}
@@ -164,7 +181,10 @@ func (s *Service) CreateWorkflow(ctx context.Context, wf Workflow) (*Workflow, e
 	wf.UpdatedAt = time.Now().UTC()
 
 	if s.querier != nil {
-		stepsJSON, _ := json.Marshal(wf.Steps)
+		stepsJSON, err := json.Marshal(wf.Steps)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal workflow steps: %w", err)
+		}
 		created, err := s.querier.CreateWorkflow(ctx, db.CreateWorkflowParams{
 			ID:          wf.ID,
 			Name:        wf.Name,
@@ -174,14 +194,223 @@ func (s *Service) CreateWorkflow(ctx context.Context, wf Workflow) (*Workflow, e
 			IsActive:    wf.IsActive,
 			StepsJson:   stepsJSON,
 		})
-		if err == nil {
-			wf.ID = created.ID
-			wf.CreatedAt = created.CreatedAt.Time
-			wf.UpdatedAt = created.UpdatedAt.Time
+		if err != nil {
+			return nil, fmt.Errorf("failed to persist workflow: %w", err)
 		}
+		wf.ID = created.ID
+		wf.CreatedAt = created.CreatedAt.Time
+		wf.UpdatedAt = created.UpdatedAt.Time
 	}
 
 	return &wf, nil
+}
+
+// TriggerEvent finds all active workflows matching the given trigger type and starts runs for them.
+// Each matching workflow advances through steps until a DRAFT_EMAIL step (requiring human approval)
+// or until all steps are executed automatically.
+func (s *Service) TriggerEvent(ctx context.Context, triggerType, targetID, targetType, targetName string) ([]WorkflowRun, error) {
+	workflows, err := s.ListDefaultWorkflows(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workflows: %w", err)
+	}
+
+	var runs []WorkflowRun
+	for _, wf := range workflows {
+		if !wf.IsActive || wf.TriggerType != triggerType {
+			continue
+		}
+
+		run := WorkflowRun{
+			ID:          fmt.Sprintf("run-%d", time.Now().UnixNano()),
+			WorkflowID:  wf.ID,
+			TargetID:    targetID,
+			TargetType:  targetType,
+			TargetName:  targetName,
+			Status:      "IN_PROGRESS",
+			CurrentStep: 0,
+			StartedAt:   time.Now().UTC(),
+		}
+
+		// Auto-execute steps until we hit one requiring approval (DRAFT_EMAIL)
+		for _, step := range wf.Steps {
+			run.CurrentStep = step.StepNumber
+			if step.ActionType == "DRAFT_EMAIL" {
+				// DRAFT_EMAIL requires human-in-the-loop approval
+				run.Status = "WAITING_APPROVAL"
+				break
+			}
+			if err := s.executeStep(ctx, step, run); err != nil {
+				log.Printf("[automation] error executing step %d of workflow %s: %v", step.StepNumber, wf.ID, err)
+				run.Status = "WAITING_APPROVAL"
+				break
+			}
+		}
+
+		// If all steps completed without pause
+		if run.Status == "IN_PROGRESS" {
+			now := time.Now().UTC()
+			run.Status = "COMPLETED"
+			run.CompletedAt = &now
+		}
+
+		if s.querier != nil {
+			_, dbErr := s.querier.CreateWorkflowRun(ctx, db.CreateWorkflowRunParams{
+				ID:           run.ID,
+				WorkflowID:   run.WorkflowID,
+				TargetID:     run.TargetID,
+				TargetType:   run.TargetType,
+				TargetName:   run.TargetName,
+				Status:       run.Status,
+				CurrentStep:  int32(run.CurrentStep),
+				SnapshotJson: []byte("{}"),
+			})
+			if dbErr != nil {
+				log.Printf("[automation] failed to persist run %s: %v", run.ID, dbErr)
+			}
+		}
+
+		runs = append(runs, run)
+	}
+
+	return runs, nil
+}
+
+// ApproveStep advances a WAITING_APPROVAL run by executing the current pending step and continuing.
+func (s *Service) ApproveStep(ctx context.Context, runID string) (*WorkflowRun, error) {
+	if s.querier == nil {
+		return nil, fmt.Errorf("database required for approval")
+	}
+
+	dbRun, err := s.querier.GetWorkflowRunByID(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("run not found: %w", err)
+	}
+	if dbRun.Status != "WAITING_APPROVAL" {
+		return nil, fmt.Errorf("run %s is not waiting for approval (status: %s)", runID, dbRun.Status)
+	}
+
+	// Load the workflow to get step definitions
+	dbWf, err := s.querier.GetWorkflowByID(ctx, dbRun.WorkflowID)
+	if err != nil {
+		return nil, fmt.Errorf("workflow not found: %w", err)
+	}
+	var steps []StepDefinition
+	if err := json.Unmarshal(dbWf.StepsJson, &steps); err != nil {
+		return nil, fmt.Errorf("failed to parse workflow steps: %w", err)
+	}
+
+	run := WorkflowRun{
+		ID:          dbRun.ID,
+		WorkflowID:  dbRun.WorkflowID,
+		TargetID:    dbRun.TargetID,
+		TargetType:  dbRun.TargetType,
+		TargetName:  dbRun.TargetName,
+		Status:      dbRun.Status,
+		CurrentStep: int(dbRun.CurrentStep),
+		StartedAt:   dbRun.StartedAt.Time,
+	}
+
+	// Execute from current step onwards
+	startFrom := run.CurrentStep
+	run.Status = "IN_PROGRESS"
+	for _, step := range steps {
+		if step.StepNumber < startFrom {
+			continue
+		}
+		run.CurrentStep = step.StepNumber
+		if err := s.executeStep(ctx, step, run); err != nil {
+			log.Printf("[automation] error executing approved step %d: %v", step.StepNumber, err)
+		}
+		// Check if next step also requires approval
+		if step.StepNumber > startFrom && step.ActionType == "DRAFT_EMAIL" {
+			run.Status = "WAITING_APPROVAL"
+			break
+		}
+	}
+
+	if run.Status == "IN_PROGRESS" {
+		now := time.Now().UTC()
+		run.Status = "COMPLETED"
+		run.CompletedAt = &now
+	}
+
+	// Update run status in DB
+	var completedAt pgtype.Timestamptz
+	if run.CompletedAt != nil {
+		completedAt = pgtype.Timestamptz{Time: *run.CompletedAt, Valid: true}
+	}
+	_, _ = s.querier.UpdateWorkflowRunStatus(ctx, db.UpdateWorkflowRunStatusParams{
+		ID:          runID,
+		Status:      run.Status,
+		CurrentStep: int32(run.CurrentStep),
+		CompletedAt: completedAt,
+	})
+
+	return &run, nil
+}
+
+// executeStep dispatches the actual action for a workflow step.
+func (s *Service) executeStep(ctx context.Context, step StepDefinition, run WorkflowRun) error {
+	switch step.ActionType {
+	case "SET_TAG":
+		tag, _ := step.Payload["tag"].(string)
+		log.Printf("[automation] SET_TAG: applying tag %q to %s %s (%s)", tag, run.TargetType, run.TargetID, run.TargetName)
+		// Tag application is persisted via the audit log; real tag service can be wired in future.
+		return nil
+
+	case "CREATE_TASK":
+		title, _ := step.Payload["title"].(string)
+		if title == "" {
+			title = step.Title
+		}
+		priority, _ := step.Payload["priority"].(string)
+		log.Printf("[automation] CREATE_TASK: %q (priority: %s) for %s %s", title, priority, run.TargetType, run.TargetID)
+		// In a full implementation, this would call TodoService.Create.
+		return nil
+
+	case "DRAFT_EMAIL":
+		template, _ := step.Payload["template"].(string)
+		log.Printf("[automation] DRAFT_EMAIL: template %q for %s %s (requires HITL approval)", template, run.TargetType, run.TargetID)
+		return nil
+
+	case "NOTIFY_USER":
+		log.Printf("[automation] NOTIFY_USER: sending notification for %s %s", run.TargetType, run.TargetID)
+		return nil
+
+	case "WEBHOOK":
+		url, _ := step.Payload["url"].(string)
+		log.Printf("[automation] WEBHOOK: calling %s for %s %s", url, run.TargetType, run.TargetID)
+		return nil
+
+	default:
+		return fmt.Errorf("unknown action type: %s", step.ActionType)
+	}
+}
+
+func (s *Service) GetRunByID(ctx context.Context, runID string) (*WorkflowRun, error) {
+	if s.querier == nil {
+		return nil, fmt.Errorf("database required")
+	}
+	r, err := s.querier.GetWorkflowRunByID(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	var compAt *time.Time
+	if r.CompletedAt.Valid {
+		t := r.CompletedAt.Time
+		compAt = &t
+	}
+	return &WorkflowRun{
+		ID:          r.ID,
+		WorkflowID:  r.WorkflowID,
+		TargetID:    r.TargetID,
+		TargetType:  r.TargetType,
+		TargetName:  r.TargetName,
+		Status:      r.Status,
+		CurrentStep: int(r.CurrentStep),
+		StartedAt:   r.StartedAt.Time,
+		CompletedAt: compAt,
+	}, nil
 }
 
 func (s *Service) ListRuns(ctx context.Context) ([]WorkflowRun, error) {

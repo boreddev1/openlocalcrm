@@ -32,6 +32,7 @@ func GenerateAccessToken(userID uuid.UUID, email string, role string, privKey ed
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(duration)),
 			Issuer:    "openlocalcrm",
+			Audience:  jwt.ClaimStrings{"openlocalcrm-api"},
 		},
 	}
 
@@ -46,7 +47,7 @@ func ValidateAccessToken(tokenStr string, pubKey ed25519.PublicKey) (*AccessClai
 			return nil, ErrInvalidToken
 		}
 		return pubKey, nil
-	})
+	}, jwt.WithIssuer("openlocalcrm"), jwt.WithAudience("openlocalcrm-api"))
 
 	if err != nil {
 		return nil, err

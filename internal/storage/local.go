@@ -1,16 +1,36 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+// maxUploadSize limits uploads to 50 MB.
+const maxUploadSize = 50 * 1024 * 1024
+
+// blockedMIMETypes are file types that must not be stored.
+var blockedMIMETypes = map[string]bool{
+	"application/x-executable":    true,
+	"application/x-mach-binary":   true,
+	"application/x-elf":           true,
+	"application/x-dosexec":       true,
+	"application/x-msdownload":    true,
+	"application/x-sharedlib":     true,
+	"application/javascript":      true,
+	"text/x-shellscript":          true,
+	"application/x-sh":            true,
+	"application/x-bat":           true,
+	"application/x-msdos-program": true,
+}
 
 // LocalStorage implements StorageService using the local filesystem volume
 type LocalStorage struct {
@@ -51,8 +71,14 @@ func (s *LocalStorage) Save(ctx context.Context, filename string, r io.Reader) (
 	hasher := sha256.New()
 	tee := io.TeeReader(r, hasher)
 
-	if _, err := io.Copy(tempFile, tee); err != nil {
+	// Limit upload size to prevent abuse
+	limited := io.LimitReader(tee, maxUploadSize+1)
+	written, err := io.Copy(tempFile, limited)
+	if err != nil {
 		return "", fmt.Errorf("failed writing upload: %w", err)
+	}
+	if written > maxUploadSize {
+		return "", fmt.Errorf("file exceeds maximum upload size of %d bytes", maxUploadSize)
 	}
 
 	hashStr := hex.EncodeToString(hasher.Sum(nil))[:16]
@@ -63,11 +89,50 @@ func (s *LocalStorage) Save(ctx context.Context, filename string, r io.Reader) (
 	finalName := fmt.Sprintf("%s_%s", hashStr, cleanName)
 	finalPath := filepath.Join(targetDir, finalName)
 
+	// CAS dedup: if a file with the same content hash already exists, return it
+	if _, err := os.Stat(finalPath); err == nil {
+		// File already exists with identical content hash – return the existing path
+		return filepath.Join(relDir, finalName), nil
+	}
+
+	// MIME-type validation via magic bytes
+	if err := s.validateMIME(tempFile.Name()); err != nil {
+		return "", err
+	}
+
 	if err := os.Rename(tempFile.Name(), finalPath); err != nil {
 		return "", fmt.Errorf("failed committing uploaded file: %w", err)
 	}
 
 	return filepath.Join(relDir, finalName), nil
+}
+
+// validateMIME reads the first 512 bytes of the file to detect MIME type and blocks dangerous types.
+func (s *LocalStorage) validateMIME(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open file for MIME check: %w", err)
+	}
+	defer f.Close()
+
+	buf := make([]byte, 512)
+	n, err := f.Read(buf)
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("failed to read file for MIME check: %w", err)
+	}
+
+	mimeType := http.DetectContentType(buf[:n])
+	// Normalize: "text/plain; charset=utf-8" → "text/plain"
+	if idx := bytes.IndexByte([]byte(mimeType), ';'); idx > 0 {
+		mimeType = mimeType[:idx]
+	}
+	mimeType = strings.TrimSpace(mimeType)
+
+	if blockedMIMETypes[mimeType] {
+		return fmt.Errorf("blocked file type: %s", mimeType)
+	}
+
+	return nil
 }
 
 func (s *LocalStorage) Open(ctx context.Context, relPath string) (io.ReadCloser, error) {

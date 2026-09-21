@@ -88,7 +88,21 @@ func (h *AppointmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AppointmentHandler) Update(w http.ResponseWriter, r *http.Request) {
+	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 	id := chi.URLParam(r, "id")
+
+	if claims != nil && claims.Role != "ADMIN" {
+		existing, err := h.svc.GetByID(r.Context(), id)
+		if err != nil {
+			http.Error(w, `{"error":"appointment not found"}`, http.StatusNotFound)
+			return
+		}
+		if existing.AssignedTo != "" && existing.AssignedTo != claims.Email && existing.AssignedTo != claims.UserID.String() {
+			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihre eigenen Termine bearbeiten"}`, http.StatusForbidden)
+			return
+		}
+	}
+
 	var input appointment.Appointment
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -107,7 +121,21 @@ func (h *AppointmentHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AppointmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 	id := chi.URLParam(r, "id")
+
+	if claims != nil && claims.Role != "ADMIN" {
+		existing, err := h.svc.GetByID(r.Context(), id)
+		if err != nil {
+			http.Error(w, `{"error":"appointment not found"}`, http.StatusNotFound)
+			return
+		}
+		if existing.AssignedTo != "" && existing.AssignedTo != claims.Email && existing.AssignedTo != claims.UserID.String() {
+			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihre eigenen Termine löschen"}`, http.StatusForbidden)
+			return
+		}
+	}
+
 	_ = h.svc.Delete(r.Context(), id)
 
 	w.Header().Set("Content-Type", "application/json")

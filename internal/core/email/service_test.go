@@ -64,3 +64,33 @@ func TestIngestEmailMessage(t *testing.T) {
 		t.Fatalf("expected 1 message stored in database")
 	}
 }
+
+func TestPasswordEncryption(t *testing.T) {
+	key := []byte("super-secret-master-key-for-test")
+	plaintext := "my-very-secret-imap-password-123!"
+
+	encrypted, err := email.EncryptPassword(plaintext, key)
+	if err != nil {
+		t.Fatalf("encryption failed: %v", err)
+	}
+
+	if encrypted == plaintext {
+		t.Fatalf("encrypted value should not match plaintext")
+	}
+
+	decrypted, err := email.DecryptPassword(encrypted, key)
+	if err != nil {
+		t.Fatalf("decryption failed: %v", err)
+	}
+
+	if decrypted != plaintext {
+		t.Fatalf("expected %s, got %s", plaintext, decrypted)
+	}
+
+	// Test with invalid key
+	wrongKey := []byte("different-secret-master-key-test")
+	_, err = email.DecryptPassword(encrypted, wrongKey)
+	if err == nil {
+		t.Fatalf("expected decryption failure with wrong key")
+	}
+}

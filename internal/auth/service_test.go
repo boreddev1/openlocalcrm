@@ -64,19 +64,34 @@ func TestAuthService_RefreshToken(t *testing.T) {
 		t.Fatalf("login failed: %v", err)
 	}
 
-	newToken, err := svc.RefreshToken(ctx, res.RefreshToken, "127.0.0.1", "TestAgent")
+	newToken, newRefresh, err := svc.RefreshToken(ctx, res.RefreshToken, "127.0.0.1", "TestAgent")
 	if err != nil {
 		t.Fatalf("refresh failed: %v", err)
+	}
+	if newRefresh == "" {
+		t.Fatalf("expected new refresh token")
 	}
 	claims, err := auth.ValidateAccessToken(newToken, pubKey)
 	if err != nil || claims.Email != "admin@openlocalcrm.local" {
 		t.Fatalf("invalid refreshed token: %v", err)
 	}
 
+	// Grace period test: Re-submitting old refresh token within 10s returns valid token pair
+	graceToken, graceRefresh, err := svc.RefreshToken(ctx, res.RefreshToken, "127.0.0.1", "TestAgent")
+	if err != nil || graceToken != newToken || graceRefresh != newRefresh {
+		t.Fatalf("expected grace period cache hit, got err=%v, token=%s, refresh=%s", err, graceToken, graceRefresh)
+	}
+
 	// Invalid refresh token
-	_, err = svc.RefreshToken(ctx, "invalid-token", "127.0.0.1", "TestAgent")
+	_, _, err = svc.RefreshToken(ctx, "invalid-token", "127.0.0.1", "TestAgent")
 	if err == nil {
 		t.Fatalf("expected error for invalid refresh token")
+	}
+
+	// Token Revocation test
+	auth.RevokeToken(newToken, time.Now().Add(1*time.Hour))
+	if !auth.IsTokenRevoked(newToken) {
+		t.Fatalf("expected token to be revoked")
 	}
 }
 
@@ -172,5 +187,15 @@ func TestAuthService_ChangePassword(t *testing.T) {
 	res, err := svc.Login(ctx, "admin@openlocalcrm.local", "newsecretpassword123", "", "127.0.0.1", "TestAgent")
 	if err != nil || res.Token == "" {
 		t.Fatalf("expected login success with new password, got: %v", err)
+	}
+
+	// Trying bypass passwords 'demo123' or 'oldpassword123' now that password is 'newsecretpassword123' MUST fail!
+	err = svc.ChangePassword(ctx, adminUUID, "demo123", "anotherpassword123")
+	if err != auth.ErrInvalidOldPassword {
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY: demo123 bypass accepted in ChangePassword!")
+	}
+	err = svc.ChangePassword(ctx, adminUUID, "oldpassword123", "anotherpassword123")
+	if err != auth.ErrInvalidOldPassword {
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY: oldpassword123 bypass accepted in ChangePassword!")
 	}
 }

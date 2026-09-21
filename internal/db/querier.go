@@ -68,6 +68,7 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	GetWorkflowByID(ctx context.Context, id string) (Workflow, error)
+	GetWorkflowRunByID(ctx context.Context, id string) (WorkflowRun, error)
 	ListAIResearchJobs(ctx context.Context) ([]AiResearchJob, error)
 	ListAllNotifications(ctx context.Context, arg ListAllNotificationsParams) ([]Notification, error)
 	ListAppointments(ctx context.Context) ([]Appointment, error)

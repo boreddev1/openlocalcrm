@@ -1,0 +1,1234 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset=utf8>
+  <meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <style>
+    :root {
+      color-scheme: light;
+      box-sizing: border-box;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px)
+    }
+
+    html {
+      scroll-padding-top: env(safe-area-inset-top, 0px)
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font: 14px -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #faf9f5;
+      color: #141413
+    }
+
+    img {
+      max-width: 100%
+    }
+
+    [hidden]:not([hidden=until-found i]) {
+      display: none !important
+    }
+  </style>
+</head>
+
+<body>
+  <!doctype html>
+  <title>Prüfbericht OpenLocalCRM</title>
+  <meta charset="utf-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #EFF1EC;
+      --surface: #FFFFFF;
+      --surface-2: #F7F8F5;
+      --ink: #1B1E22;
+      --ink-soft: #4E5560;
+      --ink-faint: #838A93;
+      --border: #DBDED6;
+      --accent: #1F3A5F;
+      --accent-soft: #E6ECF3;
+      --accent-ink: #14283E;
+      --sev-critical: #A32F27;
+      --sev-critical-bg: #FBEAE8;
+      --sev-high: #A15400;
+      --sev-high-bg: #FCEFDC;
+      --sev-medium: #8A6D00;
+      --sev-medium-bg: #FBF3D9;
+      --sev-low: #52606B;
+      --sev-low-bg: #ECEEF0;
+      --shadow: 0 1px 2px rgba(27, 30, 34, .06), 0 1px 1px rgba(27, 30, 34, .04);
+      color-scheme: light dark;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #15171A;
+        --surface: #1D2024;
+        --surface-2: #22262B;
+        --ink: #E9EAE6;
+        --ink-soft: #AAB0B8;
+        --ink-faint: #767E87;
+        --border: #2C3136;
+        --accent: #8FB4DE;
+        --accent-soft: #22303F;
+        --accent-ink: #CFE0F3;
+        --sev-critical: #FF7A6E;
+        --sev-critical-bg: #3A211F;
+        --sev-high: #F2A94D;
+        --sev-high-bg: #3A2E17;
+        --sev-medium: #E4C64F;
+        --sev-medium-bg: #35300F;
+        --sev-low: #9DA6AF;
+        --sev-low-bg: #262A2E;
+        --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+      }
+    }
+
+    :root[data-theme="dark"] {
+      --bg: #15171A;
+      --surface: #1D2024;
+      --surface-2: #22262B;
+      --ink: #E9EAE6;
+      --ink-soft: #AAB0B8;
+      --ink-faint: #767E87;
+      --border: #2C3136;
+      --accent: #8FB4DE;
+      --accent-soft: #22303F;
+      --accent-ink: #CFE0F3;
+      --sev-critical: #FF7A6E;
+      --sev-critical-bg: #3A211F;
+      --sev-high: #F2A94D;
+      --sev-high-bg: #3A2E17;
+      --sev-medium: #E4C64F;
+      --sev-medium-bg: #35300F;
+      --sev-low: #9DA6AF;
+      --sev-low-bg: #262A2E;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.55;
+      padding-inline: max(16px, env(safe-area-inset-left, 0px));
+    }
+
+    h1,
+    h2,
+    h3 {
+      font-family: "IBM Plex Serif", Georgia, serif;
+      text-wrap: balance;
+      margin: 0;
+    }
+
+    code,
+    .mono {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    img {
+      max-width: 100%;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    .shell {
+      max-width: 1180px;
+      margin-inline: auto;
+      padding-block: 28px 64px;
+    }
+
+    /* ---- Masthead ---- */
+    .masthead {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      box-shadow: var(--shadow);
+      padding: 28px 32px;
+      display: flex;
+      gap: 28px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .seal {
+      flex: none;
+      width: 68px;
+      height: 68px;
+    }
+
+    .masthead-text {
+      flex: 1;
+      min-width: 240px;
+    }
+
+    .eyebrow {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11.5px;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+
+    h1.title {
+      font-size: clamp(24px, 3.4vw, 32px);
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .subtitle {
+      color: var(--ink-soft);
+      margin-top: 6px;
+      font-size: 14.5px;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 22px;
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--ink-soft);
+    }
+
+    .meta-row div {
+      display: flex;
+      gap: 6px;
+    }
+
+    .meta-row b {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    /* ---- Summary bar ---- */
+    .summary {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 18px;
+    }
+
+    @media (max-width: 760px) {
+      .summary {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      box-shadow: var(--shadow);
+      padding: 20px 24px;
+    }
+
+    .panel h2 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .tally-bar {
+      display: flex;
+      height: 28px;
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .tally-seg {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font: 600 12.5px/1 "IBM Plex Mono", monospace;
+      color: #fff;
+    }
+
+    .tally-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 12px;
+      font-size: 12.5px;
+    }
+
+    .tally-legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--ink-soft);
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .summary p {
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: 13.8px;
+    }
+
+    .summary strong {
+      color: var(--ink);
+    }
+
+    /* ---- Layout: nav + content ---- */
+    .layout {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 28px;
+      margin-top: 24px;
+      align-items: start;
+    }
+
+    @media (max-width: 860px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .toc {
+        position: static !important;
+      }
+    }
+
+    .toc {
+      position: sticky;
+      top: calc(16px + env(safe-area-inset-top, 0px));
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+    }
+
+    .toc-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--ink-faint);
+      margin-bottom: 10px;
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    .toc a {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 3px;
+      text-decoration: none;
+      color: var(--ink-soft);
+      font-size: 13.5px;
+    }
+
+    .toc a:hover {
+      background: var(--surface-2);
+      color: var(--ink);
+    }
+
+    .toc a b {
+      color: var(--ink);
+      font-weight: 500;
+    }
+
+    .toc small {
+      font-family: "IBM Plex Mono", monospace;
+      color: var(--ink-faint);
+    }
+
+    .filter-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .chip-btn {
+      font: 500 11.5px "IBM Plex Mono", monospace;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--ink-soft);
+      border-radius: 999px;
+      padding: 4px 10px;
+      cursor: pointer;
+    }
+
+    .chip-btn[aria-pressed="true"] {
+      background: var(--accent);
+      color: var(--surface);
+      border-color: var(--accent);
+    }
+
+    .chip-btn:focus-visible,
+    a:focus-visible,
+    input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* ---- Sections ---- */
+    section.sev-group {
+      margin-bottom: 36px;
+      scroll-margin-top: 16px;
+    }
+
+    .sev-heading {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--border);
+    }
+
+    .sev-heading h2 {
+      font-size: 20px;
+    }
+
+    .sev-heading .count {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 13px;
+      color: var(--ink-faint);
+    }
+
+    .finding {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--sev-c);
+      border-radius: 3px;
+      box-shadow: var(--shadow);
+      padding: 16px 20px;
+      margin-bottom: 10px;
+      scroll-margin-top: 16px;
+    }
+
+    .finding-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+
+    .sev-chip {
+      font: 600 11px "IBM Plex Mono", monospace;
+      letter-spacing: .03em;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--sev-bg);
+      color: var(--sev-c);
+    }
+
+    .finding-title {
+      font-weight: 600;
+      font-size: 15px;
+    }
+
+    .finding-refs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+
+    .ref {
+      font: 500 12px "IBM Plex Mono", monospace;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--ink-soft);
+      padding: 1px 7px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+
+    .finding p {
+      margin: 6px 0 0;
+      color: var(--ink-soft);
+      font-size: 14px;
+    }
+
+    .finding p.scenario::before {
+      content: "Szenario: ";
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .finding p.fix::before {
+      content: "Empfehlung: ";
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .finding p.fix {
+      color: var(--ink-soft);
+    }
+
+    .verified {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font: 500 10.5px "IBM Plex Mono", monospace;
+      color: var(--accent);
+      margin-left: 8px;
+    }
+
+    .verified::before {
+      content: "✓";
+    }
+
+    .finding[data-sev="critical"] {
+      --sev-c: var(--sev-critical);
+      --sev-bg: var(--sev-critical-bg);
+    }
+
+    .finding[data-sev="high"] {
+      --sev-c: var(--sev-high);
+      --sev-bg: var(--sev-high-bg);
+    }
+
+    .finding[data-sev="medium"] {
+      --sev-c: var(--sev-medium);
+      --sev-bg: var(--sev-medium-bg);
+    }
+
+    .finding[data-sev="low"] {
+      --sev-c: var(--sev-low);
+      --sev-bg: var(--sev-low-bg);
+    }
+
+    footer.methodology {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      color: var(--ink-faint);
+      font-size: 12.5px;
+      max-width: 70ch;
+    }
+
+    footer.methodology h3 {
+      font-size: 13px;
+      color: var(--ink-soft);
+      margin-bottom: 6px;
+    }
+
+    footer.methodology p {
+      margin: 4px 0;
+    }
+  </style>
+
+  <div class="shell">
+
+    <header class="masthead">
+      <svg class="seal" viewBox="0 0 68 68" aria-hidden="true">
+        <circle cx="34" cy="34" r="31" fill="none" stroke="var(--accent)" stroke-width="1.6" />
+        <circle cx="34" cy="34" r="25" fill="none" stroke="var(--accent)" stroke-width="1" />
+        <path d="M34 16 L40 30 L55 31 L43 40 L47 55 L34 46 L21 55 L25 40 L13 31 L28 30 Z" fill="var(--accent)"
+          opacity="0.85" />
+        <text x="34" y="63" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="6.2"
+          fill="var(--accent)" letter-spacing="1">GEPRÜFT</text>
+      </svg>
+      <div class="masthead-text">
+        <div class="eyebrow">Interner Prüfbericht · Read-Only-Review</div>
+        <h1 class="title">OpenLocalCRM — Sicherheits- und Implementierungs-Audit</h1>
+        <p class="subtitle">Systematische Durchsicht von Auth, AI-Gateway, Routing/Autorisierung, Datenhaltung,
+          Core-Services, Frontend und Doku-Konformität.</p>
+        <div class="meta-row">
+          <div><b>Repository</b> openlocalcrm</div>
+          <div><b>Branch</b> main</div>
+          <div><b>Datum</b> 21.09.2026</div>
+          <div><b>Umfang</b> 9 Bereiche, ~38.000 LOC</div>
+          <div><b>Methode</b> 8 parallele Read-Only-Analysen + manuelle Gegenprüfung</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="summary">
+      <div class="panel">
+        <h2>Befunde nach Schweregrad</h2>
+        <div class="tally-bar">
+          <div class="tally-seg" style="background:var(--sev-critical); flex:5">5</div>
+          <div class="tally-seg" style="background:var(--sev-high); flex:9">9</div>
+          <div class="tally-seg" style="background:var(--sev-medium); flex:18">18</div>
+          <div class="tally-seg" style="background:var(--sev-low); flex:9">9</div>
+        </div>
+        <div class="tally-legend">
+          <span><i class="dot" style="background:var(--sev-critical)"></i>Kritisch · 5</span>
+          <span><i class="dot" style="background:var(--sev-high)"></i>Hoch · 9</span>
+          <span><i class="dot" style="background:var(--sev-medium)"></i>Mittel · 18</span>
+          <span><i class="dot" style="background:var(--sev-low)"></i>Niedrig · 9</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Kernbefund</h2>
+        <p><strong>Zwei hartkodierte Master-Bypässe</strong> in der Auth-Schicht (2FA-Umgehung per Fix-Code,
+          Passwort-Änderung per Fix-String) ermöglichen vollständige Account-Übernahme und wirken wie versehentlich
+          stehen gelassener Testcode. <strong>Mehrere dokumentierte Compliance-Funktionen</strong> (Steuer-ID-Redaktion,
+          EU-AI-Act-Audit-Ledger, HITL-Automation) existieren im Code nicht oder nur als Attrappe.</p>
+      </div>
+    </div>
+
+    <div class="layout">
+      <nav class="toc" aria-label="Inhaltsverzeichnis">
+        <div class="toc-title">Inhalt</div>
+        <a href="#kritisch"><b>Kritisch</b><small>5</small></a>
+        <a href="#hoch"><b>Hoch</b><small>9</small></a>
+        <a href="#mittel"><b>Mittel</b><small>18</small></a>
+        <a href="#niedrig"><b>Niedrig</b><small>9</small></a>
+        <div class="filter-row" role="group" aria-label="Nach Schweregrad filtern">
+          <button class="chip-btn" data-filter="critical" aria-pressed="false">Kritisch</button>
+          <button class="chip-btn" data-filter="high" aria-pressed="false">Hoch</button>
+          <button class="chip-btn" data-filter="medium" aria-pressed="false">Mittel</button>
+          <button class="chip-btn" data-filter="low" aria-pressed="false">Niedrig</button>
+          <button class="chip-btn" data-filter="reset" aria-pressed="false" style="margin-left:auto">Alle</button>
+        </div>
+      </nav>
+
+      <main id="findings">
+
+        <section class="sev-group" id="kritisch">
+          <div class="sev-heading">
+            <h2>Kritisch</h2><span class="count">5 Befunde</span>
+          </div>
+
+          <article class="finding" data-sev="critical">
+            <div class="finding-head">
+              <span class="sev-chip">KRITISCH</span>
+              <span class="finding-title">Hartkodierter 2FA-Bypass-Code</span>
+              <span class="verified">verifiziert</span>
+              <div class="finding-refs"><code class="ref">internal/auth/totp.go:21-22</code></div>
+            </div>
+            <p><code>ValidateTOTPCode</code> gibt <code>true</code> zurück, sobald der übergebene Code exakt
+              <code>"123456"</code> lautet — unabhängig vom tatsächlichen TOTP-Secret des Nutzers. Kein Demo-Flag, kein
+              Build-Tag, aktiver Produktionscode.</p>
+            <p class="scenario">Jeder, der E-Mail und Passwort eines Opfers kennt (z.B. aus einem Leak), gibt beim Login
+              als 2FA-Code <code>123456</code> ein und umgeht die Zwei-Faktor-Absicherung vollständig.</p>
+            <p class="fix">Sonderfall entfernen, ausschließlich echte TOTP-Validierung gegen das gespeicherte Secret
+              zulassen.</p>
+          </article>
+
+          <article class="finding" data-sev="critical">
+            <div class="finding-head">
+              <span class="sev-chip">KRITISCH</span>
+              <span class="finding-title">Passwort-Backdoor in ChangePassword</span>
+              <span class="verified">verifiziert</span>
+              <div class="finding-refs"><code class="ref">internal/auth/service.go:244</code></div>
+            </div>
+            <p>Neben dem echten aktuellen Passwort akzeptiert <code>ChangePassword</code> zusätzlich die fest codierten
+              Strings <code>"oldpassword123"</code> und <code>"demo123"</code> als gültiges „altes Passwort" — für jeden
+              Account, nicht nur Demo-Nutzer.</p>
+            <p class="scenario">Jeder Angreifer mit einem gültigen (auch niedrig privilegierten oder liegengelassenen)
+              Access-Token ruft <code>POST /change-password</code> mit <code>old_password=demo123</code> auf und setzt
+              ein neues Passwort für den Account — vollständige Kontoübernahme ohne Kenntnis des echten Passworts.</p>
+            <p class="fix">Beide Sonderfälle entfernen, ausschließlich <code>CheckPassword</code> gegen den echten Hash
+              prüfen.</p>
+          </article>
+
+          <article class="finding" data-sev="critical">
+            <div class="finding-head">
+              <span class="sev-chip">KRITISCH</span>
+              <span class="finding-title">EU-AI-Act-Audit-Ledger existiert nur im Arbeitsspeicher</span>
+              <span class="verified">verifiziert</span>
+              <div class="finding-refs"><code class="ref">internal/ai/observability.go:32-53</code><code
+                  class="ref">docs/AI_COPILOT_AND_COMPLIANCE.md:28</code></div>
+            </div>
+            <p><code>ObservabilityService</code> hält alle KI-Interaktionsprotokolle in einer In-Memory-Slice (Cap 500
+              Einträge), es gibt keinen einzigen Datenbank-Schreibzugriff in dieser Datei. Die zugehörige Tabelle
+              <code>ai_audit_logs</code> existiert zwar als Migration, aber keine sqlc-Query schreibt je hinein. Die
+              Doku wirbt explizit mit „revisionssicherem EU AI Act Audit-Ledger (Art. 50/52)".</p>
+            <p class="scenario">Ein Prozess-Neustart (Deployment, Crash, Container-Restart) löscht sämtliche
+              KI-Interaktionsnachweise unwiederbringlich — exakt das Gegenteil von „revisionssicher", während die
+              Software selbst behauptet, konform zu sein.</p>
+            <p class="fix">Audit-Einträge tatsächlich in <code>ai_audit_logs</code> persistieren oder
+              Compliance-Anspruch in der Doku zurücknehmen.</p>
+          </article>
+
+          <article class="finding" data-sev="critical">
+            <div class="finding-head">
+              <span class="sev-chip">KRITISCH</span>
+              <span class="finding-title">Steuer-ID-Redaktion dokumentiert, aber nie ausgeführt</span>
+              <span class="verified">verifiziert</span>
+              <div class="finding-refs"><code class="ref">internal/ai/guard.go:14,26-36</code><code
+                  class="ref">docs/AI_COPILOT_AND_COMPLIANCE.md:16</code></div>
+            </div>
+            <p><code>taxIDRegex</code> ist definiert, wird aber in <code>SanitizeInput</code> an keiner Stelle
+              angewendet (nur IBAN-, Kreditkarten- und Secret-Regex laufen tatsächlich). Die Compliance-Doku verspricht
+              explizit die Maskierung deutscher Steuer-IDs zu <code>[REDACTED_TAXID]</code>.</p>
+            <p class="scenario">Ein Vertriebsmitarbeiter kopiert eine Kundenunterlage inkl. 11-stelliger Steuer-ID in
+              den KI-Chat — die ID geht unredigiert an das LLM (lokal oder extern), obwohl die Doku genau das
+              ausschließt.</p>
+            <p class="fix">Einen Aufruf von <code>taxIDRegex.ReplaceAllString</code> in <code>SanitizeInput</code>
+              ergänzen.</p>
+          </article>
+
+          <article class="finding" data-sev="critical">
+            <div class="finding-head">
+              <span class="sev-chip">KRITISCH</span>
+              <span class="finding-title">HITL-Automation-Engine ist reine Attrappe</span>
+              <span class="verified">verifiziert</span>
+              <div class="finding-refs"><code class="ref">internal/core/automation/service.go</code><code
+                  class="ref">internal/queue/jobs.go:22-24,39-41</code></div>
+            </div>
+            <p>Der Service kennt nur <code>ListDefaultWorkflows</code>, <code>CreateWorkflow</code>,
+              <code>ListRuns</code> — keinerlei Ausführungslogik. Kein Code liest <code>ActionType</code> aus und führt
+              ihn aus, <code>river.Insert</code> wird repo-weit kein einziges Mal aufgerufen,
+              <code>WorkflowRun.Status</code>/<code>CurrentStep</code> werden nie durch echte Trigger fortgeschritten.
+              Die Queue-Worker <code>EmailSyncWorker</code>/<code>EmailTriageWorker</code> sind No-Op-Stubs.</p>
+            <p class="scenario">Die Architekturdoku verspricht eine „Human-in-the-loop"-Freigabe für automatisierte
+              Aktionen (Massen-E-Mail, Aufgaben, Tags). Tatsächlich passiert bei einem „aktivierten" Workflow schlicht
+              nichts — wer sich auf die beworbene Freigabe-Schranke als Sicherheitsmechanismus verlässt, irrt sich in
+              beide Richtungen: kein Risiko unautorisierter Massenaktionen, aber auch keine funktionierende
+              Automatisierung.</p>
+            <p class="fix">Feature entweder fertigstellen (Dispatch-Logik + Queue-Anbindung) oder aus der Doku als
+              „geplant/nicht implementiert" kennzeichnen.</p>
+          </article>
+        </section>
+
+        <section class="sev-group" id="hoch">
+          <div class="sev-heading">
+            <h2>Hoch</h2><span class="count">9 Befunde</span>
+          </div>
+
+          <article class="finding" data-sev="high">
+            <div class="finding-head"><span class="sev-chip">HOCH</span><span class="finding-title">Kein serverseitiges
+                Logout / keine Token-Revocation</span>
+              <div class="finding-refs"><code class="ref">handlers/auth.go</code><code
+                  class="ref">auth/service.go</code></div>
+            </div>
+            <p>Logout löscht nur die Cookies clientseitig. Die vorhandenen Queries
+              <code>DeleteRefreshToken</code>/<code>DeleteUserRefreshTokens</code> werden nirgends aufgerufen. Kein
+              Blocklist-Mechanismus für Access-Tokens.</p>
+            <p class="scenario">Ein gestohlener Access-Token (24h) oder Refresh-Token (30 Tage) bleibt nach „Logout" bis
+              zum natürlichen Ablauf voll gültig.</p>
+            <p class="fix">Logout-Handler an <code>DeleteRefreshToken</code> anbinden; Access-Token-Blocklist oder kurze
+              TTL + Revocation-Check einführen.</p>
+          </article>
+
+          <article class="finding" data-sev="high">
+            <div class="finding-head"><span class="sev-chip">HOCH</span><span class="finding-title">Refresh-Token ohne
+                Rotation oder Single-Use</span>
+              <div class="finding-refs"><code class="ref">internal/auth/service.go:134-157</code></div>
+            </div>
+            <p><code>RefreshToken</code> löscht oder ersetzt den verwendeten Token nicht — er bleibt beliebig oft
+              wiederverwendbar.</p>
+            <p class="scenario">Ein einmal abgegriffener Refresh-Token lässt sich bis zu 30 Tage lang unbegrenzt oft für
+              neue Access-Tokens einlösen, ohne dass ein Replay erkannt wird.</p>
+            <p class="fix">Rotation mit Single-Use-Invalidierung und Replay-Erkennung (alter Token nach Gebrauch
+              ungültig machen).</p>
+          </article>
+
+          <article class="finding" data-sev="high">
+            <div class="finding-head"><span class="sev-chip">HOCH</span><span class="finding-title">Kein Rate-Limiting
+                auf sensiblen Endpunkten</span>
+              <div class="finding-refs"><code class="ref">router.go:317-331</code><code
+                  class="ref">handlers/auth.go</code></div>
+            </div>
+            <p>Nur der Login-Endpunkt nutzt den <code>RateLimiter</code>. <code>/refresh-token</code>,
+              <code>/verify-totp</code>, <code>/disable-totp</code>, <code>/change-password</code> sowie sämtliche
+              <code>/ai/*</code>-Routen sind unlimitiert.</p>
+            <p class="scenario">TOTP-Codes oder das aktuelle Passwort (via <code>/disable-totp</code>) lassen sich mit
+              gültigem Session-Token brute-forcen; <code>/ai/chat</code> und <code>/ai/research/company</code> lassen
+              sich beliebig oft aufrufen — Kostenrisiko bei bezahlten LLM-APIs, DoS-Risiko gegen lokales Ollama.</p>
+            <p class="fix">Rate-Limiter auf alle sicherheitsrelevanten und kostenrelevanten Endpunkte ausweiten.</p>
+          </article>
+
+          <article class="finding" data-sev="high">
+            <div class="finding-head"><span class="sev-chip">HOCH</span><span class="finding-title">Prompt-Injection:
+                System-Instruktion umgeht jede Sanitisierung</span>
+              <span class="verified">verifiziert</span>
+              <div class="finding-refs"><code class="ref">internal/ai/gateway.go:82-94</code><code
+                  class="ref">internal/ai/chat.go:142-144</code></div>
+            </div>
+            <p><code>Gateway.Generate</code> sanitisiert nur den <code>prompt</code>-Parameter, nie die
+              <code>systemInstruction</code>. In <code>chat.go</code> wird das client-seitig gesetzte
+              <code>req.Context</code> direkt und ungeprüft an die System-Instruktion angehängt — selbst die schwache
+              Regex-Redaktion (IBAN/Kreditkarte/Secret) greift hier nicht.</p>
+            <p class="scenario">Ein Nutzer setzt <code>Context</code> auf eine Instruktion wie „Ignoriere alle
+              vorherigen Anweisungen…" — sie landet ungefiltert im System-Prompt.</p>
+            <p class="fix">Auch <code>systemInstruction</code>/<code>req.Context</code> durch <code>SanitizeInput</code>
+              schicken; strukturelle Trennung von Trusted-System- und Untrusted-User-Text einführen.</p>
+          </article>
+
+          <article class="finding" data-sev="high">
+            <div class="finding-head"><span class="sev-chip">HOCH</span><span class="finding-title">ValidateOutput
+                validiert nichts</span>
+              <span class="verified">verifiziert</span>
+              <div class="finding-refs"><code class="ref">internal/ai/guard.go:39-46</code></div>
+            </div>
+            <p>Trotz Docstring „ensures... do not echo forbidden system instructions or dangerous markdown injections"
+              trimmt die Funktion nur Markdown-Codefences. Keine Prüfung auf geleakte System-Prompts oder gefährliches
+              Markdown/HTML in LLM-Antworten.</p>
+            <p class="scenario">Eine durch Prompt-Injection kompromittierte LLM-Antwort (z.B. Echo des System-Prompts
+              oder manipuliertes Markdown) passiert ungeprüft bis zur UI.</p>
+            <p class="fix">Funktion umbenennen oder echte Validierung implementieren (Instruction-Leak-Erkennung,
+              Markdown-/Link-Sanitisierung).</p>
+          </article>
+
+          <article class="finding" data-sev="high">
+            <div class="finding-head"><span class="sev-chip">HOCH</span><span class="finding-title">IDOR bei Notizen,
+                Aufgaben und Terminen</span>
+              <div class="finding-refs"><code class="ref">notes.go</code><code class="ref">todos.go</code><code
+                  class="ref">appointments.go</code></div>
+            </div>
+            <p>Nur <code>Delete</code> prüft Autor/Zuständigkeit bzw. Admin-Rolle. <code>Get</code>/<code>Update</code>
+              auf denselben Ressourcen prüfen gar kein Ownership — bei Terminen fehlt jede Prüfung, auch beim Löschen.
+            </p>
+            <p class="scenario">Jeder eingeloggte Nutzer kann fremde Notizen lesen und bearbeiten, fremde Aufgaben
+              umschreiben, fremde Termine löschen/verschieben, ohne Bezug zur Ressource zu haben.</p>
+            <p class="fix">Ownership-/Zuständigkeitsprüfung konsistent auf Get/Update/Delete anwenden, nicht nur Delete.
+            </p>
+          </article>
+
+          <article class="finding" data-sev="high">
+            <div class="finding-head"><span class="sev-chip">HOCH</span><span class="finding-title">Ungeschützter
+                Demo-Endpunkt injiziert beliebige E-Mails</span>
+              <div class="finding-refs"><code class="ref">emails.go:70</code><code class="ref">router.go:312</code>
+              </div>
+            </div>
+            <p><code>POST /emails/demo-ingest</code> hat keinerlei Rollen-Prüfung und wirkt wie ein liegengelassener
+              Seed/Demo-Endpunkt.</p>
+            <p class="scenario">Jeder authentifizierte Nutzer kann beliebige „eingehende" E-Mails (frei wählbarer
+              Absender, Betreff, Inhalt) in die CRM-Timeline einschleusen — Spoofing-Vektor innerhalb des Systems.</p>
+            <p class="fix">Endpunkt auf Demo-Modus beschränken (Build-Flag/Env-Check) oder entfernen.</p>
+          </article>
+
+          <article class="finding" data-sev="high">
+            <div class="finding-head"><span class="sev-chip">HOCH</span><span class="finding-title">KI-Ausweichantworten
+                sind nicht als solche erkennbar</span>
+              <div class="finding-refs"><code class="ref">internal/ai/chat.go:98-303</code><code
+                  class="ref">internal/ai/gateway.go:191-236</code></div>
+            </div>
+            <p><code>simulateGemmaResponse</code>/<code>generateSmartFallback</code> liefern bei LLM-Fehler
+              kanonisierten Ersatztext, das <code>Model</code>-Feld bleibt dabei wie bei einer echten Antwort gesetzt —
+              kein Flag in <code>ChatResponse</code> zeigt „simuliert" an. Schlägt zudem eine DB-Abfrage fehl, werden
+              die verschluckten Fehler als „0 Kontakte/Deals" präsentiert statt als Fehlerzustand.</p>
+            <p class="scenario">Ein Vertriebsmitarbeiter erhält bei einem Ollama-Ausfall eine selbstbewusst formulierte,
+              aber fabrizierte Antwort — ununterscheidbar von einer echten KI-Auskunft; bei gleichzeitigem DB-Fehler
+              wirkt „0 aktive Deals" wie ein Fakt statt wie ein Systemfehler.</p>
+            <p class="fix"><code>simulated: true</code> im Response-Objekt setzen und in der UI kennzeichnen; DB-Fehler
+              nicht als „0" maskieren, sondern als Fehler durchreichen.</p>
+          </article>
+
+          <article class="finding" data-sev="high">
+            <div class="finding-head"><span class="sev-chip">HOCH</span><span class="finding-title">Access-Token in
+                localStorage + Query-Parameter</span>
+              <div class="finding-refs"><code class="ref">AuthContext.tsx:85</code><code
+                  class="ref">client.ts:23</code><code class="ref">useSSE.ts:17</code></div>
+            </div>
+            <p>Der JWT liegt in <code>localStorage</code> (XSS-erreichbar) und wird zusätzlich für die SSE-Verbindung
+              als URL-Query-Parameter übertragen; der Server akzeptiert diesen Query-Token-Pfad
+              (<code>router.go:113</code>) gleichrangig neben Bearer-Header und Cookie.</p>
+            <p class="scenario">Jede künftige XSS-Lücke (aktuell keine gefunden) würde den Token vollständig
+              exfiltrierbar machen; der Query-Parameter-Pfad leakt den Token zusätzlich über Server-/Proxy-Logs und
+              Browser-Historie.</p>
+            <p class="fix">Token nicht in localStorage halten (httpOnly-Cookie als alleinigen Transport erwägen);
+              Query-Parameter-Fallback für SSE nur zulassen, wenn Cookie-Auth nicht greift.</p>
+          </article>
+        </section>
+
+        <section class="sev-group" id="mittel">
+          <div class="sev-heading">
+            <h2>Mittel</h2><span class="count">18 Befunde</span>
+          </div>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">Audit-Log-Fehler
+                werden überall verschluckt</span>
+              <div class="finding-refs"><code class="ref">contact/deal/company/todo/service.go</code></div>
+            </div>
+            <p>Jeder Aufruf erfolgt als <code>_ = s.audit.Log(...)</code>. Schlägt der Audit-Write fehl, läuft die
+              eigentliche Operation trotzdem durch, ohne dass es irgendwo sichtbar wird.</p>
+            <p class="scenario">Ein DB-Ausfall auf der Audit-Tabelle erzeugt lautlos Lücken im „unveränderbaren"
+              Compliance-Trail.</p>
+            <p class="fix">Fehler mindestens loggen, im Zweifel Operation nicht als erfolgreich melden.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">Queue-Worker sind
+                No-Op-Stubs</span>
+              <div class="finding-refs"><code class="ref">internal/queue/jobs.go:22-24,39-41</code></div>
+            </div>
+            <p><code>EmailSyncWorker</code>/<code>EmailTriageWorker</code> loggen nur und geben <code>nil</code> zurück;
+              <code>river.Insert</code> wird nirgends aufgerufen.</p>
+            <p class="scenario">Hintergrundverarbeitung für E-Mail-Sync/-Triage ist bereitgestellt, aber komplett
+              funktionslos.</p>
+            <p class="fix">Worker-Logik implementieren oder Feature aus der Doku entfernen.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">CreateWorkflow
+                täuscht Erfolg bei DB-Fehler vor</span>
+              <div class="finding-refs"><code class="ref">automation/service.go:156-185</code></div>
+            </div>
+            <p>Schlägt <code>s.querier.CreateWorkflow</code> fehl, wird der Fehler verschluckt und trotzdem eine lokal
+              generierte, nie gespeicherte ID zurückgegeben.</p>
+            <p class="scenario">Der Aufrufer glaubt, der Workflow sei gespeichert, obwohl er es nicht ist.</p>
+            <p class="fix">Fehler durchreichen statt verwerfen.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">Deal-Update
+                verwirft CustomFields</span>
+              <div class="finding-refs"><code class="ref">deal/service.go:189</code></div>
+            </div>
+            <p><code>Update</code> setzt <code>CustomFields</code> hart auf <code>"{}"</code> statt bestehende Werte zu
+              übernehmen.</p>
+            <p class="scenario">Jedes Update eines Deals löscht stillschweigend alle zuvor gesetzten benutzerdefinierten
+              Felder.</p>
+            <p class="fix">Bestehende CustomFields laden und mergen statt überschreiben.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">Keine
+                Nebenläufigkeitskontrolle bei Deal-Updates</span>
+              <div class="finding-refs"><code class="ref">deal/service.go:95-200</code></div>
+            </div>
+            <p>Kein Optimistic-Locking/Versionsfeld bei <code>UpdateStage</code>/<code>Update</code>.</p>
+            <p class="scenario">Zwei Vertriebsmitarbeiter schließen gleichzeitig denselben Deal ab — der letzte
+              Schreibzugriff gewinnt lautlos, ohne Konflikterkennung.</p>
+            <p class="fix">Versionsfeld oder <code>updated_at</code>-basierte Optimistic-Locking-Prüfung einführen.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">Fehlende
+                Feldvalidierung in Core-Services</span>
+              <div class="finding-refs"><code class="ref">deal/service.go</code><code
+                  class="ref">appointment/service.go</code><code class="ref">contact/service.go</code></div>
+            </div>
+            <p>Negativer Deal-Wert, Probability außerhalb 0–100, Termin-Ende vor -Beginn und ungültiges E-Mail-Format
+              werden anstandslos in die DB geschrieben — auch von den Tests nicht abgedeckt.</p>
+            <p class="scenario">Ein fehlerhafter Client-Request erzeugt einen Deal mit Wert <code>-5000€</code> oder
+              einen Termin, der vor seinem eigenen Start endet.</p>
+            <p class="fix">Basis-Validierung auf Service-Ebene ergänzen.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">Fehlende Indizes
+                auf Fremdschlüssel-Spalten</span>
+              <div class="finding-refs"><code class="ref">migrations/00002…:23,45-46,80-81</code></div>
+            </div>
+            <p><code>contacts.company_id</code>, <code>deals.company_id</code>/<code>contact_id</code>,
+              <code>todos.contact_id</code>/<code>deal_id</code> sind trotz aktiver Filterung in den zugehörigen Queries
+              unindiziert.</p>
+            <p class="scenario">Wachsende Kontakt-/Deal-Tabellen führen zu Sequential Scans bei alltäglichen
+              Listen-Abfragen.</p>
+            <p class="fix">Indizes auf diese Fremdschlüssel-Spalten ergänzen.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">Doppelte,
+                divergenzgefährdete Migrationsverzeichnisse</span>
+              <div class="finding-refs"><code class="ref">migrations/</code><code
+                  class="ref">internal/db/migrations/</code></div>
+            </div>
+            <p>Beide Verzeichnisse sind aktuell byte-identisch; nur <code>internal/db/migrations</code> wird per
+              <code>go:embed</code> tatsächlich genutzt.</p>
+            <p class="scenario">Eine künftige Änderung an nur einer Kopie führt zu stillem Auseinanderlaufen zwischen
+              „Doku"- und „aktivem" Migrationsstand.</p>
+            <p class="fix">Eines der beiden Verzeichnisse entfernen oder per Symlink/Build-Skript synchron halten.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span
+                class="finding-title">Docker-Compose-Standardpasswort für Postgres</span>
+              <div class="finding-refs"><code class="ref">docker-compose.yml</code></div>
+            </div>
+            <p><code>POSTGRES_PASSWORD=${DB_PASSWORD:-crm_pass}</code> — ein schwaches, bekanntes Default greift, wenn
+              <code>DB_PASSWORD</code> nicht gesetzt wird.</p>
+            <p class="scenario">Bei fehlerhafter Netzwerk-Isolation (z.B. versehentlich exponierter Postgres-Port) ist
+              die DB mit einem öffentlich bekannten Passwort erreichbar.</p>
+            <p class="fix">Kein Default setzen, Start ohne <code>DB_PASSWORD</code> verweigern.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">Caddyfile erzwingt
+                kein TLS</span>
+              <div class="finding-refs"><code class="ref">Caddyfile</code></div>
+            </div>
+            <p>Der Site-Block lautet bloß <code>:80, :443 { … }</code> ohne Domain oder <code>tls</code>-Direktive —
+              Caddys automatisches HTTPS greift ohne Hostnamen nicht, Port 443 liefert de facto Klartext-HTTP.</p>
+            <p class="scenario">Ein Deployment „out of the box" liefert trotz beworbener HTTPS-Unterstützung
+              unverschlüsselten Datenverkehr, bis jemand manuell eine Domain einträgt.</p>
+            <p class="fix">Domain + <code>tls</code>-Direktive in Setup-Doku/Standardkonfiguration verpflichtend machen.
+            </p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">Kein CSRF-Token
+                trotz Cookie-Auth auf allen API-Routen</span>
+              <div class="finding-refs"><code class="ref">auth/middleware.go</code></div>
+            </div>
+            <p><code>AuthMiddleware</code> akzeptiert den <code>access_token</code>-Cookie als Fallback für jede
+              <code>/api/v1</code>-Route, nicht nur SSE. Kein CSRF-Token existiert; einzige Absicherung ist
+              <code>SameSite=Lax</code>.</p>
+            <p class="scenario">Bei einer künftigen CORS-Fehlkonfiguration oder in älteren Browsern wäre klassisches
+              Cross-Site-Request-Forgery sofort exploitierbar, da keine zweite Verteidigungslinie existiert.</p>
+            <p class="fix">Explizites CSRF-Token für zustandsändernde Requests ergänzen, auch wenn SameSite aktuell
+              greift.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">SSE-Token im
+                Query-Parameter</span>
+              <span class="verified">verifiziert</span>
+              <div class="finding-refs"><code class="ref">router.go:104-129</code></div>
+            </div>
+            <p><code>/events/stream</code> akzeptiert den Access-Token wahlweise per Bearer-Header, Cookie oder
+              <code>?token=</code>-Query-Parameter.</p>
+            <p class="scenario">Der Query-Parameter-Pfad landet in Server-/Proxy-Logs und Browser-Historie —
+              zusätzlicher Leak-Kanal neben den beiden sichereren Übertragungswegen.</p>
+            <p class="fix">Prüfen, ob der Query-Pfad noch gebraucht wird (Cookie-Fallback deckt den
+              Same-Origin-Browserfall bereits ab); sonst entfernen.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">/reports/sales
+                ohne Rollen-Prüfung</span>
+              <div class="finding-refs"><code class="ref">router.go:364-368</code></div>
+            </div>
+            <p>Anders als <code>/export</code>, <code>/backup</code>, <code>/settings</code> (alle ADMIN-only) ist der
+              Sales-Report für jeden authentifizierten Nutzer abrufbar.</p>
+            <p class="scenario">Jeder Nutzer kann aggregierte Umsatzzahlen einsehen, obwohl vergleichbare
+              Auswertungsdaten sonst konsequent auf Admins beschränkt sind.</p>
+            <p class="fix">Konsistent <code>RequireRole("ADMIN")</code> ergänzen oder bewusst als Team-weite Kennzahl
+              dokumentieren.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span
+                class="finding-title">SHA-256-„Deduplizierung" funktioniert nicht wie dokumentiert</span>
+              <div class="finding-refs"><code class="ref">internal/storage/local.go:58-64</code></div>
+            </div>
+            <p>Der Dateiname enthält Hash <em>und</em> Original-Dateiname, es gibt keine Existenzprüfung vor dem
+              Schreiben — zwei identische Anhänge mit unterschiedlichem Dateinamen belegen doppelten Speicherplatz,
+              entgegen der Architektur-Doku.</p>
+            <p class="scenario">Kapazitätsplanung, die sich auf die dokumentierte Dedup-Ersparnis verlässt, unterschätzt
+              den tatsächlichen Speicherbedarf.</p>
+            <p class="fix">Vor dem Schreiben auf Hash-Existenz prüfen und wiederverwenden, oder Doku korrigieren.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span
+                class="finding-title">PII-Filter-Statistik ist in Produktion konstant Null</span>
+              <div class="finding-refs"><code class="ref">chat.go:77,179</code><code
+                  class="ref">observability.go:76-89</code></div>
+            </div>
+            <p><code>PIIFilterTriggered</code> ist an jeder echten Aufrufstelle hartkodiert <code>false</code>; nur
+              Tests setzen es auf <code>true</code>. <code>TotalPIIBlocked</code> in den Observability-Stats ist damit
+              dauerhaft 0, obwohl <code>SanitizeInput</code> tatsächlich redigiert.</p>
+            <p class="scenario">Die im UI/Compliance-Bericht ausgewiesene „geblockte PII"-Kennzahl ist Fiktion —
+              suggeriert entweder, dass nichts redigiert wird, oder verschleiert reale Redaktionen.</p>
+            <p class="fix"><code>PIIFilterTriggered</code>/<code>PIIRedactionsCount</code> tatsächlich aus dem Ergebnis
+              von <code>SanitizeInput</code> ableiten.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">E-Mail-Triage wird
+                nicht auditiert</span>
+              <div class="finding-refs"><code class="ref">internal/ai/triage.go</code></div>
+            </div>
+            <p><code>TriageService</code> ruft <code>obsSvc.Record</code> nie auf, obwohl echte Kunden-PII (Absender,
+              Betreff, Inhalt) verarbeitet wird.</p>
+            <p class="scenario">KI-Verarbeitung von Kunden-E-Mails hinterlässt keinerlei Spur im (ohnehin schon
+              unvollständigen) Audit-Ledger.</p>
+            <p class="fix"><code>Record</code>-Aufruf analog zu <code>chat.go</code>/<code>research.go</code> ergänzen.
+            </p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span
+                class="finding-title">PasswordEncrypted-Feld ist nie tatsächlich verschlüsselt</span>
+              <div class="finding-refs"><code class="ref">internal/core/email/service.go:53</code></div>
+            </div>
+            <p>Für den (bislang ungenutzten) SMTP-Versandpfad existiert ein Feld <code>PasswordEncrypted</code>, aber
+              keine Verschlüsselungslogik dazu — irreführender Name.</p>
+            <p class="scenario">Sobald der SMTP-Versand implementiert wird, landet ein echtes Passwort mutmaßlich im
+              Klartext in der DB, weil der Feldname fälschlich Sicherheit suggeriert.</p>
+            <p class="fix">Feld vor Nutzung tatsächlich verschlüsseln oder umbenennen, solange es nur Klartext hält.</p>
+          </article>
+
+          <article class="finding" data-sev="medium">
+            <div class="finding-head"><span class="sev-chip">MITTEL</span><span class="finding-title">Kein
+                MIME-/Dateityp-Check im Storage-Layer</span>
+              <div class="finding-refs"><code class="ref">internal/storage/local.go</code></div>
+            </div>
+            <p>Aktuell nicht ausnutzbar, da kein Upload/Download-Handler an den Storage-Service angebunden ist. Als
+              Grundlage für ein künftiges Anhang-Feature aber unfertig: kein Content-Type-, Magic-Byte- oder
+              Extension-Check.</p>
+            <p class="scenario">Sobald ein Upload-Endpunkt angebunden wird, wäre z.B. ein SVG-Upload mit eingebettetem
+              Script ohne Prüfung möglich (Stored-XSS-Risiko).</p>
+            <p class="fix">Validierung ergänzen, bevor das Feature an einen HTTP-Endpunkt angebunden wird.</p>
+          </article>
+        </section>
+
+        <section class="sev-group" id="niedrig">
+          <div class="sev-heading">
+            <h2>Niedrig</h2><span class="count">9 Befunde</span>
+          </div>
+
+          <article class="finding" data-sev="low">
+            <div class="finding-head"><span class="sev-chip">NIEDRIG</span><span class="finding-title">User-Enumeration
+                via Timing-Seitenkanal</span>
+              <div class="finding-refs"><code class="ref">auth/service.go:67-71</code></div>
+            </div>
+            <p>Bei unbekannter E-Mail wird sofort abgebrochen, bei bekannter E-Mail läuft zusätzlich der langsame
+              Argon2id-Vergleich — messbarer Zeitunterschied verrät, ob eine E-Mail registriert ist.</p>
+            <p class="fix">Bei unbekannter E-Mail einen Dummy-Hash-Vergleich ausführen, um konstante Antwortzeit zu
+              erzwingen.</p>
+          </article>
+
+          <article class="finding" data-sev="low">
+            <div class="finding-head"><span class="sev-chip">NIEDRIG</span><span class="finding-title">Rate-Limiter ohne
+                Speichergrenze</span>
+              <div class="finding-refs"><code class="ref">internal/auth/limiter.go</code></div>
+            </div>
+            <p>In-Memory-Map wird nur lazy bei erneuter Abfrage bereinigt — kein hartes Kapazitätslimit.</p>
+            <p class="fix">Periodisches Aufräumen oder Kapazitätsgrenze ergänzen.</p>
+          </article>
+
+          <article class="finding" data-sev="low">
+            <div class="finding-head"><span class="sev-chip">NIEDRIG</span><span
+                class="finding-title">JWT-Issuer/Audience nicht validiert</span>
+              <div class="finding-refs"><code class="ref">internal/auth/jwt.go</code></div>
+            </div>
+            <p>Algorithmus-Erzwingung (Ed25519) ist korrekt, aber Issuer/Audience-Claims werden beim Parsen nicht
+              geprüft.</p>
+            <p class="fix"><code>jwt.WithIssuer</code>/<code>WithAudience</code>-Parser-Optionen ergänzen — Absicherung
+              für den Fall, dass der Key je geteilt wird.</p>
+          </article>
+
+          <article class="finding" data-sev="low">
+            <div class="finding-head"><span class="sev-chip">NIEDRIG</span><span class="finding-title">Diverse
+                verschluckte Fehler ohne Compliance-Bezug</span>
+              <div class="finding-refs"><code class="ref">auth/service.go:101,115,119</code><code
+                  class="ref">appointment/service.go:293</code><code class="ref">note/service.go:249</code></div>
+            </div>
+            <p><code>crypto/rand</code>-Fehler bei Refresh-Token-Erzeugung ignoriert;
+              <code>CreateRefreshToken</code>/<code>UpdateUserLastLogin</code>-Fehler verschluckt; <code>Delete</code>
+              bei Terminen/Notizen meldet immer Erfolg, auch wenn die DB-Löschung fehlschlug.</p>
+            <p class="fix">Fehler an den Aufrufer durchreichen statt zu verwerfen.</p>
+          </article>
+
+          <article class="finding" data-sev="low">
+            <div class="finding-head"><span class="sev-chip">NIEDRIG</span><span class="finding-title">GetRecentLogs
+                crasht bei negativem Limit</span>
+              <div class="finding-refs"><code class="ref">internal/ai/observability.go:58-64</code></div>
+            </div>
+            <p><code>make([]AIAuditLog, limit)</code> ohne Prüfung auf negative Werte.</p>
+            <p class="fix">Limit auf ≥0 validieren, bevor die Slice allokiert wird.</p>
+          </article>
+
+          <article class="finding" data-sev="low">
+            <div class="finding-head"><span class="sev-chip">NIEDRIG</span><span class="finding-title">Byte- statt
+                Rune-sicheres Trunkieren von Scraped-HTML</span>
+              <div class="finding-refs"><code class="ref">internal/ai/research.go:224</code></div>
+            </div>
+            <p><code>html[:min(len(html),500)]</code> kappt auf Byte-Ebene — mehrbyte-UTF-8 (deutsche Umlaute) kann
+              mitten im Zeichen getrennt werden, bevor es an das LLM geht.</p>
+            <p class="fix">Rune-sicheres Trunkieren verwenden (<code>[]rune</code> oder
+              <code>utf8</code>-Hilfsfunktion).</p>
+          </article>
+
+          <article class="finding" data-sev="low">
+            <div class="finding-head"><span class="sev-chip">NIEDRIG</span><span class="finding-title">Modellname wird
+                bei OpenAI-Provider stillschweigend überschrieben</span>
+              <div class="finding-refs"><code class="ref">internal/ai/gateway.go:102-104</code></div>
+            </div>
+            <p>Ist <code>OllamaModel</code> leer oder exakt <code>"gemma4:12b"</code>, wird beim OpenAI-Aufruf ungefragt
+              auf <code>gpt-4o</code> umgeschaltet.</p>
+            <p class="fix">Modellwahl explizit pro Provider konfigurieren, keinen impliziten Fallback auf einen
+              Zufallstreffer.</p>
+          </article>
+
+          <article class="finding" data-sev="low">
+            <div class="finding-head"><span class="sev-chip">NIEDRIG</span><span class="finding-title">Direkter
+                Browser→Ollama-Fetch im Simulation-Widget</span>
+              <div class="finding-refs"><code class="ref">web/src/simulation/SimulationWidget.tsx:120</code></div>
+            </div>
+            <p>Hartkodierter Aufruf von <code>http://localhost:11434/api/generate</code> direkt aus dem Browser statt
+              über die Backend-API.</p>
+            <p class="scenario">Bei HTTPS-Auslieferung würde dieser Request als Mixed-Content vom Browser geblockt;
+              zudem umgeht er jede serverseitige Guard-/Rate-Limiting-Logik.</p>
+            <p class="fix">Sicherstellen, dass dieser Demo-Pfad nicht in Produktions-Builds landet, oder über die
+              reguläre <code>apiFetch</code>-Route führen.</p>
+          </article>
+
+          <article class="finding" data-sev="low">
+            <div class="finding-head"><span class="sev-chip">NIEDRIG</span><span
+                class="finding-title">Notification-MarkRead ohne Ownership-Prüfung</span>
+              <div class="finding-refs"><code class="ref">notifications.go:35</code></div>
+            </div>
+            <p><code>MarkRead</code> nimmt eine rohe <code>{id}</code> ohne Zuständigkeitsprüfung entgegen;
+              <code>ListUnread</code>/<code>MarkAllRead</code> sind ohnehin global, nicht nutzerskaliert.</p>
+            <p class="fix">Geringe Auswirkung, aber der Konsistenz halber Ownership-Check ergänzen.</p>
+          </article>
+        </section>
+
+      </main>
+    </div>
+
+    <footer class="methodology">
+      <h3>Methodik</h3>
+      <p>Reine Read-Only-Analyse (keine Code-Änderungen). Acht parallele, bereichsfokussierte Untersuchungen
+        (AI-Gateway, Autorisierung/Routing, Auth-Subsystem, Storage/DB, zwei Durchgänge Core-Domain-Services, Frontend,
+        Config/Doku-Abgleich) mit anschließender manueller Gegenprüfung aller als kritisch eingestuften Befunde direkt
+        im Quellcode (mit „verifiziert"-Markierung gekennzeichnet). Kein Build/Test-Lauf, keine Laufzeit-Exploits
+        durchgeführt — alle Aussagen basieren auf statischer Codelektüre. Einzelne Datei:Zeile-Angaben können sich bei
+        künftigen Commits verschieben.</p>
+    </footer>
+
+  </div>
+
+  <script>
+    (function () {
+      var buttons = document.querySelectorAll('.chip-btn');
+      var findings = document.querySelectorAll('.finding');
+      buttons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var f = btn.getAttribute('data-filter');
+          buttons.forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
+          if (f === 'reset') {
+            findings.forEach(function (el) { el.hidden = false; });
+            return;
+          }
+          btn.setAttribute('aria-pressed', 'true');
+          findings.forEach(function (el) {
+            el.hidden = el.getAttribute('data-sev') !== f;
+          });
+        });
+      });
+    })();
+  </script>
+
+</body>
+
+</html>

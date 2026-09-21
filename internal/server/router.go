@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -102,6 +103,7 @@ func NewRouter(cfg Config) http.Handler {
 	})
 
 	// Server-Sent Events stream: Protected with token authentication
+	// Server-Sent Events stream: Protected with token authentication (Cookie or Authorization: Bearer only)
 	if cfg.SSEHub != nil {
 		r.Get("/events/stream", func(w http.ResponseWriter, r *http.Request) {
 			token := ""
@@ -110,11 +112,14 @@ func NewRouter(cfg Config) http.Handler {
 				token = strings.TrimPrefix(authHeader, "Bearer ")
 			} else if cookie, err := r.Cookie("access_token"); err == nil && cookie.Value != "" {
 				token = cookie.Value
-			} else if qToken := r.URL.Query().Get("token"); qToken != "" {
-				token = qToken
 			}
 
 			if token == "" {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+
+			if auth.IsTokenRevoked(token) {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
@@ -156,14 +161,18 @@ func NewRouter(cfg Config) http.Handler {
 		notificationSvc := notification.NewService(cfg.DB, cfg.SSEHub)
 		exportSvc := export.NewService(cfg.DB, contactSvc)
 
-		obsSvc := ai.NewObservabilityService()
+		var dbtx db.DBTX
+		if provider, ok := cfg.DB.(interface{ DB() db.DBTX }); ok {
+			dbtx = provider.DB()
+		}
+		obsSvc := ai.NewObservabilityService(dbtx)
 		aiGateway := ai.NewGateway(ai.GatewayConfig{
 			DefaultProvider: ai.Provider(aiProvider),
 			OllamaBaseURL:   aiBaseURL,
 			OllamaModel:     aiModel,
 			APIKey:          aiAPIKey,
 		})
-		triageSvc := ai.NewTriageService(aiGateway)
+		triageSvc := ai.NewTriageService(aiGateway, obsSvc)
 		chatSvc := ai.NewChatService(aiGateway, obsSvc, cfg.DB)
 		researchSvc := ai.NewResearchService(aiGateway, obsSvc)
 
@@ -179,7 +188,7 @@ func NewRouter(cfg Config) http.Handler {
 		dealH = handlers.NewDealHandler(dealSvc)
 		todoH = handlers.NewTodoHandler(todoSvc)
 		noteH = handlers.NewNoteHandler(noteSvc, aiGateway)
-		emailH = handlers.NewEmailHandler(emailSvc)
+		emailH = handlers.NewEmailHandler(emailSvc, cfg.DemoMode)
 		aiH = handlers.NewAIHandler(triageSvc, chatSvc, researchSvc, obsSvc, aiGateway, cfg.DB)
 		connectorH = handlers.NewConnectorHandler(connectorEngine)
 		notificationH = handlers.NewNotificationHandler(notificationSvc)
@@ -189,12 +198,18 @@ func NewRouter(cfg Config) http.Handler {
 		settingsH = handlers.NewSettingsHandler()
 	}
 
+	// Rate limiters for sensitive operations (Findings #8, #34)
+	authLimiter := auth.NewRateLimiter(20, time.Minute, 5*time.Minute)
+	aiLimiter := auth.NewRateLimiter(30, time.Minute, 2*time.Minute)
+
 	// API v1 group
 	r.Route("/api/v1", func(api chi.Router) {
+		api.Use(CSRFProtectionMiddleware)
+
 		// Public Auth routes
 		if authH != nil {
 			api.Post("/auth/login", authH.Login)
-			api.Post("/auth/refresh", authH.Refresh)
+			api.With(auth.RateLimitMiddleware(authLimiter)).Post("/auth/refresh", authH.Refresh)
 			api.Post("/auth/logout", authH.Logout)
 		}
 
@@ -217,12 +232,15 @@ func NewRouter(cfg Config) http.Handler {
 				_ = json.NewEncoder(w).Encode(claims)
 			})
 
-			// Protected user account & security endpoints
+			// Protected user account & security endpoints (with rate limiting)
 			if authH != nil {
-				protected.Post("/auth/change-password", authH.ChangePassword)
-				protected.Post("/auth/totp/setup", authH.SetupTOTP)
-				protected.Post("/auth/totp/verify", authH.VerifyTOTP)
-				protected.Post("/auth/totp/disable", authH.DisableTOTP)
+				protected.Group(func(secRouter chi.Router) {
+					secRouter.Use(auth.RateLimitMiddleware(authLimiter))
+					secRouter.Post("/auth/change-password", authH.ChangePassword)
+					secRouter.Post("/auth/totp/setup", authH.SetupTOTP)
+					secRouter.Post("/auth/totp/verify", authH.VerifyTOTP)
+					secRouter.Post("/auth/totp/disable", authH.DisableTOTP)
+				})
 			}
 
 			// Protected User Management (Admin team endpoints)
@@ -315,6 +333,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if aiH != nil {
 				protected.Route("/ai", func(air chi.Router) {
+					air.Use(auth.RateLimitMiddleware(aiLimiter))
 					air.Post("/triage", aiH.TriageEmail)
 					air.Post("/chat", aiH.Chat)
 					air.Post("/research/company", aiH.ResearchCompany)
@@ -363,6 +382,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if reportsH != nil {
 				protected.Route("/reports", func(repr chi.Router) {
+					repr.Use(auth.RequireAnyRole("ADMIN", "BACKOFFICE"))
 					repr.Get("/sales", reportsH.GetSalesReport)
 				})
 			}
@@ -372,6 +392,7 @@ func NewRouter(cfg Config) http.Handler {
 					autr.Get("/", automationH.ListWorkflows)
 					autr.Get("/runs", automationH.ListRuns)
 					autr.With(auth.RequireRole("ADMIN")).Post("/", automationH.CreateWorkflow)
+					autr.With(auth.RequireRole("ADMIN")).Post("/runs/{id}/approve", automationH.ApproveStep)
 				})
 			}
 

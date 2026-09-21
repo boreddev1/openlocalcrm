@@ -30,4 +30,13 @@ func TestTOTPFlow(t *testing.T) {
 	if auth.ValidateTOTPCode("000000", secret) {
 		t.Fatalf("expected invalid code to fail")
 	}
+
+	// Verify that 123456 is NOT accepted as a hardcoded bypass
+	fakeSecret := "JBSWY3DPEHPK3PXP"
+	realCode, _ := totp.GenerateCode(fakeSecret, time.Now())
+	if realCode != "123456" {
+		if auth.ValidateTOTPCode("123456", fakeSecret) {
+			t.Fatalf("CRITICAL SECURITY VULNERABILITY: 123456 bypass was accepted!")
+		}
+	}
 }

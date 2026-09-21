@@ -100,6 +100,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Expires:  time.Now().Add(24 * time.Hour),
 		HttpOnly: true,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -110,9 +111,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			Path:     "/api/v1/auth",
 			Expires:  time.Now().Add(30 * 24 * time.Hour),
 			HttpOnly: true,
+			Secure:   r.TLS != nil,
 			SameSite: http.SameSiteStrictMode,
 		})
 	}
+
+	auth.SetCSRFCookie(w, r.TLS != nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(LoginResponse{
@@ -148,7 +152,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newToken, err := h.service.RefreshToken(r.Context(), token, r.RemoteAddr, r.UserAgent())
+	newToken, newRefreshToken, err := h.service.RefreshToken(r.Context(), token, r.RemoteAddr, r.UserAgent())
 	if err != nil {
 		http.Error(w, `{"error":"invalid_token","message":"`+err.Error()+`"}`, http.StatusUnauthorized)
 		return
@@ -160,16 +164,50 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Expires:  time.Now().Add(24 * time.Hour),
 		HttpOnly: true,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 	})
 
+	if newRefreshToken != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "refresh_token",
+			Value:    newRefreshToken,
+			Path:     "/api/v1/auth",
+			Expires:  time.Now().Add(30 * 24 * time.Hour),
+			HttpOnly: true,
+			Secure:   r.TLS != nil,
+			SameSite: http.SameSiteStrictMode,
+		})
+	}
+
+	auth.SetCSRFCookie(w, r.TLS != nil)
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"token": newToken,
+		"token":         newToken,
+		"refresh_token": newRefreshToken,
 	})
 }
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	var refreshToken string
+	if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
+		refreshToken = cookie.Value
+	}
+	if refreshToken != "" {
+		_ = h.service.RevokeRefreshToken(r.Context(), refreshToken)
+	}
+
+	var accessToken string
+	if cookie, err := r.Cookie("access_token"); err == nil && cookie.Value != "" {
+		accessToken = cookie.Value
+	} else if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+		accessToken = strings.TrimPrefix(authHeader, "Bearer ")
+	}
+	if accessToken != "" {
+		h.service.RevokeAccessToken(accessToken)
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "access_token",
 		Value:    "",
@@ -177,6 +215,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.SetCookie(w, &http.Cookie{
@@ -186,8 +225,10 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteStrictMode,
 	})
+	auth.ClearCSRFCookie(w)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})

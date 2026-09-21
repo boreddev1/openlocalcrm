@@ -2,7 +2,10 @@ package deal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -11,8 +14,11 @@ import (
 )
 
 var (
-	ErrDealNotFound = errors.New("deal not found")
-	ErrInvalidDeal  = errors.New("deal title is required")
+	ErrDealNotFound        = errors.New("deal not found")
+	ErrInvalidDeal         = errors.New("deal title is required")
+	ErrInvalidDealValue    = errors.New("deal value must be >= 0")
+	ErrInvalidProbability  = errors.New("probability must be between 0 and 100")
+	ErrConcurrencyConflict = errors.New("deal was modified by another user, please reload and retry")
 )
 
 type Service struct {
@@ -42,6 +48,9 @@ type CreateDealInput struct {
 func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateDealInput) (db.Deal, error) {
 	if input.Title == "" {
 		return db.Deal{}, ErrInvalidDeal
+	}
+	if input.Probability < 0 || input.Probability > 100 {
+		return db.Deal{}, ErrInvalidProbability
 	}
 
 	var compID, contID, assignID pgtype.UUID
@@ -86,13 +95,19 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateD
 	}
 
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "DEAL", deal.ID, "CREATE", deal, "", "")
+		if err := s.audit.Log(ctx, actorID, "DEAL", deal.ID, "CREATE", deal, "", ""); err != nil {
+			log.Printf("[audit] failed to log deal create: %v", err)
+		}
 	}
 
 	return deal, nil
 }
 
 func (s *Service) UpdateStage(ctx context.Context, actorID, dealID pgtype.UUID, stage string, probability int32) (db.Deal, error) {
+	if probability < 0 || probability > 100 {
+		return db.Deal{}, ErrInvalidProbability
+	}
+
 	var closedAt pgtype.Timestamptz
 	if stage == "WON" || stage == "LOST" {
 		closedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
@@ -110,10 +125,12 @@ func (s *Service) UpdateStage(ctx context.Context, actorID, dealID pgtype.UUID, 
 	}
 
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "DEAL", deal.ID, "UPDATE_STAGE", map[string]any{
+		if err := s.audit.Log(ctx, actorID, "DEAL", deal.ID, "UPDATE_STAGE", map[string]any{
 			"stage":       stage,
 			"probability": probability,
-		}, "", "")
+		}, "", ""); err != nil {
+			log.Printf("[audit] failed to log deal stage update: %v", err)
+		}
 	}
 
 	return deal, nil
@@ -138,20 +155,24 @@ func (s *Service) GetByID(ctx context.Context, id pgtype.UUID) (db.Deal, error) 
 }
 
 type UpdateDealInput struct {
-	ID          pgtype.UUID
-	Title       string
-	CompanyID   *pgtype.UUID
-	ContactID   *pgtype.UUID
-	Value       pgtype.Numeric
-	Currency    string
-	Stage       string
-	Probability int32
-	AssignedTo  *pgtype.UUID
+	ID           pgtype.UUID
+	Title        string
+	CompanyID    *pgtype.UUID
+	ContactID    *pgtype.UUID
+	Value        pgtype.Numeric
+	Currency     string
+	Stage        string
+	Probability  int32
+	AssignedTo   *pgtype.UUID
+	CustomFields []byte
 }
 
 func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateDealInput) (db.Deal, error) {
 	if input.Title == "" {
 		return db.Deal{}, ErrInvalidDeal
+	}
+	if input.Probability < 0 || input.Probability > 100 {
+		return db.Deal{}, ErrInvalidProbability
 	}
 
 	var compID, contID, assignID pgtype.UUID
@@ -175,6 +196,12 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateD
 		closedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 	}
 
+	// Merge custom fields: preserve existing fields, overwrite with new ones
+	mergedFields, err := s.mergeCustomFields(ctx, input.ID, input.CustomFields)
+	if err != nil {
+		return db.Deal{}, fmt.Errorf("failed to merge custom fields: %w", err)
+	}
+
 	deal, err := s.queries.UpdateDeal(ctx, db.UpdateDealParams{
 		ID:           input.ID,
 		Title:        input.Title,
@@ -186,17 +213,59 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateD
 		Probability:  input.Probability,
 		AssignedTo:   assignID,
 		ClosedAt:     closedAt,
-		CustomFields: []byte("{}"),
+		CustomFields: mergedFields,
 	})
 	if err != nil {
 		return db.Deal{}, err
 	}
 
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "DEAL", deal.ID, "UPDATE", deal, "", "")
+		if err := s.audit.Log(ctx, actorID, "DEAL", deal.ID, "UPDATE", deal, "", ""); err != nil {
+			log.Printf("[audit] failed to log deal update: %v", err)
+		}
 	}
 
 	return deal, nil
+}
+
+// mergeCustomFields merges new custom fields with existing ones from DB.
+// Existing keys are preserved unless explicitly overwritten by new values.
+func (s *Service) mergeCustomFields(ctx context.Context, dealID pgtype.UUID, newFields []byte) ([]byte, error) {
+	if len(newFields) == 0 {
+		// No new fields provided; load existing to preserve them
+		existing, err := s.queries.GetDealByID(ctx, dealID)
+		if err != nil {
+			return []byte("{}"), nil // new deal or not found
+		}
+		if len(existing.CustomFields) > 0 {
+			return existing.CustomFields, nil
+		}
+		return []byte("{}"), nil
+	}
+
+	// Load existing custom fields from DB
+	existing, err := s.queries.GetDealByID(ctx, dealID)
+	if err != nil {
+		// Deal not found, just use the new fields
+		return newFields, nil
+	}
+
+	existingMap := make(map[string]interface{})
+	if len(existing.CustomFields) > 0 {
+		_ = json.Unmarshal(existing.CustomFields, &existingMap)
+	}
+
+	newMap := make(map[string]interface{})
+	if err := json.Unmarshal(newFields, &newMap); err != nil {
+		return nil, fmt.Errorf("invalid custom fields JSON: %w", err)
+	}
+
+	// Merge: new values overwrite existing
+	for k, v := range newMap {
+		existingMap[k] = v
+	}
+
+	return json.Marshal(existingMap)
 }
 
 func (s *Service) Delete(ctx context.Context, actorID, dealID pgtype.UUID) error {
@@ -205,7 +274,9 @@ func (s *Service) Delete(ctx context.Context, actorID, dealID pgtype.UUID) error
 		return err
 	}
 	if s.audit != nil {
-		_ = s.audit.Log(ctx, actorID, "DEAL", dealID, "DELETE", map[string]string{"status": "deleted"}, "", "")
+		if err := s.audit.Log(ctx, actorID, "DEAL", dealID, "DELETE", map[string]string{"status": "deleted"}, "", ""); err != nil {
+			log.Printf("[audit] failed to log deal delete: %v", err)
+		}
 	}
 	return nil
 }

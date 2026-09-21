@@ -221,7 +221,11 @@ func (s *ResearchService) scrapeWebsite(ctx context.Context, targetURL string) (
 		title = u.Host
 	}
 
-	return title, metaDesc, html[:min(len(html), 500)]
+	runes := []rune(html)
+	if len(runes) > 500 {
+		return title, metaDesc, string(runes[:500])
+	}
+	return title, metaDesc, string(runes)
 }
 
 func min(a, b int) int {
