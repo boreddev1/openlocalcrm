@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -87,6 +88,10 @@ func (h *AIHandler) TriageEmail(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.triageSvc.TriageEmail(r.Context(), req.Sender, req.Subject, req.Body)
 	if err != nil {
+		if errors.Is(err, ai.ErrUpstreamUnavailable) {
+			http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+			return
+		}
 		http.Error(w, `{"error":"ai triage failed: `+err.Error()+`"}`, http.StatusInternalServerError)
 		return
 	}
@@ -104,6 +109,10 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.chatSvc.Chat(r.Context(), req)
 	if err != nil {
+		if errors.Is(err, ai.ErrUpstreamUnavailable) {
+			http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+			return
+		}
 		http.Error(w, `{"error":"ai chat failed: `+err.Error()+`"}`, http.StatusInternalServerError)
 		return
 	}
@@ -149,12 +158,22 @@ func (h *AIHandler) ParseBill(w http.ResponseWriter, r *http.Request) {
 		CustomerName string `json:"customer_name"`
 		DocumentText string `json:"document_text"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	custName := req.CustomerName
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
 
-	// If document text is provided, attempt AI structured extraction
-	if req.DocumentText != "" && h.gateway != nil {
-		prompt := fmt.Sprintf(`Extrahiere aus folgendem Energierechnungs-Text die Daten für einen PV-Angebotsrechner im JSON-Format:
+	if strings.TrimSpace(req.DocumentText) == "" {
+		http.Error(w, `{"error":"document_text_required","message":"Es wurde kein Rechnungs- oder Zählertext übermittelt"}`, http.StatusBadRequest)
+		return
+	}
+
+	if h.gateway == nil {
+		http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+		return
+	}
+
+	prompt := fmt.Sprintf(`Extrahiere aus folgendem Energierechnungs-Text die Daten für einen PV-Angebotsrechner im JSON-Format:
 Text: %s
 Erwartetes JSON-Format:
 {
@@ -168,48 +187,30 @@ Erwartetes JSON-Format:
   "recommended_storage_kwh": 12.0
 }`, req.DocumentText)
 
-		if out, err := h.gateway.Generate(r.Context(), prompt, "Du bist ein präziser OCR-Parser für Energierechnungen. Antworte ausschließlich mit gültigem JSON."); err == nil {
-			cleaned := strings.TrimSpace(out)
-			if idx := strings.Index(cleaned, "{"); idx >= 0 {
-				if endIdx := strings.LastIndex(cleaned, "}"); endIdx > idx {
-					cleaned = cleaned[idx : endIdx+1]
-				}
-			}
-			var parsedData map[string]any
-			if err := json.Unmarshal([]byte(cleaned), &parsedData); err == nil {
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"simulated": false,
-					"mode":      "ai_ocr_extraction",
-					"extracted": parsedData,
-				})
-				return
-			}
+	out, err := h.gateway.Generate(r.Context(), prompt, "Du bist ein präziser OCR-Parser für Energierechnungen. Antworte ausschließlich mit gültigem JSON.")
+	if err != nil {
+		http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+		return
+	}
+
+	cleaned := strings.TrimSpace(out)
+	if idx := strings.Index(cleaned, "{"); idx >= 0 {
+		if endIdx := strings.LastIndex(cleaned, "}"); endIdx > idx {
+			cleaned = cleaned[idx : endIdx+1]
 		}
 	}
-
-	if custName == "" {
-		custName = "Familie Müller (Demo-Vorlage)"
-	}
-
-	res := map[string]any{
-		"simulated": true,
-		"mode":      "demo_template",
-		"note":      "Musterdaten für Vorführung und Angebotsrechner (kein Beleg-Upload übergeben)",
-		"extracted": map[string]any{
-			"customer_name":             custName,
-			"yearly_consumption":        6500,
-			"current_electricity_price": 0.385,
-			"meter_number":              "1EMH0012948291",
-			"roof_area_sqm":             75,
-			"roof_orientation":          "Süd (35° Dachneigung)",
-			"recommended_kwp":           14.5,
-			"recommended_storage_kwh":   12.0,
-		},
+	var parsedData map[string]any
+	if err := json.Unmarshal([]byte(cleaned), &parsedData); err != nil {
+		http.Error(w, `{"error":"ai_invalid_response","message":"KI-Antwort konnte nicht als JSON verarbeitet werden"}`, http.StatusBadGateway)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"simulated": false,
+		"mode":      "ai_ocr_extraction",
+		"extracted": parsedData,
+	})
 }
 
 func (h *AIHandler) ListKB(w http.ResponseWriter, r *http.Request) {

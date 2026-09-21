@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -13,6 +13,11 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrUpstreamUnavailable signals that the configured AI backend could not be
+// reached or returned an unsuccessful response. Callers must surface this as an
+// honest error instead of inventing a response.
+var ErrUpstreamUnavailable = errors.New("KI-Dienst nicht erreichbar")
 
 type Provider string
 
@@ -92,11 +97,11 @@ func (g *Gateway) Generate(ctx context.Context, prompt string, systemInstruction
 	case ProviderOpenAI:
 		return g.callOpenAI(ctx, cleanPrompt, cleanSystem)
 	case ProviderAnthropic:
-		return "", fmt.Errorf("ai provider 'anthropic' ist noch nicht konfiguriert")
+		return "", fmt.Errorf("%w: ai provider 'anthropic' ist noch nicht konfiguriert", ErrUpstreamUnavailable)
 	case ProviderGemini:
-		return "", fmt.Errorf("ai provider 'gemini' ist noch nicht konfiguriert")
+		return "", fmt.Errorf("%w: ai provider 'gemini' ist noch nicht konfiguriert", ErrUpstreamUnavailable)
 	default:
-		return "", fmt.Errorf("unbekannter AI-Provider: %s", g.cfg.DefaultProvider)
+		return "", fmt.Errorf("%w: unbekannter AI-Provider: %s", ErrUpstreamUnavailable, g.cfg.DefaultProvider)
 	}
 }
 
@@ -143,11 +148,13 @@ func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstructi
 	}
 
 	resp, err := g.http.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		log.Printf("[AI_GATEWAY_NOTICE] OpenAI backend call failed (err: %v); serving simulated fallback response", err)
-		return g.simulateGemmaResponse(prompt, systemInstruction)
+	if err != nil {
+		return "", fmt.Errorf("%w: openai request failed: %v", ErrUpstreamUnavailable, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("%w: openai backend returned HTTP %d", ErrUpstreamUnavailable, resp.StatusCode)
+	}
 
 	var res struct {
 		Choices []struct {
@@ -162,7 +169,7 @@ func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstructi
 	if len(res.Choices) > 0 {
 		return g.guard.ValidateOutput(res.Choices[0].Message.Content)
 	}
-	return g.simulateGemmaResponse(prompt, systemInstruction)
+	return "", fmt.Errorf("%w: openai backend returned no choices", ErrUpstreamUnavailable)
 }
 
 func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstruction string) (string, error) {
@@ -185,11 +192,13 @@ func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstructi
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := g.http.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		log.Printf("[AI_GATEWAY_NOTICE] Ollama daemon unavailable at %s (err: %v); serving simulated fallback response", g.cfg.OllamaBaseURL, err)
-		return g.simulateGemmaResponse(prompt, systemInstruction)
+	if err != nil {
+		return "", fmt.Errorf("%w: ollama request failed: %v", ErrUpstreamUnavailable, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("%w: ollama backend returned HTTP %d", ErrUpstreamUnavailable, resp.StatusCode)
+	}
 
 	var res struct {
 		Response string `json:"response"`
@@ -199,51 +208,4 @@ func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstructi
 	}
 
 	return g.guard.ValidateOutput(res.Response)
-}
-
-func (g *Gateway) simulateGemmaResponse(prompt string, systemInstruction string) (string, error) {
-	if strings.Contains(systemInstruction, "industry_keywords") {
-		res := map[string]any{
-			"summary":           "Führender Fachbetrieb für Solarenergie, gewerbliche Photovoltaik und Speicherlösungen.",
-			"industry_keywords": []string{"Photovoltaik", "Gewerbespeicher", "Energie", "B2B"},
-		}
-		raw, _ := json.Marshal(res)
-		return string(raw), nil
-	}
-
-	if strings.Contains(systemInstruction, "Copilot") || strings.Contains(systemInstruction, "Vertriebsassistent") {
-		// Isolate the actual user query from conversation history to prevent matching previous assistant greetings
-		userMsg := prompt
-		if idx := strings.LastIndex(prompt, "USER:"); idx != -1 {
-			userMsg = prompt[idx+5:]
-		}
-		lower := strings.ToLower(strings.TrimSpace(userMsg))
-
-		if lower == "hi" || lower == "hallo" || lower == "hey" || lower == "servus" || lower == "moin" ||
-			strings.HasPrefix(lower, "hi ") || strings.HasPrefix(lower, "hallo ") || strings.HasPrefix(lower, "guten tag") || strings.HasPrefix(lower, "guten morgen") || strings.Contains(lower, "wer bist du") {
-			return "Hallo! Ich bin Ihr OpenLocalCRM Vertriebs-Copilot. Ich unterstütze Sie bei Kundenkontakten, Pipeline-Deals, E-Mail-Kommunikation und automatisierten Vertriebsabläufen. Wie kann ich Ihnen heute helfen?", nil
-		}
-		if strings.Contains(lower, "pipeline") || strings.Contains(lower, "deal") || strings.Contains(lower, "umsatz") {
-			return "Gerne unterstütze ich Sie bei Ihrer Pipeline. Sie können Ihre Verkaufschancen einsehen, neue Deals anlegen und Abschlusswahrscheinlichkeiten pflegen.", nil
-		}
-		if strings.Contains(lower, "workflow") || strings.Contains(lower, "automation") {
-			return "Sie können automatisierte Workflows für Lead-Qualifizierung und Follow-Ups erstellen. Nutzen Sie dazu gerne den Bereich Automationen.", nil
-		}
-		if strings.Contains(lower, "kontakt") || strings.Contains(lower, "kunde") {
-			return "Im Adressbuch können Sie Kunden und Leads verwalten sowie Adressdaten und Energieprofile pflegen.", nil
-		}
-		return "Ich stehe als KI-Vertriebs-Copilot bereit. Wie kann ich Sie bei Ihren Deals, Kontakten oder Automatisierungen unterstützen? Nutzen Sie gerne die Schnellbefehle für häufige Aktionen.", nil
-	}
-
-	// Deterministic Gemma 12B JSON mock generator
-	triage := TriageResult{
-		Category:   "ANFRAGE",
-		Sentiment:  "POSITIVE",
-		Priority:   "HIGH",
-		Summary:    "Kunde interessiert sich für PV-Anlage & Speicher und bittet um Angebot.",
-		DraftReply: "Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Anfrage. Gerne erstellen wir Ihnen ein maßgeschneidertes Angebot für Ihre Solaranlage.\n\nMit freundlichen Grüßen,\nIhr Vertriebsteam",
-	}
-
-	raw, _ := json.Marshal(triage)
-	return string(raw), nil
 }

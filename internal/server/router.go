@@ -188,8 +188,8 @@ func NewRouter(cfg Config) http.Handler {
 			APIKey:          aiAPIKey,
 		})
 		triageSvc := ai.NewTriageService(aiGateway, obsSvc)
-		chatSvc := ai.NewChatService(aiGateway, obsSvc, cfg.DB)
 		researchSvc := ai.NewResearchService(aiGateway, obsSvc)
+		chatSvc := ai.NewChatService(aiGateway, obsSvc, researchSvc, cfg.DB)
 
 		connectorToken := os.Getenv("CONNECTOR_API_TOKEN")
 		if connectorToken == "" && cfg.DemoMode {

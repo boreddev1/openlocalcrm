@@ -2,13 +2,33 @@ package ai_test
 
 import (
 	"context"
+	"net/http"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 )
 
+func ollamaReachable(baseURL string) bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get(baseURL + "/api/tags")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 func TestLiveOllamaIntegrationWithPromptGuard(t *testing.T) {
+	const baseURL = "http://localhost:11434"
+	if os.Getenv("OLLAMA_LIVE_TEST") != "1" {
+		t.Skip("set OLLAMA_LIVE_TEST=1 to run the live Ollama integration test")
+	}
+	if !ollamaReachable(baseURL) {
+		t.Skip("live Ollama daemon not reachable at localhost:11434; skipping integration test")
+	}
+
 	gw := ai.NewGateway(ai.GatewayConfig{
 		DefaultProvider: ai.ProviderOllama,
 		OllamaBaseURL:   "http://localhost:11434",
