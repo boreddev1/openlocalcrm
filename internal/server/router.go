@@ -246,23 +246,22 @@ func NewRouter(cfg Config) http.Handler {
 
 	// API v1 group
 	r.Route("/api/v1", func(api chi.Router) {
-		api.Use(CSRFProtectionMiddleware)
-
 		// Public Auth routes
 		if authH != nil {
 			api.Post("/auth/login", authH.Login)
-			api.With(auth.RateLimitMiddleware(authLimiter)).Post("/auth/refresh", authH.Refresh)
-			api.Post("/auth/logout", authH.Logout)
+			api.With(CSRFProtectionMiddleware, auth.RateLimitMiddleware(authLimiter)).Post("/auth/refresh", authH.Refresh)
+			api.With(CSRFProtectionMiddleware).Post("/auth/logout", authH.Logout)
 		}
 
-		// Public Webhook intake (secured via Connector Bearer Token)
+		// Public Webhook intake (secured via Connector Bearer Token, outside CSRF group)
 		if connectorH != nil {
 			api.Post("/connectors/lead-intake", connectorH.LeadIntake)
 		}
 
-		// Protected routes (Always enforced JWT authentication)
+		// Protected routes (Always enforced JWT authentication, then CSRF protection)
 		api.Group(func(protected chi.Router) {
 			protected.Use(auth.AuthMiddleware(cfg.PubKey))
+			protected.Use(CSRFProtectionMiddleware)
 
 			protected.Get("/me", func(w http.ResponseWriter, r *http.Request) {
 				claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
