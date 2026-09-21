@@ -142,7 +142,10 @@ func (h *AppointmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_ = h.svc.Delete(r.Context(), id)
+	if err := h.svc.Delete(r.Context(), id); err != nil {
+		http.Error(w, `{"error":"failed to delete appointment"}`, http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -150,7 +153,10 @@ func (h *AppointmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *AppointmentHandler) PushExternal(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	_ = h.svc.PushExternal(r.Context(), id)
+	if err := h.svc.PushExternal(r.Context(), id); err != nil {
+		http.Error(w, `{"error":"failed to push appointment"}`, http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{

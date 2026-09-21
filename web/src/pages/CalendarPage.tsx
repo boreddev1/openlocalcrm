@@ -130,26 +130,24 @@ export const CalendarPage: React.FC = () => {
     mutationFn: (app: any) =>
       apiFetch(`/api/v1/appointments/${app.id}/push-external`, {
         method: 'POST',
-        body: JSON.stringify({ provider: 'microsoft_and_google' }),
+        body: JSON.stringify({ provider: 'ics_export' }),
       }),
     onSuccess: (_, app) => {
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      handleDownloadICS(app);
       setFeedbackBanner(
-        `Termin "${app.title}" erfolgreich in Ihren Microsoft 365 & Google Kalender übertragen!`,
+        `Termin "${app.title}" als extern exportiert markiert. ICS-Kalenderdatei heruntergeladen!`,
       );
       setTimeout(() => setFeedbackBanner(null), 4000);
     },
   });
 
-  const handleSyncExternal = () => {
+  const handleSyncExternal = async () => {
     setIsSyncing(true);
-    setTimeout(() => {
-      setIsSyncing(false);
-      setFeedbackBanner(
-        'Microsoft 365 & Google Kalender synchronisiert (30 Tage zurück / 60 Tage voraus)',
-      );
-      setTimeout(() => setFeedbackBanner(null), 4000);
-    }, 800);
+    await queryClient.invalidateQueries({ queryKey: ['appointments'] });
+    setIsSyncing(false);
+    setFeedbackBanner('Lokaler Kalender aktualisiert.');
+    setTimeout(() => setFeedbackBanner(null), 4000);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -183,8 +181,9 @@ export const CalendarPage: React.FC = () => {
   };
 
   const handleSendInviteEmail = (app: any) => {
+    handleDownloadICS(app);
     setFeedbackBanner(
-      `ICS-Kalendereinladung erfolgreich an ${app.contact_email || 'Kunden'} gesendet!`,
+      `ICS-Kalendereinladung für ${app.contact_email || 'Kunden'} generiert (Datei heruntergeladen).`,
     );
     setInviteModalApp(null);
     setTimeout(() => setFeedbackBanner(null), 4000);
@@ -416,10 +415,12 @@ export const CalendarPage: React.FC = () => {
                             ? 'bg-blue-500/10 text-blue-300 border-blue-500/20'
                             : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
                         }`}
-                        title="Termin per Graph/Google API in M365 & Google Kalender pushen"
+                        title="Termin als extern exportiert markieren & ICS herunterladen"
                       >
                         <Globe className="w-3 h-3 text-blue-400" />
-                        <span>{app.is_pushed ? 'In M365 gepusht' : 'An M365 pushen'}</span>
+                        <span>
+                          {app.is_pushed ? 'Als extern markiert' : 'Extern exportieren (ICS)'}
+                        </span>
                       </button>
                       <button
                         type="button"

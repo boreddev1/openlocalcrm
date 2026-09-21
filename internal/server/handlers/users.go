@@ -96,7 +96,7 @@ func (h *UserHandler) Invite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	role := strings.ToUpper(req.Role)
-	if role != "ADMIN" && role != "BENUTZER" {
+	if role != "ADMIN" && role != "BENUTZER" && role != "VERTRIEB" && role != "BACKOFFICE" {
 		role = "BENUTZER"
 	}
 
@@ -154,8 +154,8 @@ func (h *UserHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newRole := strings.ToUpper(req.Role)
-	if newRole != "ADMIN" && newRole != "BENUTZER" {
-		http.Error(w, `{"error":"invalid_role","message":"Rolle muss ADMIN oder BENUTZER sein"}`, http.StatusBadRequest)
+	if newRole != "ADMIN" && newRole != "BENUTZER" && newRole != "VERTRIEB" && newRole != "BACKOFFICE" {
+		http.Error(w, `{"error":"invalid_role","message":"Rolle muss ADMIN, BENUTZER, VERTRIEB oder BACKOFFICE sein"}`, http.StatusBadRequest)
 		return
 	}
 

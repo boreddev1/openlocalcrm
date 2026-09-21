@@ -43,7 +43,7 @@ func TestNotificationService_Lifecycle(t *testing.T) {
 	}
 
 	// 3. Mark as read
-	err = svc.MarkAsRead(ctx, n.ID)
+	err = svc.MarkAsRead(ctx, n.ID, &userID)
 	if err != nil {
 		t.Fatalf("failed to mark notification as read: %v", err)
 	}

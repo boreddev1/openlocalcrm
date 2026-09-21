@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -67,7 +68,7 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (ChatResponse, 
 		}
 	}
 
-	if customReply, card := s.handleActionableIntent(ctx, lastUserMsg); customReply != "" {
+	if customReply, card := s.handleActionableIntent(ctx, req.Messages); customReply != "" {
 		latency := int(time.Since(startTime).Milliseconds())
 		if s.obsSvc != nil {
 			s.obsSvc.Record(ctx, AIAuditLog{
@@ -374,8 +375,27 @@ func formatGermanNumber(val float64) string {
 	return string(res)
 }
 
-func (s *ChatService) handleActionableIntent(ctx context.Context, msg string) (string, *ActionCard) {
-	lower := strings.ToLower(strings.TrimSpace(msg))
+func (s *ChatService) handleActionableIntent(ctx context.Context, messages []ChatMessage) (string, *ActionCard) {
+	if len(messages) == 0 {
+		return "", nil
+	}
+	lastUserMsg := ""
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			lastUserMsg = messages[i].Content
+			break
+		}
+	}
+	if lastUserMsg == "" {
+		return "", nil
+	}
+	lower := strings.ToLower(strings.TrimSpace(lastUserMsg))
+
+	// Check if user confirmed the action
+	isConfirmed := strings.HasPrefix(lower, "bestätige") || strings.HasPrefix(lower, "confirm") ||
+		strings.Contains(lower, "ja, bitte anlegen") || strings.Contains(lower, "ja, anlegen") ||
+		strings.Contains(lower, "ja, bitte ausführen") || strings.Contains(lower, "bestätigt") ||
+		strings.Contains(lower, "ausführen und bestätigen")
 
 	// 1. Create company / customer / contact
 	isCreation := strings.Contains(lower, "anlegen") || strings.Contains(lower, "erstellen") ||
@@ -384,12 +404,27 @@ func (s *ChatService) handleActionableIntent(ctx context.Context, msg string) (s
 	isCustomerOrCompany := strings.Contains(lower, "kunde") || strings.Contains(lower, "firma") ||
 		strings.Contains(lower, "unternehmen") || strings.Contains(lower, "kontakt")
 
-	if isCreation && isCustomerOrCompany {
-		name := extractCompanyName(msg)
-		if name == "" {
-			return "", nil
-		}
+	var name string
+	var withResearch bool
 
+	if isCreation && isCustomerOrCompany {
+		name = extractCompanyName(lastUserMsg)
+		withResearch = strings.Contains(lower, "recherch") || strings.Contains(lower, "meta") ||
+			strings.Contains(lower, "info") || strings.Contains(lower, "analyse")
+	} else if isConfirmed {
+		// Look up company name from previous messages
+		for i := len(messages) - 2; i >= 0; i-- {
+			prevName := extractCompanyName(messages[i].Content)
+			if prevName != "" {
+				name = prevName
+				withResearch = strings.Contains(strings.ToLower(messages[i].Content), "recherch") ||
+					strings.Contains(strings.ToLower(messages[i].Content), "meta")
+				break
+			}
+		}
+	}
+
+	if name != "" {
 		domain := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
 		domain = strings.ReplaceAll(domain, "ä", "ae")
 		domain = strings.ReplaceAll(domain, "ö", "oe")
@@ -397,7 +432,15 @@ func (s *ChatService) handleActionableIntent(ctx context.Context, msg string) (s
 		domain = strings.ReplaceAll(domain, "ß", "ss")
 		domain += ".de"
 
-		withResearch := strings.Contains(lower, "recherch") || strings.Contains(lower, "meta") ||
+		if !isConfirmed {
+			return fmt.Sprintf("Möchten Sie **%s** (Web-Domain: %s) als neues Unternehmen im CRM-System anlegen?\n\nAntworten Sie mit **\"Bestätige %s\"** oder nutzen Sie den Button unten, um den Eintrag zu erstellen.", name, domain, name), &ActionCard{
+				Title: fmt.Sprintf("Bestätigen: %s anlegen", name),
+				Badge: "Bestätigung erforderlich",
+				Route: fmt.Sprintf("/companies?confirm_name=%s", url.QueryEscape(name)),
+			}
+		}
+
+		withResearch = withResearch || strings.Contains(lower, "recherch") || strings.Contains(lower, "meta") ||
 			strings.Contains(lower, "info") || strings.Contains(lower, "analyse")
 
 		if s.querier != nil {
@@ -457,6 +500,16 @@ Sie können den Kunden jetzt direkt im Adressbuch öffnen, um Ansprechpartner od
 }
 
 func extractCompanyName(msg string) string {
+	if idxStart := strings.Index(msg, "**"); idxStart != -1 {
+		rest := msg[idxStart+2:]
+		if idxEnd := strings.Index(rest, "**"); idxEnd != -1 {
+			candidate := strings.TrimSpace(rest[:idxEnd])
+			if candidate != "" && len(candidate) < 60 && !strings.Contains(candidate, "Web-Domain") {
+				return candidate
+			}
+		}
+	}
+
 	lower := strings.ToLower(msg)
 
 	suffixes := []string{" als kunden", " als kunde", " als firma", " als unternehmen"}

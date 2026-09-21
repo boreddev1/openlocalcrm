@@ -221,7 +221,7 @@ func TestCopilotChatService(t *testing.T) {
 		}
 	})
 
-	t.Run("customer creation and research intent creates company and returns action card", func(t *testing.T) {
+	t.Run("customer creation and research intent requires confirmation before creating company", func(t *testing.T) {
 		querier := demo.NewInMemoryQuerier()
 		chatWithDB := ai.NewChatService(gw, obs, querier)
 
@@ -242,21 +242,46 @@ func TestCopilotChatService(t *testing.T) {
 		if contains(resp.Reply, "Hallo! Ich bin Ihr OpenLocalCRM Vertriebs-Copilot") {
 			t.Errorf("greeting loop detected! Should have executed creation, got greeting: %s", resp.Reply)
 		}
-		if resp.ActionCard == nil || resp.ActionCard.Route != "/companies" {
-			t.Errorf("expected ActionCard to /companies, got: %+v", resp.ActionCard)
+		if resp.ActionCard == nil || resp.ActionCard.Badge != "Bestätigung erforderlich" {
+			t.Errorf("expected confirmation ActionCard, got: %+v", resp.ActionCard)
 		}
 
-		// Verify company was created in querier
+		// Verify company is NOT created without confirmation (Finding H3)
 		companies, _ := querier.ListCompanies(ctx, db.ListCompaniesParams{Limit: 10, Offset: 0})
-		found := false
 		for _, c := range companies {
+			if c.Name == "Bäckerei Passa" {
+				t.Fatalf("company Bäckerei Passa should not be created without confirmation")
+			}
+		}
+
+		// Now confirm action
+		respConfirmed, err := chatWithDB.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "assistant", Content: "Hallo! Ich bin Ihr OpenLocalCRM KI-Vertriebs-Copilot."},
+				{Role: "user", Content: prompt},
+				{Role: "assistant", Content: resp.Reply},
+				{Role: "user", Content: "Ja, bitte ausführen und bestätigen."},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error on confirmation: %v", err)
+		}
+
+		if respConfirmed.ActionCard == nil || respConfirmed.ActionCard.Route != "/companies" {
+			t.Errorf("expected ActionCard to /companies after confirmation, got: %+v", respConfirmed.ActionCard)
+		}
+
+		// Verify company was created in querier after confirmation
+		companiesAfter, _ := querier.ListCompanies(ctx, db.ListCompaniesParams{Limit: 10, Offset: 0})
+		found := false
+		for _, c := range companiesAfter {
 			if c.Name == "Bäckerei Passa" {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("expected Bäckerei Passa to be created in DB, but not found in %v", companies)
+			t.Errorf("expected Bäckerei Passa to be created in DB after confirmation, but not found in %v", companiesAfter)
 		}
 	})
 

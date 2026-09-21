@@ -1,10 +1,12 @@
 package automation
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -315,6 +317,7 @@ func (s *Service) ApproveStep(ctx context.Context, runID string) (*WorkflowRun, 
 	// Execute from current step onwards
 	startFrom := run.CurrentStep
 	run.Status = "IN_PROGRESS"
+	var execErr error
 	for _, step := range steps {
 		if step.StepNumber < startFrom {
 			continue
@@ -322,6 +325,9 @@ func (s *Service) ApproveStep(ctx context.Context, runID string) (*WorkflowRun, 
 		run.CurrentStep = step.StepNumber
 		if err := s.executeStep(ctx, step, run); err != nil {
 			log.Printf("[automation] error executing approved step %d: %v", step.StepNumber, err)
+			execErr = err
+			run.Status = "FAILED"
+			break
 		}
 		// Check if next step also requires approval
 		if step.StepNumber > startFrom && step.ActionType == "DRAFT_EMAIL" {
@@ -341,12 +347,23 @@ func (s *Service) ApproveStep(ctx context.Context, runID string) (*WorkflowRun, 
 	if run.CompletedAt != nil {
 		completedAt = pgtype.Timestamptz{Time: *run.CompletedAt, Valid: true}
 	}
-	_, _ = s.querier.UpdateWorkflowRunStatus(ctx, db.UpdateWorkflowRunStatusParams{
-		ID:          runID,
-		Status:      run.Status,
-		CurrentStep: int32(run.CurrentStep),
-		CompletedAt: completedAt,
-	})
+	if s.querier != nil {
+		if _, err := s.querier.UpdateWorkflowRunStatus(ctx, db.UpdateWorkflowRunStatusParams{
+			ID:          runID,
+			Status:      run.Status,
+			CurrentStep: int32(run.CurrentStep),
+			CompletedAt: completedAt,
+		}); err != nil {
+			log.Printf("[automation] failed to update workflow run status in db: %v", err)
+			if execErr == nil {
+				return nil, fmt.Errorf("failed to persist workflow run status: %w", err)
+			}
+		}
+	}
+
+	if execErr != nil {
+		return &run, fmt.Errorf("workflow execution failed at step %d: %w", run.CurrentStep, execErr)
+	}
 
 	return &run, nil
 }
@@ -364,12 +381,15 @@ func (s *Service) executeStep(ctx context.Context, step StepDefinition, run Work
 				"workflow_id": run.WorkflowID,
 				"run_id":      run.ID,
 			})
-			_, _ = s.querier.CreateAuditLog(ctx, db.CreateAuditLogParams{
+			if _, err := s.querier.CreateAuditLog(ctx, db.CreateAuditLogParams{
 				EntityType: run.TargetType,
 				EntityID:   pgtype.UUID{Bytes: targetUUID, Valid: targetUUID != uuid.Nil},
 				Action:     "TAG_APPLIED",
 				Changes:    details,
-			})
+			}); err != nil {
+				log.Printf("[automation_error] SET_TAG audit log failed: %v", err)
+				return err
+			}
 		}
 		return nil
 
@@ -418,12 +438,15 @@ func (s *Service) executeStep(ctx context.Context, step StepDefinition, run Work
 				"workflow_id": run.WorkflowID,
 				"run_id":      run.ID,
 			})
-			_, _ = s.querier.CreateAuditLog(ctx, db.CreateAuditLogParams{
+			if _, err := s.querier.CreateAuditLog(ctx, db.CreateAuditLogParams{
 				EntityType: run.TargetType,
 				EntityID:   pgtype.UUID{Bytes: targetUUID, Valid: targetUUID != uuid.Nil},
 				Action:     "EMAIL_DRAFTED",
 				Changes:    details,
-			})
+			}); err != nil {
+				log.Printf("[automation_error] DRAFT_EMAIL audit log failed: %v", err)
+				return err
+			}
 		}
 		return nil
 
@@ -454,10 +477,34 @@ func (s *Service) executeStep(ctx context.Context, step StepDefinition, run Work
 		return nil
 
 	case "WEBHOOK":
-		url, _ := step.Payload["url"].(string)
-		log.Printf("[automation] WEBHOOK: calling %s for %s %s", url, run.TargetType, run.TargetID)
-		if url == "" {
+		webhookURL, _ := step.Payload["url"].(string)
+		log.Printf("[automation] WEBHOOK: calling %s for %s %s", webhookURL, run.TargetType, run.TargetID)
+		if webhookURL == "" {
 			return fmt.Errorf("webhook action requires url payload")
+		}
+		client := &http.Client{Timeout: 5 * time.Second}
+		payloadData, _ := json.Marshal(map[string]any{
+			"workflow_id": run.WorkflowID,
+			"run_id":      run.ID,
+			"step_number": step.StepNumber,
+			"step_title":  step.Title,
+			"target_type": run.TargetType,
+			"target_id":   run.TargetID,
+			"target_name": run.TargetName,
+			"payload":     step.Payload,
+		})
+		req, err := http.NewRequestWithContext(ctx, "POST", webhookURL, bytes.NewReader(payloadData))
+		if err != nil {
+			return fmt.Errorf("failed to create webhook request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("webhook request to %s failed: %w", webhookURL, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			return fmt.Errorf("webhook responded with HTTP status %d", resp.StatusCode)
 		}
 		return nil
 

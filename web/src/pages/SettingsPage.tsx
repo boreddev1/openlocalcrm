@@ -402,9 +402,41 @@ export const SettingsPage: React.FC = () => {
       setIsImportingSettings(true);
       setSettingsStatus(null);
 
+      // Whitelist only approved configuration keys (M12)
+      const sanitizedPayload: Record<string, any> = {};
+      if (parsed.ai && typeof parsed.ai === 'object' && !Array.isArray(parsed.ai)) {
+        sanitizedPayload.ai = {
+          provider: typeof parsed.ai.provider === 'string' ? parsed.ai.provider : undefined,
+          model: typeof parsed.ai.model === 'string' ? parsed.ai.model : undefined,
+          base_url: typeof parsed.ai.base_url === 'string' ? parsed.ai.base_url : undefined,
+        };
+      }
+      if (parsed.admin && typeof parsed.admin === 'object' && !Array.isArray(parsed.admin)) {
+        sanitizedPayload.admin = {
+          email: typeof parsed.admin.email === 'string' ? parsed.admin.email : undefined,
+          name: typeof parsed.admin.name === 'string' ? parsed.admin.name : undefined,
+        };
+      }
+      if (parsed.system && typeof parsed.system === 'object' && !Array.isArray(parsed.system)) {
+        sanitizedPayload.system = {
+          app_name: typeof parsed.system.app_name === 'string' ? parsed.system.app_name : undefined,
+          currency: typeof parsed.system.currency === 'string' ? parsed.system.currency : undefined,
+        };
+      }
+      if (parsed.backup && typeof parsed.backup === 'object' && !Array.isArray(parsed.backup)) {
+        sanitizedPayload.backup = {
+          auto_backup:
+            typeof parsed.backup.auto_backup === 'boolean' ? parsed.backup.auto_backup : undefined,
+          interval_hours:
+            typeof parsed.backup.interval_hours === 'number'
+              ? parsed.backup.interval_hours
+              : undefined,
+        };
+      }
+
       const res = await apiFetch<any>('/api/v1/settings/import', {
         method: 'POST',
-        body: JSON.stringify(parsed),
+        body: JSON.stringify(sanitizedPayload),
       });
 
       setSettingsStatus(
@@ -496,9 +528,7 @@ export const SettingsPage: React.FC = () => {
     }, 1000);
   };
 
-  const [connectorToken, setConnectorToken] = useState(() => {
-    return localStorage.getItem('connector_api_token') || 'demo-connector-token';
-  });
+  const [connectorToken, setConnectorToken] = useState('demo-connector-token');
   const webhookUrl = `${window.location.origin}/api/v1/connectors/lead-intake`;
 
   const copyToClipboard = (text: string) => {
@@ -741,9 +771,7 @@ export const SettingsPage: React.FC = () => {
                   <input
                     value={connectorToken}
                     onChange={(e) => {
-                      const val = e.target.value;
-                      setConnectorToken(val);
-                      localStorage.setItem('connector_api_token', val);
+                      setConnectorToken(e.target.value);
                     }}
                     placeholder="Connector API Token (z.B. demo-connector-token)"
                     className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-300 focus:outline-none focus:border-emerald-500"

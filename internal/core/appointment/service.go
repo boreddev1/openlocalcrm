@@ -353,10 +353,12 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 func (s *Service) PushExternal(ctx context.Context, id string) error {
 	if s.querier != nil {
 		if u, err := uuid.Parse(id); err == nil {
-			_, _ = s.querier.UpdateAppointmentPushStatus(ctx, db.UpdateAppointmentPushStatusParams{
+			if _, err := s.querier.UpdateAppointmentPushStatus(ctx, db.UpdateAppointmentPushStatusParams{
 				ID:       pgtype.UUID{Bytes: u, Valid: true},
 				IsPushed: true,
-			})
+			}); err != nil {
+				return fmt.Errorf("failed to update push status in db: %w", err)
+			}
 		}
 	}
 

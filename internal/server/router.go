@@ -316,6 +316,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if contactH != nil {
 				protected.Route("/contacts", func(cr chi.Router) {
+					cr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
 					cr.Post("/", contactH.Create)
 					cr.Get("/", contactH.List)
 					cr.Get("/{id}", contactH.Get)
@@ -326,6 +327,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if companyH != nil {
 				protected.Route("/companies", func(cr chi.Router) {
+					cr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
 					cr.Post("/", companyH.Create)
 					cr.Get("/", companyH.List)
 					cr.Get("/{id}", companyH.Get)
@@ -336,6 +338,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if dealH != nil {
 				protected.Route("/deals", func(dr chi.Router) {
+					dr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
 					dr.Post("/", dealH.Create)
 					dr.Get("/", dealH.List)
 					dr.Get("/{id}", dealH.Get)
@@ -347,6 +350,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if todoH != nil {
 				protected.Route("/todos", func(tr chi.Router) {
+					tr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
 					tr.Post("/", todoH.Create)
 					tr.Get("/", todoH.List)
 					tr.Get("/{id}", todoH.Get)
@@ -357,6 +361,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if noteH != nil {
 				protected.Route("/notes", func(nr chi.Router) {
+					nr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
 					nr.Post("/", noteH.Create)
 					nr.Get("/", noteH.List)
 					nr.Get("/{id}", noteH.Get)
@@ -407,6 +412,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if appointmentH != nil {
 				protected.Route("/appointments", func(appr chi.Router) {
+					appr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
 					appr.Get("/", appointmentH.List)
 					appr.Post("/", appointmentH.Create)
 					appr.Put("/{id}", appointmentH.Update)
@@ -447,10 +453,9 @@ func NewRouter(cfg Config) http.Handler {
 			}
 
 			if exportH != nil {
-				protected.Group(func(adminOnly chi.Router) {
-					adminOnly.Use(auth.RequireRole("ADMIN"))
-					adminOnly.Get("/export/contacts.csv", exportH.ExportContactsCSV)
-					adminOnly.Post("/import/contacts", exportH.ImportContactsCSV)
+				protected.Group(func(exportRouter chi.Router) {
+					exportRouter.With(auth.RequireRole("ADMIN")).Get("/export/contacts.csv", exportH.ExportContactsCSV)
+					exportRouter.With(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE")).Post("/import/contacts", exportH.ImportContactsCSV)
 				})
 			}
 		})

@@ -142,7 +142,11 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
         setRoofOrientation(res.extracted.roof_orientation);
         handleKwpChange(res.extracted.recommended_kwp);
         setStorageKwh(res.extracted.recommended_storage_kwh);
-        setFeedbackBanner('Gemma 12B OCR: Stromrechnung & Zählerdaten erfolgreich eingelesen!');
+        if (res.mode === 'demo_template' || res.simulated) {
+          setFeedbackBanner('Mustervorlage (Demo-Daten): Beispieldaten für Stromrechnung geladen.');
+        } else {
+          setFeedbackBanner('Stromrechnung: Verbrauchs- & Zählerdaten erfolgreich extrahiert.');
+        }
         setTimeout(() => setFeedbackBanner(null), 4000);
       }
     } finally {
@@ -226,7 +230,7 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                 className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition-colors inline-flex items-center gap-1.5 shadow-lg shadow-purple-600/20 cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{isExtracting ? 'Analysiert...' : '📄 Demo-Rechnung einlesen'}</span>
+                <span>{isExtracting ? 'Lädt...' : '📄 Demo-Mustervorlage laden'}</span>
               </button>
             </div>
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -146,16 +147,55 @@ func (h *AIHandler) GetObservability(w http.ResponseWriter, r *http.Request) {
 func (h *AIHandler) ParseBill(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		CustomerName string `json:"customer_name"`
+		DocumentText string `json:"document_text"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	custName := req.CustomerName
+
+	// If document text is provided, attempt AI structured extraction
+	if req.DocumentText != "" && h.gateway != nil {
+		prompt := fmt.Sprintf(`Extrahiere aus folgendem Energierechnungs-Text die Daten für einen PV-Angebotsrechner im JSON-Format:
+Text: %s
+Erwartetes JSON-Format:
+{
+  "customer_name": "Name",
+  "yearly_consumption": 6500,
+  "current_electricity_price": 0.385,
+  "meter_number": "1EMH...",
+  "roof_area_sqm": 75,
+  "roof_orientation": "Süd (35° Dachneigung)",
+  "recommended_kwp": 14.5,
+  "recommended_storage_kwh": 12.0
+}`, req.DocumentText)
+
+		if out, err := h.gateway.Generate(r.Context(), prompt, "Du bist ein präziser OCR-Parser für Energierechnungen. Antworte ausschließlich mit gültigem JSON."); err == nil {
+			cleaned := strings.TrimSpace(out)
+			if idx := strings.Index(cleaned, "{"); idx >= 0 {
+				if endIdx := strings.LastIndex(cleaned, "}"); endIdx > idx {
+					cleaned = cleaned[idx : endIdx+1]
+				}
+			}
+			var parsedData map[string]any
+			if err := json.Unmarshal([]byte(cleaned), &parsedData); err == nil {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"simulated": false,
+					"mode":      "ai_ocr_extraction",
+					"extracted": parsedData,
+				})
+				return
+			}
+		}
+	}
+
 	if custName == "" {
-		custName = "Familie Müller"
+		custName = "Familie Müller (Demo-Vorlage)"
 	}
 
 	res := map[string]any{
 		"simulated": true,
-		"note":      "Simulierter OCR-Parser für Demo & Angebotsrechner",
+		"mode":      "demo_template",
+		"note":      "Musterdaten für Vorführung und Angebotsrechner (kein Beleg-Upload übergeben)",
 		"extracted": map[string]any{
 			"customer_name":             custName,
 			"yearly_consumption":        6500,
@@ -215,7 +255,8 @@ func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if doc.ChunksCount == 0 {
-		doc.ChunksCount = 4
+		words := len(strings.Fields(doc.Content))
+		doc.ChunksCount = words/150 + 1
 	}
 
 	if h.querier != nil {
@@ -255,7 +296,10 @@ func (h *AIHandler) DeleteKB(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.querier != nil {
-		_ = h.querier.DeleteKBArticle(r.Context(), pgtype.UUID{Bytes: u, Valid: true})
+		if err := h.querier.DeleteKBArticle(r.Context(), pgtype.UUID{Bytes: u, Valid: true}); err != nil {
+			http.Error(w, `{"error":"failed to delete kb article: `+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
 	}
 
 	h.mu.Lock()
@@ -325,12 +369,17 @@ func (h *AIHandler) CreateResearchJob(w http.ResponseWriter, r *http.Request) {
 		domain = "energie-dach.de"
 	}
 
-	siteTitle := domain + " - Gewerbliche Photovoltaik"
-	summary := "Geprüftes Gewerbeunternehmen mit hoher Dachflächen-Eignung für Photovoltaik-Großanlagen."
-	decisionMakers := []string{"Geschäftsführung (" + domain + ")"}
+	siteTitle := domain
+	summary := ""
+	decisionMakers := []string{}
+	status := "COMPLETED"
 
 	if h.researchSvc != nil {
-		if res, err := h.researchSvc.ResearchCompany(r.Context(), domain); err == nil {
+		res, err := h.researchSvc.ResearchCompany(r.Context(), domain)
+		if err != nil {
+			status = "FAILED"
+			summary = fmt.Sprintf("Recherche für %s fehlgeschlagen: %v", domain, err)
+		} else {
 			if res.Title != "" {
 				siteTitle = res.Title
 			}
@@ -341,6 +390,9 @@ func (h *AIHandler) CreateResearchJob(w http.ResponseWriter, r *http.Request) {
 				decisionMakers = res.IndustryKeywords
 			}
 		}
+	} else {
+		status = "FAILED"
+		summary = "Recherche-Dienst nicht konfiguriert."
 	}
 
 	jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
@@ -348,7 +400,7 @@ func (h *AIHandler) CreateResearchJob(w http.ResponseWriter, r *http.Request) {
 		created, err := h.querier.CreateAIResearchJob(r.Context(), db.CreateAIResearchJobParams{
 			CompanyName: domain,
 			Domain:      domain,
-			Status:      "COMPLETED",
+			Status:      status,
 		})
 		if err == nil {
 			jobID = uuid.UUID(created.ID.Bytes).String()
@@ -364,7 +416,7 @@ func (h *AIHandler) CreateResearchJob(w http.ResponseWriter, r *http.Request) {
 		CompanyName: domain,
 		Category:    req.Category,
 		Depth:       req.Depth,
-		Status:      "COMPLETED",
+		Status:      status,
 		Result: &ResearchResult{
 			SiteTitle:      siteTitle,
 			Summary:        summary,

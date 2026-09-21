@@ -5,6 +5,34 @@ Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/) 
 
 ---
 
+## [1.0.6] - 2026-09-21
+
+### Behoben & Gehärtet (Security Review Round 3 Remediation)
+- **Berechtigung & IDOR (N1, N2, N8, N17):**
+  - Deals: Eigentümer- und Zuweisungsprüfung bei `Update` und `AttachSolarCalculation` für Nicht-Admins (Schutz vor IDOR).
+  - Benachrichtigungen: `MarkRead` scoped auf den anfragenden Benutzer; fremde Benachrichtigungen können nicht mehr manipuliert werden.
+  - Benutzerverwaltung: Validierung bei `Invite` und `UpdateRole` erlaubt alle Systemrollen (`ADMIN`, `BENUTZER`, `VERTRIEB`, `BACKOFFICE`).
+  - Router: Fehlende Rollenbeschränkungen auf Kernendpunkten (`/contacts`, `/companies`, `/deals`, `/todos`, `/appointments`, `/import/contacts`) mit `auth.RequireAnyRole` gehärtet.
+- **Fehlerbehandlung & Automations-Engine (N3, N4, N5, N7, N9, N10):**
+  - Termine: Echte Fehlerprüfung bei `Delete` und `PushExternal` im Handler und Service; Statusfehler werden mit HTTP 500 propagiert.
+  - Wissensdatenbank: `DeleteKB` prüft Fehler der Datenbank-Löschung (`DeleteKBArticle`) und meldet Fehler sauber an den Aufrufer.
+  - Workflow-Engine: `ApproveStep` bricht bei Step-Fehlern ab, markiert Run als `FAILED` und propagiert Fehler.
+  - Webhooks: `executeStep` führt echte HTTP-POST-Webhooks mit JSON-Payload und 5s-Timeout aus.
+  - Audit-Logs: DB-Fehler bei `CreateAuditLog` in `SET_TAG` und `DRAFT_EMAIL` werden erfasst und geloggt.
+- **KI-Gateway & Intent-Bestätigung (H3, N6, N11, M5):**
+  - Intent-Confirmation Gate: Automatische Firmenerstellung aus Chat erfordert Bestätigung (`requires_confirmation` ActionCard); Multi-Turn-Unterstützung.
+  - Rechnungs-OCR: Unterstützung für strukturierte KI-Extraktion und transparente Kennzeichnung als Demo-Vorlage bei fehlendem Beleg.
+  - Research-Jobs: Fehlgeschlagene Firmenrecherchen werden im Job-Status wahrheitsgemäß als `FAILED` erfasst.
+  - Dynamisches Wissens-Chunking in `CreateKB` basierend auf Wortanzahl.
+- **Frontend-Wahrhaftigkeit & Sicherheit (N12, N13, N14, N15, N16, M12):**
+  - CSV-Import: `CSVImportModal` sendet echte Multipart-Formulare an `/api/v1/import/contacts` und zeigt echte importierte Kontaktanzahl an.
+  - Wahrheitsgemäße UI: Falsche pgvector- und 384-dim-Behauptungen durch ehrliche Dokumenten-Indexierung ersetzt.
+  - Kalender-Export: Entfernung unverbundener Microsoft/Google-Push-Versprechen; echte ICS-Generierung und -Download bei Termin-Export und Einladungen.
+  - Token-Sicherheit: `localStorage.setItem('connector_api_token')` entfernt; Tokens verbleiben ausschließlich im Speicher.
+  - Einstellungs-Import: Whitelisting und Sanitizing der JSON-Konfigurationsattribute vor dem Server-Upload.
+
+---
+
 ## [1.0.5] - 2026-09-21
 
 ### Behoben & Gehärtet (Repo Review Round 2 Remediation)

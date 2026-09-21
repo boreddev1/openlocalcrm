@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -43,6 +44,15 @@ func (h *NotificationHandler) ListUnread(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
+	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
+	var actorID *pgtype.UUID
+	if claims != nil && claims.Role != "ADMIN" {
+		var uid pgtype.UUID
+		if err := uid.Scan(claims.UserID.String()); err == nil {
+			actorID = &uid
+		}
+	}
+
 	idStr := chi.URLParam(r, "id")
 	var id pgtype.UUID
 	if err := id.Scan(idStr); err != nil {
@@ -50,7 +60,11 @@ func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.service.MarkAsRead(r.Context(), id); err != nil {
+	if err := h.service.MarkAsRead(r.Context(), id, actorID); err != nil {
+		if strings.Contains(err.Error(), "forbidden") {
+			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihre eigenen Benachrichtigungen als gelesen markieren"}`, http.StatusForbidden)
+			return
+		}
 		http.Error(w, `{"error":"failed to mark notification as read"}`, http.StatusInternalServerError)
 		return
 	}

@@ -147,6 +147,13 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if claims != nil && claims.Role != "ADMIN" {
+		if !existing.AssignedTo.Valid || existing.AssignedTo.Bytes != claims.UserID {
+			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihnen zugewiesene Deals bearbeiten"}`, http.StatusForbidden)
+			return
+		}
+	}
+
 	title := req.Title
 	if title == "" {
 		title = existing.Title
@@ -251,6 +258,13 @@ func (h *DealHandler) AttachSolarCalculation(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		http.Error(w, `{"error":"deal_not_found"}`, http.StatusNotFound)
 		return
+	}
+
+	if claims != nil && claims.Role != "ADMIN" {
+		if !existing.AssignedTo.Valid || existing.AssignedTo.Bytes != claims.UserID {
+			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihnen zugewiesene Deals bearbeiten"}`, http.StatusForbidden)
+			return
+		}
 	}
 
 	val := existing.Value

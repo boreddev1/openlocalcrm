@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
@@ -77,7 +78,27 @@ func (s *Service) ListUnread(ctx context.Context, userID *pgtype.UUID, limit int
 	})
 }
 
-func (s *Service) MarkAsRead(ctx context.Context, id pgtype.UUID) error {
+func (s *Service) MarkAsRead(ctx context.Context, id pgtype.UUID, userID *pgtype.UUID) error {
+	if userID != nil && s.queries != nil {
+		notifications, err := s.queries.ListAllNotifications(ctx, db.ListAllNotificationsParams{
+			UserID: *userID,
+			Limit:  1000,
+			Offset: 0,
+		})
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, n := range notifications {
+			if n.ID.Valid && id.Valid && n.ID.Bytes == id.Bytes {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("forbidden: notification does not belong to user")
+		}
+	}
 	return s.queries.MarkNotificationAsRead(ctx, id)
 }
 
