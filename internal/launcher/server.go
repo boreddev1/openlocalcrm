@@ -59,6 +59,9 @@ func NewServerWithUpdater(baseDir string, engine *Engine, updater *Updater, onRe
 	mux.HandleFunc("/api/versions", s.handleVersions)
 	mux.HandleFunc("/api/update/check", s.handleUpdateCheck)
 	mux.HandleFunc("/api/update/execute", s.handleUpdateExecute)
+	mux.HandleFunc("/api/settings/export", s.handleSettingsExport)
+	mux.HandleFunc("/api/settings/import", s.handleSettingsImport)
+	mux.HandleFunc("/api/settings/rebuild", s.handleSettingsRebuild)
 
 	// Embedded Static UI
 	mux.Handle("/", ui.Handler())
@@ -576,5 +579,96 @@ func (s *Server) handleUpdateExecute(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"message": "Update gestartet",
+	})
+}
+
+func (s *Server) handleSettingsExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	settings, err := ExportSettingsFromEnv(s.baseDir)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed exporting settings: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename="openlocalcrm-settings.json"`)
+	_ = json.NewEncoder(w).Encode(settings)
+}
+
+func (s *Server) handleSettingsImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var settings ExportedSettings
+
+	contentType := r.Header.Get("Content-Type")
+	if strings.Contains(contentType, "multipart/form-data") {
+		file, _, err := r.FormFile("settings")
+		if err != nil {
+			http.Error(w, "Settings file required", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		if err := json.NewDecoder(file).Decode(&settings); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid JSON in uploaded file: %v", err), http.StatusBadRequest)
+			return
+		}
+	} else {
+		if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := ImportSettingsToEnv(s.baseDir, &settings, true); err != nil {
+		http.Error(w, fmt.Sprintf("Failed importing settings: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.appendLog(fmt.Sprintf("[Settings] Einstellungen importiert: KI (%s/%s), Admin (%s), Port (%d)",
+		settings.AI.Provider, settings.AI.Model, settings.Admin.Email, settings.System.Port))
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success":  true,
+		"message":  "Einstellungen erfolgreich importiert",
+		"settings": settings,
+	})
+}
+
+func (s *Server) handleSettingsRebuild(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	logChan := make(chan string, 100)
+	go func() {
+		for line := range logChan {
+			s.appendLog(line)
+			log.Println("[Rebuild]", line)
+		}
+	}()
+
+	go func() {
+		defer close(logChan)
+		s.appendLog("[Rebuild] Starte Rebuild mit importierten Einstellungen...")
+		if err := s.engine.Update(context.Background(), logChan); err != nil {
+			s.appendLog(fmt.Sprintf("[FEHLER] Rebuild fehlgeschlagen: %v", err))
+			return
+		}
+		s.appendLog("[Rebuild] ✅ Rebuild erfolgreich abgeschlossen! System läuft mit den neuen Einstellungen.")
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"message": "Rebuild mit neuen Einstellungen gestartet",
 	})
 }

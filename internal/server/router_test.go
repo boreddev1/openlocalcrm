@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
@@ -90,6 +91,7 @@ func TestRBAC_AdminEndpointsProtection(t *testing.T) {
 	adminRoutes := []string{
 		"/api/v1/users",
 		"/api/v1/export/contacts.csv",
+		"/api/v1/settings/export",
 	}
 
 	for _, route := range adminRoutes {
@@ -110,5 +112,65 @@ func TestRBAC_AdminEndpointsProtection(t *testing.T) {
 		if recAdmin.Code == http.StatusForbidden || recAdmin.Code == http.StatusUnauthorized {
 			t.Errorf("expected access allowed for route %s with ADMIN role, got %d", route, recAdmin.Code)
 		}
+	}
+}
+
+func TestSettingsEndpoints(t *testing.T) {
+	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
+	querier := demo.NewInMemoryQuerier()
+	r := server.NewRouter(server.Config{
+		DB:       querier,
+		SSEHub:   sse.NewHub(),
+		PubKey:   pubKey,
+		PrivKey:  privKey,
+		DemoMode: true,
+	})
+
+	userID := uuid.New()
+	adminToken, _ := auth.GenerateAccessToken(userID, "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+
+	// GET /api/v1/settings/export
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings/export", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on settings export, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var exported map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&exported); err != nil {
+		t.Fatalf("failed decoding exported settings: %v", err)
+	}
+
+	if exported["version"] != "v1.0.2" {
+		t.Errorf("expected version v1.0.2, got %v", exported["version"])
+	}
+
+	// POST /api/v1/settings/import
+	importPayload := []byte(`{
+		"version": "v1.0.2",
+		"ai": {
+			"provider": "ollama",
+			"ollama_base_url": "http://localhost:11434",
+			"ollama_model": "mistral:latest"
+		},
+		"admin": {
+			"email": "imported-admin@openlocalcrm.local",
+			"name": "Imported Admin"
+		},
+		"system": {
+			"port": 8080
+		}
+	}`)
+	importReq := httptest.NewRequest(http.MethodPost, "/api/v1/settings/import", bytes.NewReader(importPayload))
+	importReq.Header.Set("Authorization", "Bearer "+adminToken)
+	importReq.Header.Set("Content-Type", "application/json")
+	importRec := httptest.NewRecorder()
+	r.ServeHTTP(importRec, importReq)
+
+	if importRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on settings import, got %d: %s", importRec.Code, importRec.Body.String())
 	}
 }

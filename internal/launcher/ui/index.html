@@ -124,7 +124,8 @@
           <label for="install-version">Zu installierende Version (Release)</label>
           <div class="input-row">
             <select id="install-version" style="flex: 1;" onchange="updateVersionHelperText()">
-              <option value="v1.0.1">v1.0.1 (Neueste Version / Empfohlen)</option>
+              <option value="v1.0.2">v1.0.2 (Neueste Version / Empfohlen)</option>
+              <option value="v1.0.1">v1.0.1</option>
               <option value="v1.0.0">v1.0.0</option>
               <option value="v0.9">v0.9 (Legacy Release)</option>
               <option value="main">main (Edge / Entwicklungszweig)</option>
@@ -134,8 +135,22 @@
           <p class="helper-text" id="version-helper-text">⚡ Schnelle Bereitstellung: Vorkompilierte GitHub Container Images (GHCR) verfügbar.</p>
         </div>
 
+        <!-- ACCORDION: SETTINGS IMPORT (WITHOUT DB DUMP) -->
+        <div class="accordion-box" style="margin: 1rem 0;">
+          <details>
+            <summary style="cursor: pointer; font-weight: 600; color: #38bdf8;">⚙️ Einstellungen vorab aus Datei importieren (.json) (Optional)</summary>
+            <div style="padding: 1rem 0;">
+              <p class="helper-text" style="margin-bottom: 0.75rem;">Laden Sie eine exportierte <code>openlocalcrm-settings.json</code> hoch, um KI-Einstellungen, Admin-Konto und Port sofort automatisch auszufüllen (Rebuild ohne DB-Dump).</p>
+              <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                <input type="file" id="setup-settings-file" accept=".json" style="color: #94a3b8; font-size: 0.85rem;" onchange="loadSettingsFromFile(event)">
+              </div>
+              <div id="setup-settings-status" class="helper-text" style="margin-top: 0.5rem; font-weight: 500;"></div>
+            </div>
+          </details>
+        </div>
+
         <!-- ACCORDION: DATABASE RESTORE / IMPORT -->
-        <div class="accordion-box" style="margin: 1.5rem 0;">
+        <div class="accordion-box" style="margin: 1rem 0 1.5rem 0;">
           <details>
             <summary style="cursor: pointer; font-weight: 600; color: #38bdf8;">📦 Bestehende Datenbank importieren (.sql Dump) (Optional)</summary>
             <div style="padding: 1rem 0;">
@@ -256,6 +271,8 @@
         <button class="btn btn-secondary" onclick="controlAction('start')">▶️ Stack starten</button>
         <button class="btn btn-secondary" onclick="controlAction('restart')">🔄 Neu starten</button>
         <button class="btn btn-secondary" onclick="controlAction('stop')">⏹️ Anhalten</button>
+        <button class="btn btn-outline" onclick="exportSettings()">⚙️ Einstellungen exportieren (.json)</button>
+        <button class="btn btn-outline" onclick="openImportSettingsModal()">📥 Einstellungen importieren & Rebuild</button>
         <button class="btn btn-outline" onclick="createBackup()">💾 1-Klick Backup erstellen</button>
         <button class="btn btn-outline" onclick="openResetPasswordModal()">🔑 Admin-Passwort zurücksetzen</button>
         <button class="btn btn-danger" onclick="openResetModal()">⚠️ Alles zurücksetzen (Neuaufbau)</button>
@@ -386,6 +403,36 @@
       <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
         <button type="button" class="btn btn-secondary" onclick="closeUpdateModal()" id="btn-cancel-update">Später</button>
         <button type="button" class="btn btn-warning" id="btn-confirm-update" onclick="executeSystemUpdate()">⚡ Jetzt aktualisieren & neu starten</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- IMPORT SETTINGS MODAL -->
+  <div id="import-settings-modal" class="modal-overlay hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; z-index: 9999;">
+    <div class="card" style="max-width: 520px; width: 92%; margin: auto; position: relative; border: 1px solid rgba(255, 255, 255, 0.15); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0; font-size: 1.15rem; color: #f8fafc;">⚙️ Einstellungen importieren (ohne DB-Dump)</h3>
+        <button onclick="closeImportSettingsModal()" style="background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer; padding: 0 0.5rem; line-height: 1;">&times;</button>
+      </div>
+      <p class="helper-text" style="margin-bottom: 1.25rem;">
+        Laden Sie eine <code>openlocalcrm-settings.json</code> hoch, um KI-Einstellungen, Admin-Zugangsdaten und Port zu aktualisieren. Optional kann direkt ein Container-Rebuild ausgeführt werden, sodass die neuen Einstellungen sofort aktiv sind.
+      </p>
+
+      <div class="form-group" style="margin-bottom: 1.25rem;">
+        <label style="display: block; margin-bottom: 0.35rem; font-size: 0.85rem; color: #cbd5e1;">Einstellungsdatei auswählen (.json)</label>
+        <input type="file" id="import-settings-file" accept=".json" class="form-input" style="width: 100%; box-sizing: border-box;">
+      </div>
+
+      <div class="form-group" style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.5rem;">
+        <input type="checkbox" id="import-settings-rebuild" checked style="cursor: pointer;">
+        <label for="import-settings-rebuild" style="font-size: 0.85rem; color: #cbd5e1; cursor: pointer;">Container nach dem Import sofort neu bauen (Rebuild)</label>
+      </div>
+
+      <div id="import-settings-feedback" class="helper-text" style="margin-bottom: 1rem; font-weight: 500;"></div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+        <button type="button" class="btn btn-outline" onclick="closeImportSettingsModal()">Abbrechen</button>
+        <button type="button" class="btn btn-primary" id="btn-submit-import-settings" onclick="submitImportSettings()">📥 Einstellungen importieren</button>
       </div>
     </div>
   </div>

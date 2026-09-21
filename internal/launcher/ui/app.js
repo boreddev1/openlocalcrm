@@ -1182,3 +1182,124 @@ function updateVersionHelperText() {
   }
 }
 
+function exportSettings() {
+  window.location.href = '/api/settings/export';
+}
+
+function loadSettingsFromFile(event) {
+  const file = event.target.files[0];
+  const statusEl = document.getElementById('setup-settings-status');
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const settings = JSON.parse(e.target.result);
+      if (settings.admin) {
+        if (settings.admin.email) document.getElementById('admin-email').value = settings.admin.email;
+        if (settings.admin.password) document.getElementById('admin-password').value = settings.admin.password;
+      }
+      if (settings.system && settings.system.port) {
+        document.getElementById('web-port').value = settings.system.port;
+      }
+      if (settings.ai) {
+        if (settings.ai.provider) {
+          document.getElementById('ai-provider').value = settings.ai.provider;
+          onAIProviderChange();
+        }
+        if (settings.ai.base_url) document.getElementById('ai-url').value = settings.ai.base_url;
+        if (settings.ai.model) document.getElementById('ai-model').value = settings.ai.model;
+        if (settings.ai.api_key) document.getElementById('ai-key').value = settings.ai.api_key;
+      }
+      if (statusEl) {
+        statusEl.style.color = '#34d399';
+        statusEl.textContent = `✅ Einstellungen erfolgreich geladen: KI (${settings.ai?.provider || 'ollama'}), Admin (${settings.admin?.email || 'admin'})`;
+      }
+    } catch (err) {
+      if (statusEl) {
+        statusEl.style.color = '#f87171';
+        statusEl.textContent = '❌ Ungültige JSON-Datei: ' + err.message;
+      }
+    }
+  };
+  reader.readAsText(file);
+}
+
+function openImportSettingsModal() {
+  const modal = document.getElementById('import-settings-modal');
+  const feedback = document.getElementById('import-settings-feedback');
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.remove('hidden');
+  }
+  if (feedback) feedback.textContent = '';
+}
+
+function closeImportSettingsModal() {
+  const modal = document.getElementById('import-settings-modal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.add('hidden');
+  }
+}
+
+async function submitImportSettings() {
+  const fileInput = document.getElementById('import-settings-file');
+  const rebuildCheckbox = document.getElementById('import-settings-rebuild');
+  const feedback = document.getElementById('import-settings-feedback');
+  const btn = document.getElementById('btn-submit-import-settings');
+
+  if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+    if (feedback) {
+      feedback.style.color = '#f87171';
+      feedback.textContent = 'Bitte wählen Sie eine settings.json Datei aus.';
+    }
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('settings', fileInput.files[0]);
+
+  try {
+    btn.disabled = true;
+    btn.textContent = 'Importiere...';
+    if (feedback) {
+      feedback.style.color = '#38bdf8';
+      feedback.textContent = 'Lade Einstellungen hoch...';
+    }
+
+    const res = await fetch('/api/settings/import', {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Import fehlgeschlagen');
+    }
+
+    if (rebuildCheckbox && rebuildCheckbox.checked) {
+      feedback.style.color = '#38bdf8';
+      feedback.textContent = 'Einstellungen importiert. Starte Container-Rebuild...';
+      await fetch('/api/settings/rebuild', { method: 'POST' });
+      closeImportSettingsModal();
+      alert('Einstellungen wurden erfolgreich importiert! Der Container-Rebuild wurde gestartet. Beobachten Sie die Live-Logs.');
+    } else {
+      feedback.style.color = '#34d399';
+      feedback.textContent = '✅ Einstellungen erfolgreich importiert!';
+      setTimeout(() => {
+        closeImportSettingsModal();
+      }, 1500);
+    }
+  } catch (err) {
+    if (feedback) {
+      feedback.style.color = '#f87171';
+      feedback.textContent = '❌ Fehler: ' + err.message;
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📥 Einstellungen importieren';
+  }
+}
+
+
