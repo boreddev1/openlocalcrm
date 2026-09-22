@@ -75,6 +75,9 @@ function editExistingConfig() {
     if (existingSystemConfig.ai_model) {
       document.getElementById('ai-model').value = existingSystemConfig.ai_model;
     }
+    if (existingSystemConfig.ai_embedding_model) {
+      document.getElementById('ai-embedding-model').value = existingSystemConfig.ai_embedding_model;
+    }
     if (existingSystemConfig.ai_api_key) {
       document.getElementById('ai-key').value = existingSystemConfig.ai_api_key;
     }
@@ -387,19 +390,23 @@ function onAIProviderChange() {
   const keyGroup = document.getElementById('ai-key-group');
   const urlInput = document.getElementById('ai-url');
   const modelInput = document.getElementById('ai-model');
+  const embeddingInput = document.getElementById('ai-embedding-model');
 
   if (provider === 'none') {
     box.classList.add('hidden');
+    embeddingInput.value = '';
   } else if (provider === 'ollama') {
     box.classList.remove('hidden');
     keyGroup.classList.add('hidden');
     urlInput.value = 'http://localhost:11434';
     modelInput.value = 'gemma4:12b';
+    embeddingInput.value = 'qwen3-embedding:0.6b';
   } else {
     box.classList.remove('hidden');
     keyGroup.classList.remove('hidden');
     urlInput.value = 'https://api.openai.com/v1';
     modelInput.value = 'gpt-4o-mini';
+    embeddingInput.value = '';
   }
 }
 
@@ -412,7 +419,8 @@ async function testAIConnection() {
     provider: document.getElementById('ai-provider').value,
     base_url: document.getElementById('ai-url').value,
     api_key: document.getElementById('ai-key').value,
-    model: document.getElementById('ai-model').value
+    model: document.getElementById('ai-model').value,
+    embedding_model: document.getElementById('ai-embedding-model').value
   };
 
   try {
@@ -453,6 +461,7 @@ async function startSetup() {
     ai_base_url: document.getElementById('ai-url').value,
     ai_api_key: document.getElementById('ai-key').value,
     ai_model: document.getElementById('ai-model').value,
+    ai_embedding_model: document.getElementById('ai-embedding-model').value,
     version: selectedVersion
   };
 
@@ -1209,6 +1218,7 @@ function loadSettingsFromFile(event) {
         }
         if (settings.ai.base_url) document.getElementById('ai-url').value = settings.ai.base_url;
         if (settings.ai.model) document.getElementById('ai-model').value = settings.ai.model;
+        if (settings.ai.embedding_model) document.getElementById('ai-embedding-model').value = settings.ai.embedding_model;
         if (settings.ai.api_key) document.getElementById('ai-key').value = settings.ai.api_key;
       }
       if (statusEl) {
