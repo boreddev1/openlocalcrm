@@ -13,6 +13,11 @@ document.addEventListener('DOMContentLoaded', () => {
   loadAvailableVersions();
   checkInitialStatus();
   checkForUpdates(false);
+
+  const aiUrlInput = document.getElementById('ai-url');
+  if (aiUrlInput) {
+    aiUrlInput.addEventListener('change', () => loadAIModels());
+  }
 });
 
 async function checkInitialStatus() {
@@ -384,6 +389,17 @@ async function uploadSetupBackup() {
   }
 }
 
+function effectiveAIProvider() {
+  const v = document.getElementById('ai-provider').value;
+  if (v === 'mistral' || v === 'nebius') return 'openai';
+  return v;
+}
+
+const AI_PRESET_URLS = {
+  mistral: 'https://api.mistral.ai/v1',
+  nebius: 'https://api.studio.nebius.ai/v1'
+};
+
 function onAIProviderChange() {
   const provider = document.getElementById('ai-provider').value;
   const box = document.getElementById('ai-settings-box');
@@ -404,19 +420,58 @@ function onAIProviderChange() {
   } else {
     box.classList.remove('hidden');
     keyGroup.classList.remove('hidden');
-    urlInput.value = 'https://api.openai.com/v1';
-    modelInput.value = 'gpt-4o-mini';
+    if (AI_PRESET_URLS[provider]) {
+      urlInput.value = AI_PRESET_URLS[provider];
+      modelInput.value = '';
+    } else {
+      urlInput.value = 'https://api.openai.com/v1';
+      modelInput.value = 'gpt-4o-mini';
+    }
     embeddingInput.value = '';
+  }
+  loadAIModels();
+}
+
+async function loadAIModels() {
+  const provider = document.getElementById('ai-provider').value;
+  if (provider === 'none') return;
+  try {
+    const res = await fetch('/api/ai/models?' + new URLSearchParams({
+      provider: effectiveAIProvider(),
+      base_url: document.getElementById('ai-url').value,
+      api_key: document.getElementById('ai-key').value
+    }));
+    const data = await res.json();
+    fillDatalist('ai-model-options', data);
+    fillDatalist('ai-embedding-model-options', data);
+  } catch (err) {
+    fillDatalist('ai-model-options', null);
+    fillDatalist('ai-embedding-model-options', null);
+  }
+}
+
+function fillDatalist(id, data) {
+  const dl = document.getElementById(id);
+  if (!dl) return;
+  dl.innerHTML = '';
+  if (data && data.success && Array.isArray(data.models)) {
+    for (const m of data.models) {
+      const opt = document.createElement('option');
+      opt.value = m;
+      dl.appendChild(opt);
+    }
   }
 }
 
 async function testAIConnection() {
-  const statusEl = document.getElementById('ai-probe-status');
-  statusEl.style.color = '#fbbf24';
-  statusEl.textContent = '⏳ Teste Verbindung...';
+  const chatEl = document.getElementById('ai-chat-status');
+  const embEl = document.getElementById('ai-embedding-status');
+  chatEl.style.color = '#fbbf24';
+  chatEl.textContent = '⏳ Teste Verbindung...';
+  embEl.textContent = '';
 
   const payload = {
-    provider: document.getElementById('ai-provider').value,
+    provider: effectiveAIProvider(),
     base_url: document.getElementById('ai-url').value,
     api_key: document.getElementById('ai-key').value,
     model: document.getElementById('ai-model').value,
@@ -430,16 +485,24 @@ async function testAIConnection() {
       body: JSON.stringify(payload)
     });
     const data = await res.json();
-    if (data.success) {
-      statusEl.style.color = '#34d399';
-      statusEl.textContent = '✅ ' + data.message;
+    if (data.chat) {
+      chatEl.textContent = (data.chat.success ? '✅ Chat: ' : '❌ Chat: ') + data.chat.message + (data.chat.success ? ' (' + data.chat.latency_ms + ' ms)' : '');
+      chatEl.style.color = data.chat.success ? '#34d399' : '#f87171';
     } else {
-      statusEl.style.color = '#f87171';
-      statusEl.textContent = '❌ ' + data.message;
+      chatEl.textContent = '❌ Chat: ' + (data.message || 'Keine Antwort vom Server');
+      chatEl.style.color = '#f87171';
+    }
+    if (data.embedding) {
+      embEl.textContent = (data.embedding.success ? '✅ Embedding: ' : '❌ Embedding: ') + data.embedding.message;
+      embEl.style.color = data.embedding.success ? '#34d399' : '#f87171';
+    } else {
+      embEl.textContent = '';
     }
   } catch (err) {
-    statusEl.style.color = '#f87171';
-    statusEl.textContent = '❌ Fehler: ' + err.message;
+    chatEl.textContent = '❌ Chat: Verbindungsfehler: ' + err.message;
+    chatEl.style.color = '#f87171';
+    embEl.textContent = '❌ Embedding: Verbindungsfehler: ' + err.message;
+    embEl.style.color = '#f87171';
   }
 }
 
@@ -457,7 +520,7 @@ async function startSetup() {
     admin_password: savedAdminPassword,
     port: configuredPort,
     is_demo_mode: false,
-    ai_provider: document.getElementById('ai-provider').value,
+    ai_provider: effectiveAIProvider(),
     ai_base_url: document.getElementById('ai-url').value,
     ai_api_key: document.getElementById('ai-key').value,
     ai_model: document.getElementById('ai-model').value,
