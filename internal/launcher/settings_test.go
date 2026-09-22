@@ -155,3 +155,38 @@ PORT=80
 		t.Errorf("expected AI_PROVIDER=openai in .env")
 	}
 }
+
+func TestSettingsExportImportEmbeddingModel(t *testing.T) {
+	dir := t.TempDir()
+	env := "AI_PROVIDER=ollama\nAI_MODEL=gemma4:12b\nOLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0600); err != nil {
+		t.Fatal(err)
+	}
+	exported, err := ExportSettingsFromEnv(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exported.AI.EmbeddingModel != "qwen3-embedding:0.6b" {
+		t.Fatalf("expected alias-resolved export value, got %q", exported.AI.EmbeddingModel)
+	}
+
+	imported := &ExportedSettings{AI: AISettings{Provider: "ollama", Model: "gemma4:12b", EmbeddingModel: "mistral-embed"}}
+	if err := ValidateSettingsValues(imported); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if err := ValidateSettingsValues(&ExportedSettings{AI: AISettings{EmbeddingModel: "bad\nmodel"}}); err == nil {
+		t.Fatalf("expected newline injection to be rejected")
+	}
+
+	outDir := t.TempDir()
+	if err := ImportSettingsToEnv(outDir, imported, false); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(outDir, ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "AI_EMBEDDING_MODEL=mistral-embed") {
+		t.Fatalf("expected import to write AI_EMBEDDING_MODEL, got:\n%s", content)
+	}
+}
