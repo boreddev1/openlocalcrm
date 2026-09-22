@@ -350,7 +350,12 @@ func WriteConfigAndDirectoriesWithEnv(baseDir string, cfg SetupConfig, existing 
 	}
 
 	envPath := filepath.Join(baseDir, ".env")
-	return os.WriteFile(envPath, []byte(content), 0600)
+	if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
+		return err
+	}
+
+	_ = PatchComposeEmbeddingDefaults(filepath.Join(baseDir, "docker-compose.yml"))
+	return nil
 }
 
 // IsGHCRImageSupported returns true if the selected release version is >= v1.0 or edge (main/master/latest).
