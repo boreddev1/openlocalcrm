@@ -28,10 +28,17 @@ type EmbeddingProbeResult struct {
 	Dims    int    `json:"dims,omitempty"`
 }
 
+type ChatProbeResult struct {
+	Success   bool   `json:"success"`
+	Message   string `json:"message"`
+	LatencyMS int64  `json:"latency_ms"`
+}
+
 type AIProbeResponse struct {
 	Success   bool                  `json:"success"`
 	Message   string                `json:"message"`
 	LatencyMS int64                 `json:"latency_ms"`
+	Chat      *ChatProbeResult      `json:"chat,omitempty"`
 	Embedding *EmbeddingProbeResult `json:"embedding,omitempty"`
 }
 
@@ -116,26 +123,43 @@ func ProbeAIConnection(ctx context.Context, req AIProbeRequest) AIProbeResponse 
 
 	var res AIProbeResponse
 
+	chatFail := func(msg string) AIProbeResponse {
+		return AIProbeResponse{
+			Success: false,
+			Message: msg,
+			Chat: &ChatProbeResult{
+				Success:   false,
+				Message:   msg,
+				LatencyMS: time.Since(start).Milliseconds(),
+			},
+		}
+	}
+
 	if req.Provider == "ollama" {
 		probeURL := baseURL + "/api/tags"
 		httpReq, err := http.NewRequestWithContext(probeCtx, "GET", probeURL, nil)
 		if err != nil {
-			return AIProbeResponse{Success: false, Message: fmt.Sprintf("Ungültige URL: %v", err)}
+			return chatFail(fmt.Sprintf("Ungültige URL: %v", err))
 		}
 
 		resp, err := client.Do(httpReq)
 		if err != nil {
-			return AIProbeResponse{Success: false, Message: fmt.Sprintf("Verbindung zu Ollama fehlgeschlagen: %v", err)}
+			return chatFail(fmt.Sprintf("Verbindung zu Ollama fehlgeschlagen: %v", err))
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			return AIProbeResponse{Success: false, Message: fmt.Sprintf("Ollama antwortete mit Status: %d", resp.StatusCode)}
+			return chatFail(fmt.Sprintf("Ollama antwortete mit Status: %d", resp.StatusCode))
 		}
 
 		res = AIProbeResponse{
 			Success:   true,
 			Message:   fmt.Sprintf("Verbindung zu Ollama erfolgreich hergestellt! (Modell: %s)", req.Model),
+			LatencyMS: time.Since(start).Milliseconds(),
+		}
+		res.Chat = &ChatProbeResult{
+			Success:   true,
+			Message:   res.Message,
 			LatencyMS: time.Since(start).Milliseconds(),
 		}
 	} else {
@@ -151,7 +175,7 @@ func ProbeAIConnection(ctx context.Context, req AIProbeRequest) AIProbeResponse 
 
 		httpReq, err := http.NewRequestWithContext(probeCtx, "POST", probeURL, bytes.NewReader(body))
 		if err != nil {
-			return AIProbeResponse{Success: false, Message: fmt.Sprintf("Ungültige Anfrage: %v", err)}
+			return chatFail(fmt.Sprintf("Ungültige Anfrage: %v", err))
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		if req.APIKey != "" {
@@ -160,20 +184,25 @@ func ProbeAIConnection(ctx context.Context, req AIProbeRequest) AIProbeResponse 
 
 		resp, err := client.Do(httpReq)
 		if err != nil {
-			return AIProbeResponse{Success: false, Message: fmt.Sprintf("Verbindung fehlgeschlagen: %v", err)}
+			return chatFail(fmt.Sprintf("Verbindung fehlgeschlagen: %v", err))
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode == http.StatusUnauthorized {
-			return AIProbeResponse{Success: false, Message: "401 Unauthorized: Ungültiger API-Key"}
+			return chatFail("401 Unauthorized: Ungültiger API-Key")
 		}
 		if resp.StatusCode >= 400 && resp.StatusCode != http.StatusOK {
-			return AIProbeResponse{Success: false, Message: fmt.Sprintf("KI-Endpunkt meldete HTTP-Fehler: %d", resp.StatusCode)}
+			return chatFail(fmt.Sprintf("KI-Endpunkt meldete HTTP-Fehler: %d", resp.StatusCode))
 		}
 
 		res = AIProbeResponse{
 			Success:   true,
 			Message:   fmt.Sprintf("Verbindung zum KI-Endpunkt erfolgreich! (Modell: %s)", req.Model),
+			LatencyMS: time.Since(start).Milliseconds(),
+		}
+		res.Chat = &ChatProbeResult{
+			Success:   true,
+			Message:   res.Message,
 			LatencyMS: time.Since(start).Milliseconds(),
 		}
 	}
@@ -185,4 +214,75 @@ func ProbeAIConnection(ctx context.Context, req AIProbeRequest) AIProbeResponse 
 		res.Message = emb.Message
 	}
 	return res
+}
+
+type ListAIModelsQuery struct {
+	Provider string
+	BaseURL  string
+	APIKey   string
+}
+
+type ListAIModelsResponse struct {
+	Success bool     `json:"success"`
+	Models  []string `json:"models"`
+	Message string   `json:"message,omitempty"`
+}
+
+func ListAIModels(ctx context.Context, q ListAIModelsQuery) ListAIModelsResponse {
+	switch q.Provider {
+	case "ollama", "openai":
+	default:
+		return ListAIModelsResponse{Success: false, Message: "Provider muss ollama oder openai sein"}
+	}
+	baseURL := strings.TrimRight(q.BaseURL, "/")
+	if baseURL == "" {
+		if q.Provider == "ollama" {
+			baseURL = "http://localhost:11434"
+		} else {
+			baseURL = "https://api.openai.com/v1"
+		}
+	}
+	path := "/api/tags"
+	if q.Provider == "openai" {
+		path = "/models"
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+path, nil)
+	if err != nil {
+		return ListAIModelsResponse{Success: false, Message: fmt.Sprintf("Ungültige URL: %v", err)}
+	}
+	if q.Provider == "openai" && q.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+q.APIKey)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ListAIModelsResponse{Success: false, Message: fmt.Sprintf("Verbindung fehlgeschlagen: %v", err)}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ListAIModelsResponse{Success: false, Message: fmt.Sprintf("Endpunkt antwortete mit Status %d", resp.StatusCode)}
+	}
+	var raw struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return ListAIModelsResponse{Success: false, Message: fmt.Sprintf("Antwort unlesbar: %v", err)}
+	}
+	models := make([]string, 0, len(raw.Models)+len(raw.Data))
+	for _, m := range raw.Models {
+		if m.Name != "" {
+			models = append(models, m.Name)
+		}
+	}
+	for _, m := range raw.Data {
+		if m.ID != "" {
+			models = append(models, m.ID)
+		}
+	}
+	return ListAIModelsResponse{Success: true, Models: models}
 }

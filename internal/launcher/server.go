@@ -46,6 +46,7 @@ func NewServerWithUpdater(baseDir string, engine *Engine, updater *Updater, onRe
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/preflight", s.handlePreflight)
 	mux.HandleFunc("/api/ai/test", s.handleAITest)
+	mux.HandleFunc("/api/ai/models", s.handleAIModels)
 	mux.HandleFunc("/api/setup", s.handleSetup)
 	mux.HandleFunc("/api/control/", s.handleControl)
 	mux.HandleFunc("/api/backup", s.handleBackup)
@@ -140,6 +141,21 @@ func (s *Server) handleAITest(w http.ResponseWriter, r *http.Request) {
 	resp := ProbeAIConnection(r.Context(), req)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleAIModels(w http.ResponseWriter, r *http.Request) {
+	provider := r.URL.Query().Get("provider")
+	if provider == "" {
+		http.Error(w, `{"error":"provider is required"}`, http.StatusBadRequest)
+		return
+	}
+	res := ListAIModels(r.Context(), ListAIModelsQuery{
+		Provider: provider,
+		BaseURL:  r.URL.Query().Get("base_url"),
+		APIKey:   r.URL.Query().Get("api_key"),
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
