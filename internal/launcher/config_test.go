@@ -34,6 +34,54 @@ func TestGenerateEnvContent(t *testing.T) {
 	}
 }
 
+func TestGenerateEnvContent_EmbeddingModelProviderScoped(t *testing.T) {
+	// Ollama: Formularwert gewinnt
+	cfg := SetupConfig{AIProvider: "ollama", AIModel: "gemma4:12b", AIEmbeddingModel: "qwen3-embedding:0.6b"}
+	content, err := GenerateEnvContent(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, "AI_EMBEDDING_MODEL=qwen3-embedding:0.6b") {
+		t.Errorf("expected AI_EMBEDDING_MODEL line, got:\n%s", content)
+	}
+	if !strings.Contains(content, "OLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b") {
+		t.Errorf("expected OLLAMA alias line, got:\n%s", content)
+	}
+
+	// OpenAI: leeres Feld -> leerer AI-Key, KEINE Alias-Zeile (kein qwen3-Leak)
+	cfg = SetupConfig{AIProvider: "openai", AIModel: "gpt-4o-mini"}
+	content, err = GenerateEnvContent(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, "AI_EMBEDDING_MODEL=\n") {
+		t.Errorf("expected empty AI_EMBEDDING_MODEL line, got:\n%s", content)
+	}
+	if strings.Contains(content, "qwen3-embedding") {
+		t.Errorf("openai must never inherit the ollama alias, got:\n%s", content)
+	}
+
+	// Bestandsinstallation: nur OLLAMA_EMBEDDING_MODEL gesetzt (Rewrite erhält Alias)
+	cfg = SetupConfig{AIProvider: "ollama", AIModel: "gemma4:12b"}
+	content, err = GenerateEnvContentWithExisting(cfg, map[string]string{"OLLAMA_EMBEDDING_MODEL": "qwen3-embedding:0.6b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, "AI_EMBEDDING_MODEL=qwen3-embedding:0.6b") {
+		t.Errorf("expected alias preserved into AI key on rewrite, got:\n%s", content)
+	}
+
+	// none: keine Embedding-Zeilen
+	cfg = SetupConfig{AIProvider: "none"}
+	content, err = GenerateEnvContent(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(content, "EMBEDDING_MODEL") {
+		t.Errorf("none provider must not write embedding lines, got:\n%s", content)
+	}
+}
+
 func TestIsAlreadyInstalled(t *testing.T) {
 	tmp := t.TempDir()
 	if IsAlreadyInstalled(tmp) {

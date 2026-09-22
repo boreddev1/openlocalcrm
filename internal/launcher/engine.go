@@ -102,6 +102,10 @@ func ExtractEnvFromInspect(items []DockerInspectItem) map[string]string {
 						env["AI_API_KEY"] = v
 					case "AI_BASE_URL":
 						env["AI_BASE_URL"] = v
+					case "AI_EMBEDDING_MODEL":
+						env["AI_EMBEDDING_MODEL"] = v
+					case "OLLAMA_EMBEDDING_MODEL":
+						env["OLLAMA_EMBEDDING_MODEL"] = v
 					case "DEMO_MODE":
 						env["DEMO_MODE"] = v
 					}

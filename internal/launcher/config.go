@@ -14,15 +14,16 @@ import (
 )
 
 type SetupConfig struct {
-	AdminEmail    string `json:"admin_email"`
-	AdminPassword string `json:"admin_password"`
-	Port          int    `json:"port"`
-	IsDemoMode    bool   `json:"is_demo_mode"`
-	AIProvider    string `json:"ai_provider"`
-	AIBaseURL     string `json:"ai_base_url"`
-	AIAPIKey      string `json:"ai_api_key"`
-	AIModel       string `json:"ai_model"`
-	Version       string `json:"version"`
+	AdminEmail       string `json:"admin_email"`
+	AdminPassword    string `json:"admin_password"`
+	Port             int    `json:"port"`
+	IsDemoMode       bool   `json:"is_demo_mode"`
+	AIProvider       string `json:"ai_provider"`
+	AIBaseURL        string `json:"ai_base_url"`
+	AIAPIKey         string `json:"ai_api_key"`
+	AIModel          string `json:"ai_model"`
+	AIEmbeddingModel string `json:"ai_embedding_model"`
+	Version          string `json:"version"`
 }
 
 func randomHex(bytes int) string {
@@ -85,6 +86,8 @@ func ReadExistingConfig(baseDir string) (*SetupConfig, bool) {
 		Version:       envMap["OPENLOCALCRM_VERSION"],
 	}
 
+	cfg.AIEmbeddingModel = resolveEmbeddingModel(cfg.AIProvider, envMap["AI_EMBEDDING_MODEL"], envMap["AI_EMBEDDING_MODEL"], envMap["OLLAMA_EMBEDDING_MODEL"])
+
 	if cfg.Version == "" {
 		cfg.Version = envMap["CRM_VERSION"]
 	}
@@ -136,15 +139,16 @@ func DetectExistingInstallation(ctx context.Context, baseDir string, engine *Eng
 				}
 
 				cfg := SetupConfig{
-					AdminEmail:    recovered["INITIAL_ADMIN_EMAIL"],
-					AdminPassword: recovered["INITIAL_ADMIN_PASSWORD"],
-					Port:          port,
-					IsDemoMode:    strings.EqualFold(recovered["DEMO_MODE"], "true"),
-					AIProvider:    recovered["AI_PROVIDER"],
-					AIBaseURL:     recovered["OLLAMA_BASE_URL"],
-					AIAPIKey:      recovered["AI_API_KEY"],
-					AIModel:       recovered["OLLAMA_MODEL"],
-					Version:       recovered["OPENLOCALCRM_VERSION"],
+					AdminEmail:       recovered["INITIAL_ADMIN_EMAIL"],
+					AdminPassword:    recovered["INITIAL_ADMIN_PASSWORD"],
+					Port:             port,
+					IsDemoMode:       strings.EqualFold(recovered["DEMO_MODE"], "true"),
+					AIProvider:       recovered["AI_PROVIDER"],
+					AIBaseURL:        recovered["OLLAMA_BASE_URL"],
+					AIAPIKey:         recovered["AI_API_KEY"],
+					AIModel:          recovered["OLLAMA_MODEL"],
+					Version:          recovered["OPENLOCALCRM_VERSION"],
+					AIEmbeddingModel: resolveEmbeddingModel(recovered["AI_PROVIDER"], recovered["AI_EMBEDDING_MODEL"], recovered["AI_EMBEDDING_MODEL"], recovered["OLLAMA_EMBEDDING_MODEL"]),
 				}
 				if cfg.AdminEmail == "" {
 					cfg.AdminEmail = "admin@openlocalcrm.local"
@@ -189,6 +193,25 @@ func DetectExistingInstallation(ctx context.Context, baseDir string, engine *Eng
 	}
 
 	return false, ""
+}
+
+// resolveEmbeddingModel resolves the embedding model provider-scoped: form
+// value, then AI_EMBEDDING_MODEL; the OLLAMA_EMBEDDING_MODEL alias is only
+// inherited for ollama (its container value often comes from the compose
+// default, not a user choice).
+func resolveEmbeddingModel(provider, formValue, aiModel, ollamaModel string) string {
+	if v := strings.TrimSpace(formValue); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(aiModel); v != "" {
+		return v
+	}
+	if strings.EqualFold(provider, "ollama") {
+		if v := strings.TrimSpace(ollamaModel); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func GenerateEnvContent(cfg SetupConfig) (string, error) {
@@ -282,11 +305,21 @@ func GenerateEnvContentWithExisting(cfg SetupConfig, existing map[string]string)
 		fmt.Sprintf("AI_PROVIDER=%s", cfg.AIProvider),
 		fmt.Sprintf("OLLAMA_BASE_URL=%s", aiBaseURL),
 		fmt.Sprintf("OLLAMA_MODEL=%s", cfg.AIModel),
+	}
+
+	resolvedEmbedding := resolveEmbeddingModel(cfg.AIProvider, cfg.AIEmbeddingModel, existing["AI_EMBEDDING_MODEL"], existing["OLLAMA_EMBEDDING_MODEL"])
+	if !strings.EqualFold(cfg.AIProvider, "none") {
+		lines = append(lines, fmt.Sprintf("AI_EMBEDDING_MODEL=%s", resolvedEmbedding))
+		if resolvedEmbedding != "" {
+			lines = append(lines, fmt.Sprintf("OLLAMA_EMBEDDING_MODEL=%s", resolvedEmbedding))
+		}
+	}
+
+	lines = append(lines,
 		fmt.Sprintf("AI_API_KEY=%s", cfg.AIAPIKey),
 		fmt.Sprintf("AI_BASE_URL=%s", aiBaseURL),
 		"",
-	}
-
+	)
 	if cfg.IsDemoMode {
 		lines = append(lines, "DEMO_MODE=true", "")
 	}

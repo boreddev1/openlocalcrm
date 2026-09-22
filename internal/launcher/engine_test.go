@@ -125,6 +125,8 @@ func TestParseDockerInspectJSON_AndExtractEnv(t *testing.T) {
 					"CONNECTOR_API_TOKEN=conn_secret_token_123",
 					"AI_PROVIDER=openai",
 					"AI_API_KEY=sk-test-key-abc",
+					"AI_EMBEDDING_MODEL=text-embedding-3-small",
+					"OLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b",
 					"DEMO_MODE=false"
 				]
 			}
@@ -161,6 +163,12 @@ func TestParseDockerInspectJSON_AndExtractEnv(t *testing.T) {
 	}
 	if env["APP_PORT"] != "8080" {
 		t.Errorf("expected APP_PORT 8080, got %s", env["APP_PORT"])
+	}
+	if env["AI_EMBEDDING_MODEL"] != "text-embedding-3-small" {
+		t.Errorf("expected AI_EMBEDDING_MODEL pass-through, got %s", env["AI_EMBEDDING_MODEL"])
+	}
+	if env["OLLAMA_EMBEDDING_MODEL"] != "qwen3-embedding:0.6b" {
+		t.Errorf("expected OLLAMA_EMBEDDING_MODEL pass-through, got %s", env["OLLAMA_EMBEDDING_MODEL"])
 	}
 }
 
