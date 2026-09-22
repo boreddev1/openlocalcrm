@@ -67,6 +67,51 @@ func TestGenerateEmbeddingOllamaSuccess(t *testing.T) {
 	}
 }
 
+func TestGenerateEmbeddingSanitizesPIIBeforeDispatchOllama(t *testing.T) {
+	seen := map[string]string{}
+	srv := captureEmbeddingRequest(t, map[string]any{"embedding": dimensionVector(1024)}, &seen)
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		EmbeddingModel:  "qwen3-embedding:0.6b",
+	})
+
+	_, err := gw.GenerateEmbedding(context.Background(), "Kunde zahlt via IBAN DE89370400440532013000")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(seen["body"], "DE89370400440532013000") {
+		t.Fatalf("raw IBAN leaked to embedding provider: %s", seen["body"])
+	}
+	if !strings.Contains(seen["body"], "[REDACTED_IBAN]") {
+		t.Fatalf("expected sanitized prompt, got: %s", seen["body"])
+	}
+}
+
+func TestGenerateEmbeddingSanitizesPIIBeforeDispatchOpenAICompatible(t *testing.T) {
+	seen := map[string]string{}
+	srv := captureEmbeddingRequest(t, map[string]any{
+		"data": []map[string]any{{"embedding": dimensionVector(1024)}},
+	}, &seen)
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderNebius,
+		AIBaseURL:       srv.URL,
+		EmbeddingModel:  "Qwen/Qwen3-Embedding-8B",
+		APIKey:          "test-key",
+	})
+
+	_, err := gw.GenerateEmbedding(context.Background(), "Kunde zahlt via IBAN DE89370400440532013000")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(seen["body"], "DE89370400440532013000") {
+		t.Fatalf("raw IBAN leaked to embedding provider: %s", seen["body"])
+	}
+	if !strings.Contains(seen["body"], "[REDACTED_IBAN]") {
+		t.Fatalf("expected sanitized prompt, got: %s", seen["body"])
+	}
+}
+
 func TestGenerateEmbeddingWrongDimensionsIsTypedError(t *testing.T) {
 	srv := fakeEmbeddingServer(t, map[string]any{"embedding": dimensionVector(512)})
 	gw := ai.NewGateway(ai.GatewayConfig{

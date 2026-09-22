@@ -293,6 +293,7 @@ func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstructi
 // padded, or invented. Providers without an embeddings API (Anthropic, DeepSeek,
 // unknown providers) yield ErrEmbeddingsUnsupported.
 func (g *Gateway) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	text = g.guard.SanitizeInput(text)
 	switch g.cfg.DefaultProvider {
 	case ProviderOllama:
 		return g.embedOllama(ctx, text)

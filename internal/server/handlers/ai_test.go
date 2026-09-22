@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,6 +33,26 @@ func newFakeAIGateway(t *testing.T, response string) *ai.Gateway {
 		OllamaBaseURL:   srv.URL,
 		OllamaModel:     "test-model",
 		EmbeddingModel:  "qwen3-embedding:0.6b",
+	})
+}
+
+func newRecordingFakeAIGateway(t *testing.T, response string, seen *map[string]string) *ai.Gateway {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload, _ := io.ReadAll(r.Body)
+		var reqBody struct {
+			Prompt string `json:"prompt"`
+		}
+		_ = json.Unmarshal(payload, &reqBody)
+		(*seen)["prompt"] = reqBody.Prompt
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": response})
+	}))
+	t.Cleanup(srv.Close)
+	return ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
 	})
 }
 
@@ -124,6 +145,21 @@ func TestAIHandler_TriageAndChat(t *testing.T) {
 
 		h.TriageEmail(rec, req)
 		require.Equal(t, http.StatusBadGateway, rec.Code)
+	})
+
+	t.Run("TriageEmail quote-containing model output yields valid JSON body", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, `Der Kunde sagte: "unser Budget ist frei"`))
+		reqBody := handlers.TriageRequest{Sender: "kunde@solar.de", Subject: "Angebot", Body: "Bitte Angebot."}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/triage", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.TriageEmail(rec, req)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+
+		var res map[string]string
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res), "body must stay valid JSON despite quoted model output: %s", rec.Body.String())
+		require.Equal(t, "ai_unavailable", res["error"])
 	})
 
 	t.Run("Chat returns real model reply", func(t *testing.T) {
@@ -322,5 +358,18 @@ func TestAIHandler_KnowledgeBaseAndResearch(t *testing.T) {
 
 		h.ResearchCompany(rec, req)
 		require.Equal(t, http.StatusBadGateway, rec.Code)
+	})
+
+	t.Run("ResearchCompany empty domain is 400 with valid JSON body", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, `{"summary":"Recherche","industry_keywords":[]}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/research-company", bytes.NewReader([]byte(`{"domain":""}`)))
+		rec := httptest.NewRecorder()
+
+		h.ResearchCompany(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+
+		var res map[string]string
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res), "error body must be valid JSON: %s", rec.Body.String())
+		require.Contains(t, res["message"], "empty domain")
 	})
 }

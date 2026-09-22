@@ -194,3 +194,36 @@ func TestKBHandler_SearchKBFailsHonestlyWhenEmbeddingUnavailable(t *testing.T) {
 	h.SearchKB(rec, req)
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 }
+
+func TestKBHandler_CreateKBDimensionMismatchReturnsValidJSONBody(t *testing.T) {
+	h, _ := setupKBHandler(t, newEmbeddingGateway(t, unitVector(512)))
+	doc := handlers.KBArticle{Title: "PV Handbuch", Category: "Solar", Content: "Photovoltaik Montage"}
+	body, _ := json.Marshal(doc)
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/kb", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.CreateKB(rec, req)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+
+	var res map[string]string
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res), "502 body must stay valid JSON despite quoted model name: %s", rec.Body.String())
+	require.Equal(t, "embedding_unavailable", res["error"])
+	require.Contains(t, res["message"], "qwen3-embedding:0.6b")
+	require.Contains(t, res["message"], "512")
+	require.Contains(t, res["message"], "1024")
+}
+
+func TestKBHandler_SearchKBDimensionMismatchReturnsValidJSONBody(t *testing.T) {
+	h, _ := setupKBHandler(t, newEmbeddingGateway(t, unitVector(512)))
+	req := httptest.NewRequest(http.MethodGet, "/api/ai/kb/search?q=photovoltaik", nil)
+	rec := httptest.NewRecorder()
+
+	h.SearchKB(rec, req)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+
+	var res map[string]string
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res), "502 body must stay valid JSON despite quoted model name: %s", rec.Body.String())
+	require.Equal(t, "embedding_unavailable", res["error"])
+	require.Contains(t, res["message"], "512")
+	require.Contains(t, res["message"], "1024")
+}

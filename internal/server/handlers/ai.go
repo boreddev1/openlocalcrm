@@ -84,6 +84,15 @@ func NewAIHandler(
 	}
 }
 
+// writeJSONError writes a machine-readable JSON error body whose interpolated
+// dynamic content is properly escaped by encoding/json (http.Error with
+// string-built JSON produces invalid bodies when messages contain quotes).
+func writeJSONError(w http.ResponseWriter, status int, errCode, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": errCode, "message": message})
+}
+
 type TriageRequest struct {
 	Sender  string `json:"sender"`
 	Subject string `json:"subject"`
@@ -103,7 +112,7 @@ func (h *AIHandler) TriageEmail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
 			return
 		}
-		http.Error(w, `{"error":"ai triage failed: `+err.Error()+`"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "ai_triage_failed", err.Error())
 		return
 	}
 
@@ -124,7 +133,7 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
 			return
 		}
-		http.Error(w, `{"error":"ai chat failed: `+err.Error()+`"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "ai_chat_failed", err.Error())
 		return
 	}
 
@@ -149,7 +158,7 @@ func (h *AIHandler) ResearchCompany(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
 			return
 		}
-		http.Error(w, `{"error":"company research failed: `+err.Error()+`"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "research_failed", err.Error())
 		return
 	}
 
@@ -298,7 +307,7 @@ func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 	// and never fabricate an index status.
 	vec, err := h.gateway.GenerateEmbedding(r.Context(), doc.Content)
 	if err != nil {
-		http.Error(w, `{"error":"embedding_unavailable","message":"Embedding konnte nicht erzeugt werden: `+err.Error()+`"}`, http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "embedding_unavailable", "Embedding konnte nicht erzeugt werden: "+err.Error())
 		return
 	}
 	embeddingModel := h.gateway.GetConfig().EmbeddingModel
@@ -364,7 +373,7 @@ func (h *AIHandler) SearchKB(w http.ResponseWriter, r *http.Request) {
 
 	vec, err := h.gateway.GenerateEmbedding(r.Context(), query)
 	if err != nil {
-		http.Error(w, `{"error":"embedding_unavailable","message":"Embedding konnte nicht erzeugt werden: `+err.Error()+`"}`, http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "embedding_unavailable", "Embedding konnte nicht erzeugt werden: "+err.Error())
 		return
 	}
 
@@ -409,7 +418,7 @@ func (h *AIHandler) DeleteKB(w http.ResponseWriter, r *http.Request) {
 
 	if h.querier != nil {
 		if err := h.querier.DeleteKBArticle(r.Context(), pgtype.UUID{Bytes: u, Valid: true}); err != nil {
-			http.Error(w, `{"error":"failed to delete kb article: `+err.Error()+`"}`, http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "delete_failed", err.Error())
 			return
 		}
 	}
