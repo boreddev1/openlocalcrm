@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 )
@@ -236,5 +237,55 @@ func TestTriageEmailUsesRealModelResponse(t *testing.T) {
 	}
 	if !strings.Contains(res.DraftReply, "Modell-Antwort") {
 		t.Fatalf("expected model draft reply, got %q", res.DraftReply)
+	}
+}
+
+func TestNewGatewayDisableEnvFallbackIgnoresEnv(t *testing.T) {
+	t.Setenv("AI_EMBEDDING_MODEL", "env-embedding-model")
+	t.Setenv("OLLAMA_EMBEDDING_MODEL", "env-alias-model")
+	t.Setenv("AI_API_KEY", "env-api-key")
+	t.Setenv("OLLAMA_MODEL", "env-chat-model")
+	t.Setenv("OLLAMA_BASE_URL", "http://env-host:9999")
+
+	gw := ai.NewGateway(ai.GatewayConfig{DefaultProvider: ai.ProviderOllama, DisableEnvFallback: true})
+	cfg := gw.GetConfig()
+	if cfg.EmbeddingModel != "" {
+		t.Errorf("expected empty EmbeddingModel, got %q", cfg.EmbeddingModel)
+	}
+	if cfg.APIKey != "" {
+		t.Errorf("expected empty APIKey, got %q", cfg.APIKey)
+	}
+	if cfg.OllamaModel != "" {
+		t.Errorf("expected empty OllamaModel, got %q", cfg.OllamaModel)
+	}
+	if cfg.OllamaBaseURL != "http://localhost:11434" {
+		t.Errorf("expected structural Ollama default, got %q", cfg.OllamaBaseURL)
+	}
+}
+
+func TestNewGatewayDisableEnvFallbackForcesDefaultTimeout(t *testing.T) {
+	t.Setenv("OLLAMA_TIMEOUT_SECONDS", "1")
+	body := `{"embedding":[` + strings.TrimSuffix(strings.Repeat("1.0,", 1024), ",") + `]}`
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer slow.Close()
+
+	withFlag := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama, OllamaBaseURL: slow.URL,
+		EmbeddingModel: "test-model", DisableEnvFallback: true,
+	})
+	if _, err := withFlag.GenerateEmbedding(context.Background(), "text"); err != nil {
+		t.Fatalf("expected success with forced 30s timeout, got: %v", err)
+	}
+
+	withoutFlag := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama, OllamaBaseURL: slow.URL,
+		EmbeddingModel: "test-model",
+	})
+	if _, err := withoutFlag.GenerateEmbedding(context.Background(), "text"); !errors.Is(err, ai.ErrUpstreamUnavailable) {
+		t.Fatalf("expected timeout error (1s from env) without flag, got: %v", err)
 	}
 }

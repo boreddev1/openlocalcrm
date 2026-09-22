@@ -72,6 +72,13 @@ type GatewayConfig struct {
 	// an unconfigured model is an honest config error, never a guess.
 	EmbeddingModel string
 	APIKey         string
+	// DisableEnvFallback enables pure-constructor mode: NewGateway reads no
+	// environment variables at all and the client timeout is fixed at 30 s.
+	// Every field must be provided explicitly by the caller (e.g. the launcher
+	// probe tests exactly the UI-provided configuration, never host env).
+	// Structural defaults (OllamaBaseURL) still apply; EmbeddingModel and
+	// OllamaModel get no default in this mode.
+	DisableEnvFallback bool
 }
 
 type Gateway struct {
@@ -81,8 +88,10 @@ type Gateway struct {
 }
 
 func NewGateway(cfg GatewayConfig) *Gateway {
-	// Provider resolution comes first: the embedding-model fallback depends on it.
-	if cfg.DefaultProvider == "" {
+	// Pure-constructor mode (DisableEnvFallback): no environment reads at all,
+	// so the caller-provided configuration is used verbatim. Server/worker
+	// paths keep the legacy env fallbacks.
+	if cfg.DefaultProvider == "" && !cfg.DisableEnvFallback {
 		if envProvider := os.Getenv("AI_PROVIDER"); envProvider != "" {
 			cfg.DefaultProvider = Provider(envProvider)
 		} else {
@@ -90,23 +99,23 @@ func NewGateway(cfg GatewayConfig) *Gateway {
 		}
 	}
 	if cfg.OllamaBaseURL == "" {
-		if envURL := os.Getenv("OLLAMA_BASE_URL"); envURL != "" {
+		if envURL := os.Getenv("OLLAMA_BASE_URL"); envURL != "" && !cfg.DisableEnvFallback {
 			cfg.OllamaBaseURL = envURL
 		} else {
 			cfg.OllamaBaseURL = "http://localhost:11434"
 		}
 	}
-	if cfg.AIBaseURL == "" {
+	if cfg.AIBaseURL == "" && !cfg.DisableEnvFallback {
 		cfg.AIBaseURL = os.Getenv("AI_BASE_URL")
 	}
-	if cfg.OllamaModel == "" {
+	if cfg.OllamaModel == "" && !cfg.DisableEnvFallback {
 		if envModel := os.Getenv("OLLAMA_MODEL"); envModel != "" {
 			cfg.OllamaModel = envModel
 		} else {
 			cfg.OllamaModel = "gemma4:12b"
 		}
 	}
-	if cfg.EmbeddingModel == "" {
+	if cfg.EmbeddingModel == "" && !cfg.DisableEnvFallback {
 		if envModel := os.Getenv("AI_EMBEDDING_MODEL"); envModel != "" {
 			cfg.EmbeddingModel = envModel
 		} else if envModel := os.Getenv("OLLAMA_EMBEDDING_MODEL"); envModel != "" {
@@ -117,13 +126,15 @@ func NewGateway(cfg GatewayConfig) *Gateway {
 			cfg.EmbeddingModel = DefaultOllamaEmbeddingModel
 		}
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !cfg.DisableEnvFallback {
 		cfg.APIKey = os.Getenv("AI_API_KEY")
 	}
 	timeout := 30 * time.Second
-	if tStr := os.Getenv("OLLAMA_TIMEOUT_SECONDS"); tStr != "" {
-		if tSec, err := strconv.Atoi(tStr); err == nil && tSec > 0 {
-			timeout = time.Duration(tSec) * time.Second
+	if !cfg.DisableEnvFallback {
+		if tStr := os.Getenv("OLLAMA_TIMEOUT_SECONDS"); tStr != "" {
+			if tSec, err := strconv.Atoi(tStr); err == nil && tSec > 0 {
+				timeout = time.Duration(tSec) * time.Second
+			}
 		}
 	}
 	transport := &http.Transport{
