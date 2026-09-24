@@ -31,7 +31,7 @@ type Querier interface {
 	CreateEmailAttachment(ctx context.Context, arg CreateEmailAttachmentParams) (EmailAttachment, error)
 	CreateEmailMessage(ctx context.Context, arg CreateEmailMessageParams) (EmailMessage, error)
 	// internal/db/queries/knowledge_base.sql
-	CreateKBArticle(ctx context.Context, arg CreateKBArticleParams) (KnowledgeBaseArticle, error)
+	CreateKBArticle(ctx context.Context, arg CreateKBArticleParams) (CreateKBArticleRow, error)
 	// internal/db/queries/notes.sql
 	CreateNote(ctx context.Context, arg CreateNoteParams) (Note, error)
 	// internal/db/queries/notifications.sql
@@ -62,7 +62,7 @@ type Querier interface {
 	GetDealByID(ctx context.Context, id pgtype.UUID) (Deal, error)
 	GetEmailAccountByID(ctx context.Context, id pgtype.UUID) (EmailAccount, error)
 	GetEmailMessageByID(ctx context.Context, id pgtype.UUID) (EmailMessage, error)
-	GetKBArticleByID(ctx context.Context, id pgtype.UUID) (KnowledgeBaseArticle, error)
+	GetKBArticleByID(ctx context.Context, id pgtype.UUID) (GetKBArticleByIDRow, error)
 	GetNoteByID(ctx context.Context, id pgtype.UUID) (Note, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetTodoByID(ctx context.Context, id pgtype.UUID) (Todo, error)
@@ -84,7 +84,7 @@ type Querier interface {
 	ListEmailAttachmentsByMessage(ctx context.Context, messageID pgtype.UUID) ([]EmailAttachment, error)
 	ListEmailMessages(ctx context.Context, arg ListEmailMessagesParams) ([]EmailMessage, error)
 	ListEmailMessagesByThread(ctx context.Context, threadID string) ([]EmailMessage, error)
-	ListKBArticles(ctx context.Context) ([]KnowledgeBaseArticle, error)
+	ListKBArticles(ctx context.Context) ([]ListKBArticlesRow, error)
 	ListNotes(ctx context.Context) ([]Note, error)
 	ListNotesByEntity(ctx context.Context, arg ListNotesByEntityParams) ([]Note, error)
 	ListRecentAuditLogs(ctx context.Context, arg ListRecentAuditLogsParams) ([]AuditLog, error)
@@ -100,6 +100,7 @@ type Querier interface {
 	MarkNotificationAsRead(ctx context.Context, id pgtype.UUID) error
 	SearchCompanies(ctx context.Context, arg SearchCompaniesParams) ([]Company, error)
 	SearchContacts(ctx context.Context, arg SearchContactsParams) ([]Contact, error)
+	SearchKBArticlesByEmbedding(ctx context.Context, arg SearchKBArticlesByEmbeddingParams) ([]SearchKBArticlesByEmbeddingRow, error)
 	UpdateAIResearchJobStatus(ctx context.Context, arg UpdateAIResearchJobStatusParams) (AiResearchJob, error)
 	UpdateAppointment(ctx context.Context, arg UpdateAppointmentParams) (Appointment, error)
 	UpdateAppointmentPushStatus(ctx context.Context, arg UpdateAppointmentPushStatusParams) (Appointment, error)
@@ -111,6 +112,7 @@ type Querier interface {
 	UpdateEmailAccountLastSynced(ctx context.Context, arg UpdateEmailAccountLastSyncedParams) error
 	UpdateEmailAccountSyncState(ctx context.Context, arg UpdateEmailAccountSyncStateParams) error
 	UpdateEmailMessageTags(ctx context.Context, arg UpdateEmailMessageTagsParams) (EmailMessage, error)
+	UpdateKBArticleEmbedding(ctx context.Context, arg UpdateKBArticleEmbeddingParams) error
 	UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, error)
 	UpdateTodo(ctx context.Context, arg UpdateTodoParams) (Todo, error)
 	UpdateTodoStatus(ctx context.Context, arg UpdateTodoStatusParams) (Todo, error)

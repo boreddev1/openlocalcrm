@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -15,24 +17,87 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupAIHandler() *handlers.AIHandler {
-	gw := ai.NewGateway(ai.GatewayConfig{
+func newFakeAIGateway(t *testing.T, response string) *ai.Gateway {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/api/embeddings") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"embedding": unitVector(1024)})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": response})
+	}))
+	t.Cleanup(srv.Close)
+	return ai.NewGateway(ai.GatewayConfig{
 		DefaultProvider: ai.ProviderOllama,
-		OllamaModel:     "gemma2:12b",
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+		EmbeddingModel:  "qwen3-embedding:0.6b",
 	})
-	obs := ai.NewObservabilityService()
-	triageSvc := ai.NewTriageService(gw)
-	querier := demo.NewInMemoryQuerier()
-	chatSvc := ai.NewChatService(gw, obs, querier)
-	researchSvc := ai.NewResearchService(gw, obs)
+}
 
+func newRecordingFakeAIGateway(t *testing.T, response string, seen *map[string]string) *ai.Gateway {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload, _ := io.ReadAll(r.Body)
+		var reqBody struct {
+			Prompt string `json:"prompt"`
+		}
+		_ = json.Unmarshal(payload, &reqBody)
+		(*seen)["prompt"] = reqBody.Prompt
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": response})
+	}))
+	t.Cleanup(srv.Close)
+	return ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+	})
+}
+
+func newFailingAIGateway(t *testing.T, status int) *ai.Gateway {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream failure", status)
+	}))
+	t.Cleanup(srv.Close)
+	return ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+	})
+}
+
+func newNonJSONAIGateway(t *testing.T) *ai.Gateway {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("this is not json"))
+	}))
+	t.Cleanup(srv.Close)
+	return ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+	})
+}
+
+func setupAIHandlerWithGateway(t *testing.T, gw *ai.Gateway) *handlers.AIHandler {
+	t.Helper()
+	obs := ai.NewObservabilityService()
+	triageSvc := ai.NewTriageService(gw, obs)
+	querier := demo.NewInMemoryQuerier()
+	researchSvc := ai.NewResearchService(gw, obs)
+	chatSvc := ai.NewChatService(gw, obs, researchSvc, querier)
 	return handlers.NewAIHandler(triageSvc, chatSvc, researchSvc, obs, gw, querier)
 }
 
-func TestAIHandler_TriageAndChat(t *testing.T) {
-	h := setupAIHandler()
+const validTriageJSON = `{"category":"ANFRAGE","sentiment":"POSITIVE","priority":"HIGH","summary":"Anfrage erfasst.","draft_reply":"Vielen Dank für Ihre Anfrage."}`
 
+func TestAIHandler_TriageAndChat(t *testing.T) {
 	t.Run("TriageEmail valid", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, validTriageJSON))
 		reqBody := handlers.TriageRequest{
 			Sender:  "kunde@solar.de",
 			Subject: "Photovoltaik 15kWp",
@@ -44,9 +109,15 @@ func TestAIHandler_TriageAndChat(t *testing.T) {
 
 		h.TriageEmail(rec, req)
 		require.Equal(t, http.StatusOK, rec.Code)
+
+		var res ai.TriageResult
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&res))
+		require.Equal(t, "ANFRAGE", res.Category)
+		require.Equal(t, "Anfrage erfasst.", res.Summary)
 	})
 
 	t.Run("TriageEmail invalid json", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, validTriageJSON))
 		req := httptest.NewRequest(http.MethodPost, "/api/ai/triage", bytes.NewReader([]byte("{bad-json")))
 		rec := httptest.NewRecorder()
 
@@ -54,7 +125,45 @@ func TestAIHandler_TriageAndChat(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
-	t.Run("Chat greeting", func(t *testing.T) {
+	t.Run("TriageEmail upstream failure is 502", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFailingAIGateway(t, http.StatusInternalServerError))
+		reqBody := handlers.TriageRequest{Sender: "kunde@solar.de", Subject: "Angebot", Body: "Bitte Angebot."}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/triage", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.TriageEmail(rec, req)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+	})
+
+	t.Run("TriageEmail non-JSON upstream is 502", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newNonJSONAIGateway(t))
+		reqBody := handlers.TriageRequest{Sender: "kunde@solar.de", Subject: "Angebot", Body: "Bitte Angebot."}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/triage", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.TriageEmail(rec, req)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+	})
+
+	t.Run("TriageEmail quote-containing model output yields valid JSON body", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, `Der Kunde sagte: "unser Budget ist frei"`))
+		reqBody := handlers.TriageRequest{Sender: "kunde@solar.de", Subject: "Angebot", Body: "Bitte Angebot."}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/triage", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.TriageEmail(rec, req)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+
+		var res map[string]string
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res), "body must stay valid JSON despite quoted model output: %s", rec.Body.String())
+		require.Equal(t, "ai_unavailable", res["error"])
+	})
+
+	t.Run("Chat returns real model reply", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, "Antwort vom echten Modell"))
 		reqBody := ai.ChatRequest{
 			Messages: []ai.ChatMessage{
 				{Role: "user", Content: "hi"},
@@ -68,33 +177,14 @@ func TestAIHandler_TriageAndChat(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 
 		var resp ai.ChatResponse
-		err := json.NewDecoder(rec.Body).Decode(&resp)
-		require.NoError(t, err)
-		require.Contains(t, resp.Reply, "Vertriebs-Copilot")
-		require.NotContains(t, resp.Reply, "106.700 €")
-	})
-
-	t.Run("Chat unknown input dd", func(t *testing.T) {
-		reqBody := ai.ChatRequest{
-			Messages: []ai.ChatMessage{
-				{Role: "user", Content: "dd"},
-			},
-		}
-		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", bytes.NewReader(body))
-		rec := httptest.NewRecorder()
-
-		h.Chat(rec, req)
-		require.Equal(t, http.StatusOK, rec.Code)
-
-		var resp ai.ChatResponse
-		err := json.NewDecoder(rec.Body).Decode(&resp)
-		require.NoError(t, err)
-		require.Contains(t, resp.Reply, "nicht genau verstanden")
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+		require.Equal(t, "Antwort vom echten Modell", resp.Reply)
+		require.False(t, resp.Simulated)
 		require.NotContains(t, resp.Reply, "106.700 €")
 	})
 
 	t.Run("Chat pipeline summary with action card", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, "Hier ist Ihre Pipeline."))
 		reqBody := ai.ChatRequest{
 			Messages: []ai.ChatMessage{
 				{Role: "user", Content: "Fasse die Pipeline zusammen"},
@@ -108,14 +198,29 @@ func TestAIHandler_TriageAndChat(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 
 		var resp ai.ChatResponse
-		err := json.NewDecoder(rec.Body).Decode(&resp)
-		require.NoError(t, err)
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 		require.NotEmpty(t, resp.Reply)
 		require.NotNil(t, resp.ActionCard)
 		require.Equal(t, "/deals", resp.ActionCard.Route)
 	})
 
+	t.Run("Chat upstream failure is 502", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFailingAIGateway(t, http.StatusInternalServerError))
+		reqBody := ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: "Fasse die Pipeline zusammen"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.Chat(rec, req)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+	})
+
 	t.Run("Chat invalid json", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, "Antwort"))
 		req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", bytes.NewReader([]byte("{bad-json")))
 		rec := httptest.NewRecorder()
 
@@ -125,9 +230,8 @@ func TestAIHandler_TriageAndChat(t *testing.T) {
 }
 
 func TestAIHandler_ObservabilityAndBill(t *testing.T) {
-	h := setupAIHandler()
-
 	t.Run("GetObservability", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, "Antwort"))
 		req := httptest.NewRequest(http.MethodGet, "/api/ai/observability", nil)
 		rec := httptest.NewRecorder()
 
@@ -141,28 +245,58 @@ func TestAIHandler_ObservabilityAndBill(t *testing.T) {
 		require.Contains(t, res, "recent_logs")
 	})
 
-	t.Run("ParseBill with customer name", func(t *testing.T) {
+	t.Run("ParseBill requires document_text", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, "{}"))
 		body := []byte(`{"customer_name":"Familie Schmidt"}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/ai/parse-bill", bytes.NewReader(body))
 		rec := httptest.NewRecorder()
 
 		h.ParseBill(rec, req)
-		require.Equal(t, http.StatusOK, rec.Code)
-		require.Contains(t, rec.Body.String(), "Familie Schmidt")
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		require.NotContains(t, rec.Body.String(), "Familie Müller")
 	})
 
-	t.Run("ParseBill default fallback", func(t *testing.T) {
+	t.Run("ParseBill empty body is 400", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, "{}"))
 		req := httptest.NewRequest(http.MethodPost, "/api/ai/parse-bill", bytes.NewReader([]byte("{}")))
 		rec := httptest.NewRecorder()
 
 		h.ParseBill(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("ParseBill extracts real data via gateway", func(t *testing.T) {
+		extracted := `{"customer_name":"Familie Schmidt","yearly_consumption":5000,"recommended_kwp":12.5}`
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, extracted))
+		body := []byte(`{"document_text":"Stromrechnung 5000 kWh, Familie Schmidt"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/parse-bill", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.ParseBill(rec, req)
 		require.Equal(t, http.StatusOK, rec.Code)
-		require.Contains(t, rec.Body.String(), "Familie Müller")
+
+		var res map[string]any
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&res))
+		require.Equal(t, false, res["simulated"])
+		require.Equal(t, "ai_ocr_extraction", res["mode"])
+		extractedMap, ok := res["extracted"].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "Familie Schmidt", extractedMap["customer_name"])
+	})
+
+	t.Run("ParseBill upstream failure is 502", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFailingAIGateway(t, http.StatusInternalServerError))
+		body := []byte(`{"document_text":"Stromrechnung 5000 kWh"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/parse-bill", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.ParseBill(rec, req)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
 	})
 }
 
 func TestAIHandler_KnowledgeBaseAndResearch(t *testing.T) {
-	h := setupAIHandler()
+	h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, `{"summary":"Recherche","industry_keywords":["Handwerk"]}`))
 
 	t.Run("ListKB", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/ai/kb", nil)
@@ -208,11 +342,34 @@ func TestAIHandler_KnowledgeBaseAndResearch(t *testing.T) {
 		h.ListResearchJobs(listRec, listReq)
 		require.Equal(t, http.StatusOK, listRec.Code)
 
-		createBody := []byte(`{"domain":"solar-mueller.de","depth":"DEEP","category":"Photovoltaik"}`)
+		createBody := []byte(`{"domain":"example.invalid","depth":"DEEP","category":"Photovoltaik"}`)
 		createReq := httptest.NewRequest(http.MethodPost, "/api/ai/research", bytes.NewReader(createBody))
 		createRec := httptest.NewRecorder()
 
 		h.CreateResearchJob(createRec, createReq)
 		require.Equal(t, http.StatusCreated, createRec.Code)
+	})
+
+	t.Run("ResearchCompany upstream failure is 502", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFailingAIGateway(t, http.StatusInternalServerError))
+		body := []byte(`{"domain":"example.invalid"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/research-company", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.ResearchCompany(rec, req)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+	})
+
+	t.Run("ResearchCompany empty domain is 400 with valid JSON body", func(t *testing.T) {
+		h := setupAIHandlerWithGateway(t, newFakeAIGateway(t, `{"summary":"Recherche","industry_keywords":[]}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/research-company", bytes.NewReader([]byte(`{"domain":""}`)))
+		rec := httptest.NewRecorder()
+
+		h.ResearchCompany(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+
+		var res map[string]string
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res), "error body must be valid JSON: %s", rec.Body.String())
+		require.Contains(t, res["message"], "empty domain")
 	})
 }

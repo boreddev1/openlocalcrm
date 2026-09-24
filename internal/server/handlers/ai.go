@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,12 +18,22 @@ import (
 )
 
 type KBArticle struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Category    string `json:"category"`
-	Source      string `json:"source"`
-	Content     string `json:"content"`
-	ChunksCount int    `json:"chunks_count"`
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Category       string `json:"category"`
+	Source         string `json:"source"`
+	Content        string `json:"content"`
+	EmbeddingModel string `json:"embedding_model"`
+	Indexed        bool   `json:"indexed"`
+}
+
+type KBSearchResult struct {
+	ID             string  `json:"id"`
+	Title          string  `json:"title"`
+	Category       string  `json:"category"`
+	Content        string  `json:"content"`
+	EmbeddingModel string  `json:"embedding_model"`
+	Distance       float64 `json:"distance"`
 }
 
 type ResearchJob struct {
@@ -72,6 +84,15 @@ func NewAIHandler(
 	}
 }
 
+// writeJSONError writes a machine-readable JSON error body whose interpolated
+// dynamic content is properly escaped by encoding/json (http.Error with
+// string-built JSON produces invalid bodies when messages contain quotes).
+func writeJSONError(w http.ResponseWriter, status int, errCode, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": errCode, "message": message})
+}
+
 type TriageRequest struct {
 	Sender  string `json:"sender"`
 	Subject string `json:"subject"`
@@ -87,7 +108,11 @@ func (h *AIHandler) TriageEmail(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.triageSvc.TriageEmail(r.Context(), req.Sender, req.Subject, req.Body)
 	if err != nil {
-		http.Error(w, `{"error":"ai triage failed: `+err.Error()+`"}`, http.StatusInternalServerError)
+		if errors.Is(err, ai.ErrUpstreamUnavailable) {
+			http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "ai_triage_failed", err.Error())
 		return
 	}
 
@@ -104,7 +129,11 @@ func (h *AIHandler) Chat(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.chatSvc.Chat(r.Context(), req)
 	if err != nil {
-		http.Error(w, `{"error":"ai chat failed: `+err.Error()+`"}`, http.StatusInternalServerError)
+		if errors.Is(err, ai.ErrUpstreamUnavailable) {
+			http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "ai_chat_failed", err.Error())
 		return
 	}
 
@@ -125,7 +154,11 @@ func (h *AIHandler) ResearchCompany(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.researchSvc.ResearchCompany(r.Context(), req.Domain)
 	if err != nil {
-		http.Error(w, `{"error":"company research failed: `+err.Error()+`"}`, http.StatusBadRequest)
+		if errors.Is(err, ai.ErrUpstreamUnavailable) {
+			http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+			return
+		}
+		writeJSONError(w, http.StatusBadRequest, "research_failed", err.Error())
 		return
 	}
 
@@ -149,12 +182,22 @@ func (h *AIHandler) ParseBill(w http.ResponseWriter, r *http.Request) {
 		CustomerName string `json:"customer_name"`
 		DocumentText string `json:"document_text"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	custName := req.CustomerName
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
 
-	// If document text is provided, attempt AI structured extraction
-	if req.DocumentText != "" && h.gateway != nil {
-		prompt := fmt.Sprintf(`Extrahiere aus folgendem Energierechnungs-Text die Daten für einen PV-Angebotsrechner im JSON-Format:
+	if strings.TrimSpace(req.DocumentText) == "" {
+		http.Error(w, `{"error":"document_text_required","message":"Es wurde kein Rechnungs- oder Zählertext übermittelt"}`, http.StatusBadRequest)
+		return
+	}
+
+	if h.gateway == nil {
+		http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+		return
+	}
+
+	prompt := fmt.Sprintf(`Extrahiere aus folgendem Energierechnungs-Text die Daten für einen PV-Angebotsrechner im JSON-Format:
 Text: %s
 Erwartetes JSON-Format:
 {
@@ -168,48 +211,30 @@ Erwartetes JSON-Format:
   "recommended_storage_kwh": 12.0
 }`, req.DocumentText)
 
-		if out, err := h.gateway.Generate(r.Context(), prompt, "Du bist ein präziser OCR-Parser für Energierechnungen. Antworte ausschließlich mit gültigem JSON."); err == nil {
-			cleaned := strings.TrimSpace(out)
-			if idx := strings.Index(cleaned, "{"); idx >= 0 {
-				if endIdx := strings.LastIndex(cleaned, "}"); endIdx > idx {
-					cleaned = cleaned[idx : endIdx+1]
-				}
-			}
-			var parsedData map[string]any
-			if err := json.Unmarshal([]byte(cleaned), &parsedData); err == nil {
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"simulated": false,
-					"mode":      "ai_ocr_extraction",
-					"extracted": parsedData,
-				})
-				return
-			}
+	out, err := h.gateway.Generate(r.Context(), prompt, "Du bist ein präziser OCR-Parser für Energierechnungen. Antworte ausschließlich mit gültigem JSON.")
+	if err != nil {
+		http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+		return
+	}
+
+	cleaned := strings.TrimSpace(out)
+	if idx := strings.Index(cleaned, "{"); idx >= 0 {
+		if endIdx := strings.LastIndex(cleaned, "}"); endIdx > idx {
+			cleaned = cleaned[idx : endIdx+1]
 		}
 	}
-
-	if custName == "" {
-		custName = "Familie Müller (Demo-Vorlage)"
-	}
-
-	res := map[string]any{
-		"simulated": true,
-		"mode":      "demo_template",
-		"note":      "Musterdaten für Vorführung und Angebotsrechner (kein Beleg-Upload übergeben)",
-		"extracted": map[string]any{
-			"customer_name":             custName,
-			"yearly_consumption":        6500,
-			"current_electricity_price": 0.385,
-			"meter_number":              "1EMH0012948291",
-			"roof_area_sqm":             75,
-			"roof_orientation":          "Süd (35° Dachneigung)",
-			"recommended_kwp":           14.5,
-			"recommended_storage_kwh":   12.0,
-		},
+	var parsedData map[string]any
+	if err := json.Unmarshal([]byte(cleaned), &parsedData); err != nil {
+		http.Error(w, `{"error":"ai_invalid_response","message":"KI-Antwort konnte nicht als JSON verarbeitet werden"}`, http.StatusBadGateway)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"simulated": false,
+		"mode":      "ai_ocr_extraction",
+		"extracted": parsedData,
+	})
 }
 
 func (h *AIHandler) ListKB(w http.ResponseWriter, r *http.Request) {
@@ -222,12 +247,13 @@ func (h *AIHandler) ListKB(w http.ResponseWriter, r *http.Request) {
 		res := make([]KBArticle, len(dbArticles))
 		for i, a := range dbArticles {
 			res[i] = KBArticle{
-				ID:          uuid.UUID(a.ID.Bytes).String(),
-				Title:       a.Title,
-				Category:    a.Category,
-				Content:     a.Content,
-				Source:      a.Author,
-				ChunksCount: 4,
+				ID:             uuid.UUID(a.ID.Bytes).String(),
+				Title:          a.Title,
+				Category:       a.Category,
+				Content:        a.Content,
+				Source:         a.Author,
+				EmbeddingModel: a.EmbeddingModel.String,
+				Indexed:        a.Indexed,
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -247,6 +273,19 @@ func (h *AIHandler) ListKB(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(articles)
 }
 
+func formatEmbeddingVector(vec []float32) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, v := range vec {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatFloat(float64(v), 'g', -1, 32))
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
 func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 	var doc KBArticle
 	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
@@ -254,26 +293,46 @@ func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if doc.ChunksCount == 0 {
-		words := len(strings.Fields(doc.Content))
-		doc.ChunksCount = words/150 + 1
+	if strings.TrimSpace(doc.Content) == "" {
+		http.Error(w, `{"error":"content_required","message":"Wissensinhalt darf nicht leer sein"}`, http.StatusBadRequest)
+		return
 	}
+
+	if h.gateway == nil {
+		http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+		return
+	}
+
+	// Generate the real embedding first. Never persist a half-created article
+	// and never fabricate an index status.
+	vec, err := h.gateway.GenerateEmbedding(r.Context(), doc.Content)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, "embedding_unavailable", "Embedding konnte nicht erzeugt werden: "+err.Error())
+		return
+	}
+	embeddingModel := h.gateway.GetConfig().EmbeddingModel
+	doc.EmbeddingModel = embeddingModel
+	doc.Indexed = true
 
 	if h.querier != nil {
 		created, err := h.querier.CreateKBArticle(r.Context(), db.CreateKBArticleParams{
-			Title:    doc.Title,
-			Category: doc.Category,
-			Content:  doc.Content,
-			Tags:     []string{doc.Category},
-			Author:   "System",
+			Title:          doc.Title,
+			Category:       doc.Category,
+			Content:        doc.Content,
+			Tags:           []string{doc.Category},
+			Author:         "System",
+			Embedding:      formatEmbeddingVector(vec),
+			EmbeddingModel: pgtype.Text{String: embeddingModel, Valid: true},
 		})
-		if err == nil {
-			doc.ID = uuid.UUID(created.ID.Bytes).String()
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(doc)
+		if err != nil {
+			http.Error(w, `{"error":"persist_failed","message":"Wissensdokument konnte nicht gespeichert werden"}`, http.StatusInternalServerError)
 			return
 		}
+		doc.ID = uuid.UUID(created.ID.Bytes).String()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(doc)
+		return
 	}
 
 	h.mu.Lock()
@@ -287,6 +346,68 @@ func (h *AIHandler) CreateKB(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(doc)
 }
 
+// SearchKB performs a real semantic search over the pgvector index using the
+// query embedding from the configured backend. An embedding failure is reported
+// honestly as 502; no fallback result is invented.
+func (h *AIHandler) SearchKB(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		http.Error(w, `{"error":"query_required","message":"Suchbegriff 'q' fehlt"}`, http.StatusBadRequest)
+		return
+	}
+
+	limit := 10
+	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+		if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	if h.gateway == nil {
+		http.Error(w, `{"error":"ai_unavailable","message":"KI-Dienst nicht erreichbar"}`, http.StatusBadGateway)
+		return
+	}
+
+	vec, err := h.gateway.GenerateEmbedding(r.Context(), query)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, "embedding_unavailable", "Embedding konnte nicht erzeugt werden: "+err.Error())
+		return
+	}
+
+	if h.querier == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]KBSearchResult{})
+		return
+	}
+
+	rows, err := h.querier.SearchKBArticlesByEmbedding(r.Context(), db.SearchKBArticlesByEmbeddingParams{
+		Embedding:  formatEmbeddingVector(vec),
+		LimitCount: int32(limit),
+	})
+	if err != nil {
+		http.Error(w, `{"error":"search_failed","message":"Semantische Suche fehlgeschlagen"}`, http.StatusInternalServerError)
+		return
+	}
+
+	res := make([]KBSearchResult, len(rows))
+	for i, a := range rows {
+		res[i] = KBSearchResult{
+			ID:             uuid.UUID(a.ID.Bytes).String(),
+			Title:          a.Title,
+			Category:       a.Category,
+			Content:        a.Content,
+			EmbeddingModel: a.EmbeddingModel.String,
+			Distance:       a.Distance,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
+}
+
 func (h *AIHandler) DeleteKB(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	u, err := uuid.Parse(id)
@@ -297,7 +418,7 @@ func (h *AIHandler) DeleteKB(w http.ResponseWriter, r *http.Request) {
 
 	if h.querier != nil {
 		if err := h.querier.DeleteKBArticle(r.Context(), pgtype.UUID{Bytes: u, Valid: true}); err != nil {
-			http.Error(w, `{"error":"failed to delete kb article: `+err.Error()+`"}`, http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "delete_failed", err.Error())
 			return
 		}
 	}

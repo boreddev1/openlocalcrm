@@ -173,6 +173,8 @@
           <select id="ai-provider" onchange="onAIProviderChange()">
             <option value="ollama">🖥️ Lokales Ollama (DSGVO 100 % lokal)</option>
             <option value="openai">🌐 OpenAI / OpenAI-kompatibel (OpenRouter, Groq, vLLM, etc.)</option>
+            <option value="mistral">⚡ Mistral AI (OpenAI-kompatibel)</option>
+            <option value="nebius">☁️ Nebius AI Studio (OpenAI-kompatibel)</option>
             <option value="none">🚫 Keine KI (vorerst deaktiviert)</option>
           </select>
         </div>
@@ -183,18 +185,26 @@
             <input type="text" id="ai-url" value="http://localhost:11434">
             <p class="helper-text">Lokale Adressen werden automatisch für Docker angepasst.</p>
           </div>
-          <div class="form-group" id="ai-key-group" class="hidden">
+          <div class="form-group hidden" id="ai-key-group">
             <label for="ai-key">API-Key</label>
             <input type="password" id="ai-key" placeholder="sk-...">
           </div>
           <div class="form-group">
             <label for="ai-model">Modellname</label>
-            <input type="text" id="ai-model" value="gemma2:12b">
+            <input type="text" id="ai-model" list="ai-model-options" value="gemma4:12b">
+            <datalist id="ai-model-options"></datalist>
+          </div>
+          <div class="form-group">
+            <label for="ai-embedding-model">Embedding-Modell (semantische Suche)</label>
+            <input type="text" id="ai-embedding-model" list="ai-embedding-model-options" placeholder="mistral-embed (beliebiges 1024-dim Modell)">
+            <datalist id="ai-embedding-model-options"></datalist>
+            <p class="helper-text">Benötigt wird ein 1024-dimensionales Modell (DB-Spalte vector(1024)); bei Mismatch startet crm-server nicht. Anthropic/DeepSeek bieten keine Embedding-API an.</p>
           </div>
 
           <div style="margin-bottom: 1rem;">
             <button type="button" class="btn btn-outline" onclick="testAIConnection()">🧪 KI-Verbindung testen</button>
-            <span id="ai-probe-status" style="margin-left: 0.75rem; font-size: 0.85rem;"></span>
+            <div id="ai-chat-status" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
+            <div id="ai-embedding-status" style="margin-top: 0.25rem; font-size: 0.85rem;"></div>
           </div>
         </div>
 

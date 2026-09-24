@@ -136,7 +136,7 @@ func (s *TriageService) TriageEmail(ctx context.Context, sender, subject, body s
 
 	var result TriageResult
 	if err := json.Unmarshal([]byte(sanitized), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse structured triage JSON: %w (raw: %s)", err, output)
+		return nil, fmt.Errorf("%w: failed to parse structured triage JSON: %v (raw: %s)", ErrUpstreamUnavailable, err, output)
 	}
 
 	return &result, nil

@@ -11,11 +11,12 @@ import (
 
 // AISettings contains AI configuration for local or cloud LLMs.
 type AISettings struct {
-	Provider  string `json:"provider"` // "ollama", "openai", "none"
-	BaseURL   string `json:"base_url"`
-	Model     string `json:"model"`
-	APIKey    string `json:"api_key,omitempty"`
-	HasAPIKey bool   `json:"has_api_key,omitempty"`
+	Provider       string `json:"provider"` // "ollama", "openai", "none"
+	BaseURL        string `json:"base_url"`
+	Model          string `json:"model"`
+	EmbeddingModel string `json:"embedding_model,omitempty"`
+	APIKey         string `json:"api_key,omitempty"`
+	HasAPIKey      bool   `json:"has_api_key,omitempty"`
 }
 
 // AdminSettings contains bootstrap credentials for the system administrator.
@@ -140,10 +141,11 @@ func ExportSettingsFromEnv(baseDir string) (*ExportedSettings, error) {
 		Version:    ver,
 		ExportedAt: time.Now().UTC().Format(time.RFC3339),
 		AI: AISettings{
-			Provider:  aiProvider,
-			BaseURL:   aiBaseURL,
-			Model:     aiModel,
-			HasAPIKey: envMap["AI_API_KEY"] != "",
+			Provider:       aiProvider,
+			BaseURL:        aiBaseURL,
+			Model:          aiModel,
+			EmbeddingModel: resolveEmbeddingModel(aiProvider, envMap["AI_EMBEDDING_MODEL"], envMap["AI_EMBEDDING_MODEL"], envMap["OLLAMA_EMBEDDING_MODEL"]),
+			HasAPIKey:      envMap["AI_API_KEY"] != "",
 		},
 		Admin: AdminSettings{
 			Email:       adminEmail,
@@ -178,6 +180,9 @@ func ValidateSettingsValues(s *ExportedSettings) error {
 		return err
 	}
 	if err := check("ai.model", s.AI.Model); err != nil {
+		return err
+	}
+	if err := check("ai.embedding_model", s.AI.EmbeddingModel); err != nil {
 		return err
 	}
 	if err := check("ai.api_key", s.AI.APIKey); err != nil {
@@ -233,15 +238,16 @@ func ImportSettingsToEnv(baseDir string, s *ExportedSettings, keepExistingSecret
 	}
 
 	cfg := SetupConfig{
-		Port:          s.System.Port,
-		AdminEmail:    s.Admin.Email,
-		AdminPassword: s.Admin.Password,
-		IsDemoMode:    s.System.DemoMode,
-		AIProvider:    s.AI.Provider,
-		AIBaseURL:     s.AI.BaseURL,
-		AIModel:       s.AI.Model,
-		AIAPIKey:      s.AI.APIKey,
-		Version:       s.System.Version,
+		Port:             s.System.Port,
+		AdminEmail:       s.Admin.Email,
+		AdminPassword:    s.Admin.Password,
+		IsDemoMode:       s.System.DemoMode,
+		AIProvider:       s.AI.Provider,
+		AIBaseURL:        s.AI.BaseURL,
+		AIModel:          s.AI.Model,
+		AIEmbeddingModel: s.AI.EmbeddingModel,
+		AIAPIKey:         s.AI.APIKey,
+		Version:          s.System.Version,
 	}
 
 	if cfg.Port <= 0 {

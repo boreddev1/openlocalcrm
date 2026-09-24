@@ -27,6 +27,10 @@ type CompanyResearchResult struct {
 	ResearchedAt     time.Time `json:"researched_at"`
 }
 
+type CompanyResearcher interface {
+	ResearchCompany(ctx context.Context, domain string) (CompanyResearchResult, error)
+}
+
 type ResearchService struct {
 	gateway    *Gateway
 	httpClient *http.Client
@@ -123,6 +127,10 @@ func (s *ResearchService) ResearchCompany(ctx context.Context, domain string) (C
 	targetURL := "https://" + cleanDomain
 	title, metaDesc, rawContent := s.scrapeWebsite(ctx, targetURL)
 
+	if strings.TrimSpace(metaDesc) == "" && strings.TrimSpace(rawContent) == "" {
+		return CompanyResearchResult{}, fmt.Errorf("%w: keine verwertbaren Recherchedaten für %s", ErrUpstreamUnavailable, cleanDomain)
+	}
+
 	// Build prompt for Gemma 12B with prompt injection isolation
 	prompt := fmt.Sprintf(
 		"Erstelle eine prägnante Unternehmens-Zusammenfassung und Branchen-Keywords für die Domain '%s'.\n"+
@@ -138,27 +146,6 @@ func (s *ResearchService) ResearchCompany(ctx context.Context, domain string) (C
 	rawJSON, err := s.gateway.Generate(ctx, prompt, sys)
 	latency := int(time.Since(startTime).Milliseconds())
 
-	summary := metaDesc
-	if summary == "" {
-		summary = fmt.Sprintf("Unternehmen im Bereich %s mit digitaler Webpräsenz.", cleanDomain)
-	}
-	keywords := []string{"B2B", "Vertrieb", "Energie"}
-
-	if err == nil {
-		var parsed struct {
-			Summary          string   `json:"summary"`
-			IndustryKeywords []string `json:"industry_keywords"`
-		}
-		if jsonErr := json.Unmarshal([]byte(rawJSON), &parsed); jsonErr == nil {
-			if parsed.Summary != "" {
-				summary = parsed.Summary
-			}
-			if len(parsed.IndustryKeywords) > 0 {
-				keywords = parsed.IndustryKeywords
-			}
-		}
-	}
-
 	if s.obsSvc != nil {
 		s.obsSvc.Record(ctx, AIAuditLog{
 			ID:                 fmt.Sprintf("res-%d", time.Now().UnixNano()),
@@ -169,6 +156,26 @@ func (s *ResearchService) ResearchCompany(ctx context.Context, domain string) (C
 			PIIFilterTriggered: false,
 			CreatedAt:          time.Now(),
 		})
+	}
+
+	if err != nil {
+		return CompanyResearchResult{}, err
+	}
+
+	summary := metaDesc
+	var keywords []string
+
+	var parsed struct {
+		Summary          string   `json:"summary"`
+		IndustryKeywords []string `json:"industry_keywords"`
+	}
+	if jsonErr := json.Unmarshal([]byte(rawJSON), &parsed); jsonErr == nil {
+		if parsed.Summary != "" {
+			summary = parsed.Summary
+		}
+		if len(parsed.IndustryKeywords) > 0 {
+			keywords = parsed.IndustryKeywords
+		}
 	}
 
 	return CompanyResearchResult{
@@ -198,7 +205,7 @@ func (s *ResearchService) scrapeWebsite(ctx context.Context, targetURL string) (
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return u.Host, "Webseite erreichbar", ""
+		return u.Host, "", ""
 	}
 	defer resp.Body.Close()
 

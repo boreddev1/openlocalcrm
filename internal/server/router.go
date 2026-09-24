@@ -184,12 +184,14 @@ func NewRouter(cfg Config) http.Handler {
 		aiGateway := ai.NewGateway(ai.GatewayConfig{
 			DefaultProvider: ai.Provider(aiProvider),
 			OllamaBaseURL:   aiBaseURL,
+			AIBaseURL:       os.Getenv("AI_BASE_URL"),
 			OllamaModel:     aiModel,
+			EmbeddingModel:  os.Getenv("AI_EMBEDDING_MODEL"),
 			APIKey:          aiAPIKey,
 		})
 		triageSvc := ai.NewTriageService(aiGateway, obsSvc)
-		chatSvc := ai.NewChatService(aiGateway, obsSvc, cfg.DB)
 		researchSvc := ai.NewResearchService(aiGateway, obsSvc)
+		chatSvc := ai.NewChatService(aiGateway, obsSvc, researchSvc, cfg.DB)
 
 		connectorToken := os.Getenv("CONNECTOR_API_TOKEN")
 		if connectorToken == "" && cfg.DemoMode {
@@ -402,6 +404,7 @@ func NewRouter(cfg Config) http.Handler {
 					air.Post("/research/company", aiH.ResearchCompany)
 					air.Get("/observability", aiH.GetObservability)
 					air.Post("/parse-bill", aiH.ParseBill)
+					air.Get("/kb/search", aiH.SearchKB)
 					air.Get("/kb", aiH.ListKB)
 					air.Post("/kb", aiH.CreateKB)
 					air.Delete("/kb/{id}", aiH.DeleteKB)

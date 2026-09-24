@@ -2,6 +2,11 @@ package ai_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
@@ -69,8 +74,11 @@ func TestPromptGuardOutputValidation(t *testing.T) {
 }
 
 func TestGemma12BEmailTriage(t *testing.T) {
+	payload := `{"category":"ANFRAGE","sentiment":"POSITIVE","priority":"HIGH","summary":"Kunde möchte ein Angebot.","draft_reply":"Vielen Dank für Ihre Anfrage."}`
+	srv := fakeOllamaServer(t, http.StatusOK, payload)
 	gw := ai.NewGateway(ai.GatewayConfig{
 		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
 		OllamaModel:     "gemma2:12b",
 	})
 	triageSvc := ai.NewTriageService(gw)
@@ -88,6 +96,10 @@ func TestGemma12BEmailTriage(t *testing.T) {
 
 	if res.Category != "ANFRAGE" {
 		t.Errorf("expected category ANFRAGE, got %s", res.Category)
+	}
+
+	if res.Summary != "Kunde möchte ein Angebot." {
+		t.Errorf("expected model summary, got %s", res.Summary)
 	}
 
 	if res.DraftReply == "" {
@@ -138,14 +150,17 @@ func TestObservabilityService(t *testing.T) {
 
 func TestCopilotChatService(t *testing.T) {
 	ctx := context.Background()
-	gw := ai.NewGateway(ai.GatewayConfig{
-		DefaultProvider: ai.ProviderOllama,
-		OllamaModel:     "gemma2:12b",
-	})
-	obs := ai.NewObservabilityService()
-	chatSvc := ai.NewChatService(gw, obs)
 
-	t.Run("greeting hi does not return static deal volume", func(t *testing.T) {
+	t.Run("returns real model reply without simulation flag", func(t *testing.T) {
+		srv := fakeOllamaServer(t, http.StatusOK, "Antwort vom echten Modell")
+		gw := ai.NewGateway(ai.GatewayConfig{
+			DefaultProvider: ai.ProviderOllama,
+			OllamaBaseURL:   srv.URL,
+			OllamaModel:     "gemma2:12b",
+		})
+		obs := ai.NewObservabilityService()
+		chatSvc := ai.NewChatService(gw, obs, nil)
+
 		resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
 			Messages: []ai.ChatMessage{
 				{Role: "user", Content: "hi"},
@@ -154,32 +169,50 @@ func TestCopilotChatService(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !contains(resp.Reply, "Vertriebs-Copilot") {
-			t.Fatalf("expected greeting reply, got: %s", resp.Reply)
+		if resp.Reply != "Antwort vom echten Modell" {
+			t.Fatalf("expected real model reply, got: %s", resp.Reply)
+		}
+		if resp.Simulated {
+			t.Fatalf("simulated flag must never be set")
 		}
 		if contains(resp.Reply, "106.700 €") {
-			t.Fatalf("greeting should never contain hardcoded fake pipeline volume")
+			t.Fatalf("reply should never contain hardcoded fake pipeline volume")
 		}
 	})
 
-	t.Run("gibberish dd does not return static deal volume", func(t *testing.T) {
-		resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
+	t.Run("provider failure returns honest upstream error", func(t *testing.T) {
+		srv := fakeOllamaServer(t, http.StatusInternalServerError, "")
+		gw := ai.NewGateway(ai.GatewayConfig{
+			DefaultProvider: ai.ProviderOllama,
+			OllamaBaseURL:   srv.URL,
+			OllamaModel:     "gemma2:12b",
+		})
+		obs := ai.NewObservabilityService()
+		chatSvc := ai.NewChatService(gw, obs, nil)
+
+		_, err := chatSvc.Chat(ctx, ai.ChatRequest{
 			Messages: []ai.ChatMessage{
-				{Role: "user", Content: "dd"},
+				{Role: "user", Content: "Fasse die Pipeline zusammen"},
 			},
 		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if err == nil {
+			t.Fatal("expected honest error when provider fails, got canned reply")
 		}
-		if !contains(resp.Reply, "nicht genau verstanden") {
-			t.Fatalf("expected helpful fallback for unknown input, got: %s", resp.Reply)
-		}
-		if contains(resp.Reply, "106.700 €") {
-			t.Fatalf("dd input should never contain hardcoded fake pipeline volume")
+		if !errors.Is(err, ai.ErrUpstreamUnavailable) {
+			t.Fatalf("expected ErrUpstreamUnavailable, got: %v", err)
 		}
 	})
 
 	t.Run("pipeline summary returns action card", func(t *testing.T) {
+		srv := fakeOllamaServer(t, http.StatusOK, "Hier ist Ihre aktuelle Pipeline.")
+		gw := ai.NewGateway(ai.GatewayConfig{
+			DefaultProvider: ai.ProviderOllama,
+			OllamaBaseURL:   srv.URL,
+			OllamaModel:     "gemma2:12b",
+		})
+		obs := ai.NewObservabilityService()
+		chatSvc := ai.NewChatService(gw, obs, nil)
+
 		resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
 			Messages: []ai.ChatMessage{
 				{Role: "user", Content: "Fasse die Pipeline zusammen"},
@@ -194,6 +227,15 @@ func TestCopilotChatService(t *testing.T) {
 	})
 
 	t.Run("workflow request returns automations action card", func(t *testing.T) {
+		srv := fakeOllamaServer(t, http.StatusOK, "Hier sind Ihre Automationen.")
+		gw := ai.NewGateway(ai.GatewayConfig{
+			DefaultProvider: ai.ProviderOllama,
+			OllamaBaseURL:   srv.URL,
+			OllamaModel:     "gemma2:12b",
+		})
+		obs := ai.NewObservabilityService()
+		chatSvc := ai.NewChatService(gw, obs, nil)
+
 		resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
 			Messages: []ai.ChatMessage{
 				{Role: "user", Content: "Workflow für Neukunden anlegen"},
@@ -207,23 +249,16 @@ func TestCopilotChatService(t *testing.T) {
 		}
 	})
 
-	t.Run("legal BGB 355 advice", func(t *testing.T) {
-		resp, err := chatSvc.Chat(ctx, ai.ChatRequest{
-			Messages: []ai.ChatMessage{
-				{Role: "user", Content: "Wie ist die Widerrufsfrist nach § 355 BGB?"},
-			},
+	t.Run("customer creation requires confirmation before creating company", func(t *testing.T) {
+		srv := fakeOllamaServer(t, http.StatusOK, "Antwort vom echten Modell")
+		gw := ai.NewGateway(ai.GatewayConfig{
+			DefaultProvider: ai.ProviderOllama,
+			OllamaBaseURL:   srv.URL,
+			OllamaModel:     "gemma2:12b",
 		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !contains(resp.Reply, "14 Tage") {
-			t.Fatalf("expected 14 days legal advice, got: %s", resp.Reply)
-		}
-	})
-
-	t.Run("customer creation and research intent requires confirmation before creating company", func(t *testing.T) {
+		obs := ai.NewObservabilityService()
 		querier := demo.NewInMemoryQuerier()
-		chatWithDB := ai.NewChatService(gw, obs, querier)
+		chatWithDB := ai.NewChatService(gw, obs, nil, querier)
 
 		prompt := "kannst du die Bäckerei passa als kunden anlegen udn die meta information für den Kunden rechevcheiren und anlegen?"
 		resp, err := chatWithDB.Chat(ctx, ai.ChatRequest{
@@ -271,12 +306,26 @@ func TestCopilotChatService(t *testing.T) {
 			t.Errorf("expected ActionCard to /companies after confirmation, got: %+v", respConfirmed.ActionCard)
 		}
 
+		// With no research service available the reply must be honest, not fabricated.
+		if contains(respConfirmed.Reply, "Recherchierte Unternehmensdaten") ||
+			contains(respConfirmed.Reply, "PV-Potenzial") ||
+			contains(respConfirmed.Reply, "Gewerbe / B2B") {
+			t.Errorf("must not fabricate research data, got: %s", respConfirmed.Reply)
+		}
+		if !contains(respConfirmed.Reply, "keine Recherchedaten") {
+			t.Errorf("expected honest 'keine Recherchedaten' notice, got: %s", respConfirmed.Reply)
+		}
+
 		// Verify company was created in querier after confirmation
 		companiesAfter, _ := querier.ListCompanies(ctx, db.ListCompaniesParams{Limit: 10, Offset: 0})
 		found := false
 		for _, c := range companiesAfter {
 			if c.Name == "Bäckerei Passa" {
 				found = true
+				if contains(string(c.CustomFields), "pv_potential") ||
+					contains(string(c.CustomFields), "Hohes Eigenverbrauchspotenzial") {
+					t.Errorf("fabricated custom fields persisted: %s", c.CustomFields)
+				}
 				break
 			}
 		}
@@ -285,12 +334,96 @@ func TestCopilotChatService(t *testing.T) {
 		}
 	})
 
+	t.Run("research intent uses injected researcher data", func(t *testing.T) {
+		srv := fakeOllamaServer(t, http.StatusOK, "Antwort")
+		gw := ai.NewGateway(ai.GatewayConfig{
+			DefaultProvider: ai.ProviderOllama,
+			OllamaBaseURL:   srv.URL,
+			OllamaModel:     "gemma2:12b",
+		})
+		obs := ai.NewObservabilityService()
+		querier := demo.NewInMemoryQuerier()
+		researcher := fakeResearcher{result: ai.CompanyResearchResult{
+			Domain:           "baeckerei-passa.de",
+			Summary:          "Echte Recherche-Zusammenfassung",
+			IndustryKeywords: []string{"Handwerk"},
+		}}
+		chatWithDB := ai.NewChatService(gw, obs, researcher, querier)
+
+		prompt := "kannst du die Bäckerei passa als kunden anlegen und die meta information recherchieren?"
+		resp, err := chatWithDB.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: prompt},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		respConfirmed, err := chatWithDB.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: prompt},
+				{Role: "assistant", Content: resp.Reply},
+				{Role: "user", Content: "Ja, bitte ausführen und bestätigen."},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error on confirmation: %v", err)
+		}
+		if !contains(respConfirmed.Reply, "Echte Recherche-Zusammenfassung") {
+			t.Errorf("expected injected research summary in reply, got: %s", respConfirmed.Reply)
+		}
+		if contains(respConfirmed.Reply, "Recherchierte Unternehmensdaten") {
+			t.Errorf("must not fabricate research data, got: %s", respConfirmed.Reply)
+		}
+	})
+
+	t.Run("research failure yields honest keine Recherchedaten reply", func(t *testing.T) {
+		srv := fakeOllamaServer(t, http.StatusOK, "Antwort")
+		gw := ai.NewGateway(ai.GatewayConfig{
+			DefaultProvider: ai.ProviderOllama,
+			OllamaBaseURL:   srv.URL,
+			OllamaModel:     "gemma2:12b",
+		})
+		obs := ai.NewObservabilityService()
+		querier := demo.NewInMemoryQuerier()
+		researcher := fakeResearcher{err: ai.ErrUpstreamUnavailable}
+		chatWithDB := ai.NewChatService(gw, obs, researcher, querier)
+
+		prompt := "kannst du die Bäckerei passa als kunden anlegen und die meta information recherchieren?"
+		resp, err := chatWithDB.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: prompt},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		respConfirmed, err := chatWithDB.Chat(ctx, ai.ChatRequest{
+			Messages: []ai.ChatMessage{
+				{Role: "user", Content: prompt},
+				{Role: "assistant", Content: resp.Reply},
+				{Role: "user", Content: "Ja, bitte ausführen und bestätigen."},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error on confirmation: %v", err)
+		}
+		if !contains(respConfirmed.Reply, "keine Recherchedaten") {
+			t.Errorf("expected honest 'keine Recherchedaten' notice, got: %s", respConfirmed.Reply)
+		}
+	})
+
 	t.Run("custom model mistral is preserved in response", func(t *testing.T) {
+		srv := fakeOllamaServer(t, http.StatusOK, "Antwort vom echten Modell")
 		mistralGw := ai.NewGateway(ai.GatewayConfig{
 			DefaultProvider: ai.ProviderOllama,
+			OllamaBaseURL:   srv.URL,
 			OllamaModel:     "mistral",
 		})
-		mistralChat := ai.NewChatService(mistralGw, obs)
+		obs := ai.NewObservabilityService()
+		mistralChat := ai.NewChatService(mistralGw, obs, nil)
 
 		resp, err := mistralChat.Chat(ctx, ai.ChatRequest{
 			Messages: []ai.ChatMessage{
@@ -304,4 +437,66 @@ func TestCopilotChatService(t *testing.T) {
 			t.Errorf("expected model mistral, got: %s", resp.Model)
 		}
 	})
+}
+
+type fakeResearcher struct {
+	result ai.CompanyResearchResult
+	err    error
+}
+
+func (f fakeResearcher) ResearchCompany(ctx context.Context, domain string) (ai.CompanyResearchResult, error) {
+	return f.result, f.err
+}
+
+func TestResearchCompanyNoUsableSourceDoesNotCallGateway(t *testing.T) {
+	ctx := context.Background()
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": `{"summary":"Erfundene Zusammenfassung"}`})
+	}))
+	t.Cleanup(srv.Close)
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+	})
+	svc := ai.NewResearchService(gw, ai.NewObservabilityService())
+
+	res, err := svc.ResearchCompany(ctx, "example.invalid")
+	if err == nil {
+		t.Fatalf("expected honest error when no usable scraped source, got result: %+v", res)
+	}
+	if !errors.Is(err, ai.ErrUpstreamUnavailable) {
+		t.Fatalf("expected ErrUpstreamUnavailable, got: %v", err)
+	}
+	if atomic.LoadInt32(&calls) != 0 {
+		t.Fatalf("gateway.Generate must not be called without usable source, got %d calls", calls)
+	}
+	if res.Summary != "" {
+		t.Fatalf("must not fabricate research summary, got: %q", res.Summary)
+	}
+	if len(res.IndustryKeywords) != 0 {
+		t.Fatalf("must not fabricate industry keywords, got: %v", res.IndustryKeywords)
+	}
+}
+
+func TestTriageEmailMalformedJSONReturnsUpstreamError(t *testing.T) {
+	ctx := context.Background()
+	srv := fakeOllamaServer(t, http.StatusOK, "das ist kein gültiges JSON")
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaBaseURL:   srv.URL,
+		OllamaModel:     "test-model",
+	})
+	svc := ai.NewTriageService(gw)
+
+	_, err := svc.TriageEmail(ctx, "kunde@solar.de", "Angebot", "Bitte um Angebot")
+	if err == nil {
+		t.Fatal("expected honest error on malformed upstream triage output")
+	}
+	if !errors.Is(err, ai.ErrUpstreamUnavailable) {
+		t.Fatalf("expected ErrUpstreamUnavailable, got: %v", err)
+	}
 }

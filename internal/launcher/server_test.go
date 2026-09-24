@@ -258,6 +258,41 @@ func TestServer_UpdateExecuteRoute(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 }
 
+func TestServerAIModelsEndpoint(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tags" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"models":[{"name":"gemma4:12b"},{"name":"qwen3-embedding:0.6b"}]}`))
+	}))
+	defer ts.Close()
+
+	tmpDir := t.TempDir()
+	engine := NewEngine(tmpDir)
+	handler := NewServer(tmpDir, engine)
+
+	req := httptest.NewRequest("GET", "/api/ai/models?provider=ollama&base_url="+ts.URL, nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"success":true`) || !strings.Contains(body, "gemma4:12b") {
+		t.Errorf("expected model list response, got: %s", body)
+	}
+
+	reqMissing := httptest.NewRequest("GET", "/api/ai/models", nil)
+	wMissing := httptest.NewRecorder()
+	handler.ServeHTTP(wMissing, reqMissing)
+
+	if wMissing.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 for missing provider, got %d", wMissing.Code)
+	}
+}
+
 func TestServerVersionsEndpoint(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := NewEngine(tmpDir)
