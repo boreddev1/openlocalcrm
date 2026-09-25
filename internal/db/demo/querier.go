@@ -748,23 +748,30 @@ func (q *InMemoryQuerier) CreateContact(ctx context.Context, arg db.CreateContac
 	defer q.mu.Unlock()
 
 	c := db.Contact{
-		ID:            newUUID(),
-		CompanyID:     arg.CompanyID,
-		FirstName:     arg.FirstName,
-		LastName:      arg.LastName,
-		Email:         arg.Email,
-		Phone:         arg.Phone,
-		Mobile:        arg.Mobile,
-		Position:      arg.Position,
-		LeadSource:    arg.LeadSource,
-		AddressStreet: arg.AddressStreet,
-		AddressZip:    arg.AddressZip,
-		AddressCity:   arg.AddressCity,
-		Latitude:      arg.Latitude,
-		Longitude:     arg.Longitude,
-		CustomFields:  arg.CustomFields,
-		CreatedAt:     nowTimestamptz(),
-		UpdatedAt:     nowTimestamptz(),
+		ID:                newUUID(),
+		CompanyID:         arg.CompanyID,
+		FirstName:         arg.FirstName,
+		LastName:          arg.LastName,
+		Email:             arg.Email,
+		Phone:             arg.Phone,
+		Mobile:            arg.Mobile,
+		Position:          arg.Position,
+		LeadSource:        arg.LeadSource,
+		AddressStreet:     arg.AddressStreet,
+		AddressZip:        arg.AddressZip,
+		AddressCity:       arg.AddressCity,
+		Latitude:          arg.Latitude,
+		Longitude:         arg.Longitude,
+		ConsentPhone:      arg.ConsentPhone,
+		ConsentEmail:      arg.ConsentEmail,
+		ConsentUpdatedAt:  arg.ConsentUpdatedAt,
+		StromverbrauchKwh: arg.StromverbrauchKwh,
+		GasverbrauchKwh:   arg.GasverbrauchKwh,
+		Zaehlernummer:     arg.Zaehlernummer,
+		EigentuemerStatus: arg.EigentuemerStatus,
+		CustomFields:      arg.CustomFields,
+		CreatedAt:         nowTimestamptz(),
+		UpdatedAt:         nowTimestamptz(),
 	}
 	q.contacts[uuidToStr(c.ID)] = c
 	return c, nil
@@ -868,6 +875,13 @@ func (q *InMemoryQuerier) UpdateContact(ctx context.Context, arg db.UpdateContac
 	c.AddressCity = arg.AddressCity
 	c.Latitude = arg.Latitude
 	c.Longitude = arg.Longitude
+	c.ConsentPhone = arg.ConsentPhone
+	c.ConsentEmail = arg.ConsentEmail
+	c.ConsentUpdatedAt = arg.ConsentUpdatedAt
+	c.StromverbrauchKwh = arg.StromverbrauchKwh
+	c.GasverbrauchKwh = arg.GasverbrauchKwh
+	c.Zaehlernummer = arg.Zaehlernummer
+	c.EigentuemerStatus = arg.EigentuemerStatus
 	c.CustomFields = arg.CustomFields
 	c.UpdatedAt = nowTimestamptz()
 	q.contacts[idStr] = c
@@ -1051,6 +1065,24 @@ func (q *InMemoryQuerier) UpdateDealStage(ctx context.Context, arg db.UpdateDeal
 	d.Stage = arg.Stage
 	d.Probability = arg.Probability
 	d.ClosedAt = arg.ClosedAt
+	d.UpdatedAt = nowTimestamptz()
+	q.deals[idStr] = d
+	return d, nil
+}
+
+func (q *InMemoryQuerier) RevokeDeal(ctx context.Context, arg db.RevokeDealParams) (db.Deal, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	d, ok := q.deals[idStr]
+	if !ok {
+		return db.Deal{}, ErrNotFound
+	}
+	d.Stage = "WIDERRUFEN"
+	d.Probability = 0
+	d.WiderrufenAt = arg.WiderrufenAt
+	d.WiderrufGrund = arg.WiderrufGrund
 	d.UpdatedAt = nowTimestamptz()
 	q.deals[idStr] = d
 	return d, nil
@@ -1280,6 +1312,8 @@ func (q *InMemoryQuerier) CreateAuditLog(ctx context.Context, arg db.CreateAudit
 		EntityID:   arg.EntityID,
 		Action:     arg.Action,
 		Changes:    arg.Changes,
+		OldValues:  arg.OldValues,
+		NewValues:  arg.NewValues,
 		IpAddress:  arg.IpAddress,
 		UserAgent:  arg.UserAgent,
 		CreatedAt:  nowTimestamptz(),

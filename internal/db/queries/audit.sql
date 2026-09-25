@@ -6,10 +6,12 @@ INSERT INTO audit_logs (
     entity_id,
     action,
     changes,
+    old_values,
+    new_values,
     ip_address,
     user_agent
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
 RETURNING *;
 

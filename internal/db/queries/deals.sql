@@ -66,3 +66,13 @@ SET tags = CASE WHEN tags @> sqlc.arg(tags)::jsonb THEN tags ELSE tags || sqlc.a
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
+-- name: RevokeDeal :one
+UPDATE deals
+SET stage = 'WIDERRUFEN',
+    probability = 0,
+    widerrufen_at = $2,
+    widerruf_grund = $3,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+

@@ -18,12 +18,14 @@ INSERT INTO audit_logs (
     entity_id,
     action,
     changes,
+    old_values,
+    new_values,
     ip_address,
     user_agent
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-RETURNING id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at
+RETURNING id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at, old_values, new_values
 `
 
 type CreateAuditLogParams struct {
@@ -32,6 +34,8 @@ type CreateAuditLogParams struct {
 	EntityID   pgtype.UUID `json:"entity_id"`
 	Action     string      `json:"action"`
 	Changes    []byte      `json:"changes"`
+	OldValues  []byte      `json:"old_values"`
+	NewValues  []byte      `json:"new_values"`
 	IpAddress  pgtype.Text `json:"ip_address"`
 	UserAgent  pgtype.Text `json:"user_agent"`
 }
@@ -44,6 +48,8 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 		arg.EntityID,
 		arg.Action,
 		arg.Changes,
+		arg.OldValues,
+		arg.NewValues,
 		arg.IpAddress,
 		arg.UserAgent,
 	)
@@ -58,12 +64,14 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 		&i.IpAddress,
 		&i.UserAgent,
 		&i.CreatedAt,
+		&i.OldValues,
+		&i.NewValues,
 	)
 	return i, err
 }
 
 const listAuditLogsByEntity = `-- name: ListAuditLogsByEntity :many
-SELECT id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at FROM audit_logs
+SELECT id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at, old_values, new_values FROM audit_logs
 WHERE entity_type = $1 AND entity_id = $2
 ORDER BY created_at DESC
 LIMIT $3
@@ -94,6 +102,8 @@ func (q *Queries) ListAuditLogsByEntity(ctx context.Context, arg ListAuditLogsBy
 			&i.IpAddress,
 			&i.UserAgent,
 			&i.CreatedAt,
+			&i.OldValues,
+			&i.NewValues,
 		); err != nil {
 			return nil, err
 		}
@@ -106,7 +116,7 @@ func (q *Queries) ListAuditLogsByEntity(ctx context.Context, arg ListAuditLogsBy
 }
 
 const listRecentAuditLogs = `-- name: ListRecentAuditLogs :many
-SELECT id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at FROM audit_logs
+SELECT id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at, old_values, new_values FROM audit_logs
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -135,6 +145,8 @@ func (q *Queries) ListRecentAuditLogs(ctx context.Context, arg ListRecentAuditLo
 			&i.IpAddress,
 			&i.UserAgent,
 			&i.CreatedAt,
+			&i.OldValues,
+			&i.NewValues,
 		); err != nil {
 			return nil, err
 		}

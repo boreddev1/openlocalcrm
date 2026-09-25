@@ -14,9 +14,17 @@ INSERT INTO contacts (
     address_city,
     latitude,
     longitude,
+    consent_phone,
+    consent_email,
+    consent_updated_at,
+    stromverbrauch_kwh,
+    gasverbrauch_kwh,
+    zaehlernummer,
+    eigentuemer_status,
     custom_fields
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+    $14, $15, $16, $17, $18, $19, $20, $21
 )
 RETURNING *;
 
@@ -58,7 +66,14 @@ SET company_id = $2,
     address_city = $12,
     latitude = $13,
     longitude = $14,
-    custom_fields = $15,
+    consent_phone = $15,
+    consent_email = $16,
+    consent_updated_at = $17,
+    stromverbrauch_kwh = $18,
+    gasverbrauch_kwh = $19,
+    zaehlernummer = $20,
+    eigentuemer_status = $21,
+    custom_fields = $22,
     updated_at = NOW()
 WHERE id = $1
 RETURNING *;

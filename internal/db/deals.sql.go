@@ -208,6 +208,47 @@ func (q *Queries) ListDealsByStage(ctx context.Context, stage string) ([]Deal, e
 	return items, nil
 }
 
+const revokeDeal = `-- name: RevokeDeal :one
+UPDATE deals
+SET stage = 'WIDERRUFEN',
+    probability = 0,
+    widerrufen_at = $2,
+    widerruf_grund = $3,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
+`
+
+type RevokeDealParams struct {
+	ID            pgtype.UUID        `json:"id"`
+	WiderrufenAt  pgtype.Timestamptz `json:"widerrufen_at"`
+	WiderrufGrund pgtype.Text        `json:"widerruf_grund"`
+}
+
+func (q *Queries) RevokeDeal(ctx context.Context, arg RevokeDealParams) (Deal, error) {
+	row := q.db.QueryRow(ctx, revokeDeal, arg.ID, arg.WiderrufenAt, arg.WiderrufGrund)
+	var i Deal
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.CompanyID,
+		&i.ContactID,
+		&i.Value,
+		&i.Currency,
+		&i.Stage,
+		&i.Probability,
+		&i.AssignedTo,
+		&i.ClosedAt,
+		&i.CustomFields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WiderrufenAt,
+		&i.WiderrufGrund,
+		&i.Tags,
+	)
+	return i, err
+}
+
 const updateDeal = `-- name: UpdateDeal :one
 UPDATE deals
 SET title = $2,

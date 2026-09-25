@@ -155,6 +155,8 @@ type AuditLog struct {
 	IpAddress  pgtype.Text        `json:"ip_address"`
 	UserAgent  pgtype.Text        `json:"user_agent"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	OldValues  []byte             `json:"old_values"`
+	NewValues  []byte             `json:"new_values"`
 }
 
 type CallActivity struct {

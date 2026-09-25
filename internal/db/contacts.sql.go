@@ -26,28 +26,43 @@ INSERT INTO contacts (
     address_city,
     latitude,
     longitude,
+    consent_phone,
+    consent_email,
+    consent_updated_at,
+    stromverbrauch_kwh,
+    gasverbrauch_kwh,
+    zaehlernummer,
+    eigentuemer_status,
     custom_fields
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+    $14, $15, $16, $17, $18, $19, $20, $21
 )
 RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags
 `
 
 type CreateContactParams struct {
-	CompanyID     pgtype.UUID   `json:"company_id"`
-	FirstName     string        `json:"first_name"`
-	LastName      string        `json:"last_name"`
-	Email         pgtype.Text   `json:"email"`
-	Phone         pgtype.Text   `json:"phone"`
-	Mobile        pgtype.Text   `json:"mobile"`
-	Position      pgtype.Text   `json:"position"`
-	LeadSource    pgtype.Text   `json:"lead_source"`
-	AddressStreet pgtype.Text   `json:"address_street"`
-	AddressZip    pgtype.Text   `json:"address_zip"`
-	AddressCity   pgtype.Text   `json:"address_city"`
-	Latitude      pgtype.Float8 `json:"latitude"`
-	Longitude     pgtype.Float8 `json:"longitude"`
-	CustomFields  []byte        `json:"custom_fields"`
+	CompanyID         pgtype.UUID        `json:"company_id"`
+	FirstName         string             `json:"first_name"`
+	LastName          string             `json:"last_name"`
+	Email             pgtype.Text        `json:"email"`
+	Phone             pgtype.Text        `json:"phone"`
+	Mobile            pgtype.Text        `json:"mobile"`
+	Position          pgtype.Text        `json:"position"`
+	LeadSource        pgtype.Text        `json:"lead_source"`
+	AddressStreet     pgtype.Text        `json:"address_street"`
+	AddressZip        pgtype.Text        `json:"address_zip"`
+	AddressCity       pgtype.Text        `json:"address_city"`
+	Latitude          pgtype.Float8      `json:"latitude"`
+	Longitude         pgtype.Float8      `json:"longitude"`
+	ConsentPhone      bool               `json:"consent_phone"`
+	ConsentEmail      bool               `json:"consent_email"`
+	ConsentUpdatedAt  pgtype.Timestamptz `json:"consent_updated_at"`
+	StromverbrauchKwh pgtype.Numeric     `json:"stromverbrauch_kwh"`
+	GasverbrauchKwh   pgtype.Numeric     `json:"gasverbrauch_kwh"`
+	Zaehlernummer     pgtype.Text        `json:"zaehlernummer"`
+	EigentuemerStatus pgtype.Text        `json:"eigentuemer_status"`
+	CustomFields      []byte             `json:"custom_fields"`
 }
 
 // internal/db/queries/contacts.sql
@@ -66,6 +81,13 @@ func (q *Queries) CreateContact(ctx context.Context, arg CreateContactParams) (C
 		arg.AddressCity,
 		arg.Latitude,
 		arg.Longitude,
+		arg.ConsentPhone,
+		arg.ConsentEmail,
+		arg.ConsentUpdatedAt,
+		arg.StromverbrauchKwh,
+		arg.GasverbrauchKwh,
+		arg.Zaehlernummer,
+		arg.EigentuemerStatus,
 		arg.CustomFields,
 	)
 	var i Contact
@@ -390,28 +412,42 @@ SET company_id = $2,
     address_city = $12,
     latitude = $13,
     longitude = $14,
-    custom_fields = $15,
+    consent_phone = $15,
+    consent_email = $16,
+    consent_updated_at = $17,
+    stromverbrauch_kwh = $18,
+    gasverbrauch_kwh = $19,
+    zaehlernummer = $20,
+    eigentuemer_status = $21,
+    custom_fields = $22,
     updated_at = NOW()
 WHERE id = $1
 RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags
 `
 
 type UpdateContactParams struct {
-	ID            pgtype.UUID   `json:"id"`
-	CompanyID     pgtype.UUID   `json:"company_id"`
-	FirstName     string        `json:"first_name"`
-	LastName      string        `json:"last_name"`
-	Email         pgtype.Text   `json:"email"`
-	Phone         pgtype.Text   `json:"phone"`
-	Mobile        pgtype.Text   `json:"mobile"`
-	Position      pgtype.Text   `json:"position"`
-	LeadSource    pgtype.Text   `json:"lead_source"`
-	AddressStreet pgtype.Text   `json:"address_street"`
-	AddressZip    pgtype.Text   `json:"address_zip"`
-	AddressCity   pgtype.Text   `json:"address_city"`
-	Latitude      pgtype.Float8 `json:"latitude"`
-	Longitude     pgtype.Float8 `json:"longitude"`
-	CustomFields  []byte        `json:"custom_fields"`
+	ID                pgtype.UUID        `json:"id"`
+	CompanyID         pgtype.UUID        `json:"company_id"`
+	FirstName         string             `json:"first_name"`
+	LastName          string             `json:"last_name"`
+	Email             pgtype.Text        `json:"email"`
+	Phone             pgtype.Text        `json:"phone"`
+	Mobile            pgtype.Text        `json:"mobile"`
+	Position          pgtype.Text        `json:"position"`
+	LeadSource        pgtype.Text        `json:"lead_source"`
+	AddressStreet     pgtype.Text        `json:"address_street"`
+	AddressZip        pgtype.Text        `json:"address_zip"`
+	AddressCity       pgtype.Text        `json:"address_city"`
+	Latitude          pgtype.Float8      `json:"latitude"`
+	Longitude         pgtype.Float8      `json:"longitude"`
+	ConsentPhone      bool               `json:"consent_phone"`
+	ConsentEmail      bool               `json:"consent_email"`
+	ConsentUpdatedAt  pgtype.Timestamptz `json:"consent_updated_at"`
+	StromverbrauchKwh pgtype.Numeric     `json:"stromverbrauch_kwh"`
+	GasverbrauchKwh   pgtype.Numeric     `json:"gasverbrauch_kwh"`
+	Zaehlernummer     pgtype.Text        `json:"zaehlernummer"`
+	EigentuemerStatus pgtype.Text        `json:"eigentuemer_status"`
+	CustomFields      []byte             `json:"custom_fields"`
 }
 
 func (q *Queries) UpdateContact(ctx context.Context, arg UpdateContactParams) (Contact, error) {
@@ -430,6 +466,13 @@ func (q *Queries) UpdateContact(ctx context.Context, arg UpdateContactParams) (C
 		arg.AddressCity,
 		arg.Latitude,
 		arg.Longitude,
+		arg.ConsentPhone,
+		arg.ConsentEmail,
+		arg.ConsentUpdatedAt,
+		arg.StromverbrauchKwh,
+		arg.GasverbrauchKwh,
+		arg.Zaehlernummer,
+		arg.EigentuemerStatus,
 		arg.CustomFields,
 	)
 	var i Contact

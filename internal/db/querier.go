@@ -100,6 +100,7 @@ type Querier interface {
 	MarkAllNotificationsAsRead(ctx context.Context, userID pgtype.UUID) error
 	MarkEmailMessageRead(ctx context.Context, id pgtype.UUID) error
 	MarkNotificationAsRead(ctx context.Context, id pgtype.UUID) error
+	RevokeDeal(ctx context.Context, arg RevokeDealParams) (Deal, error)
 	SearchCompanies(ctx context.Context, arg SearchCompaniesParams) ([]Company, error)
 	SearchContacts(ctx context.Context, arg SearchContactsParams) ([]Contact, error)
 	SearchKBArticlesByEmbedding(ctx context.Context, arg SearchKBArticlesByEmbeddingParams) ([]SearchKBArticlesByEmbeddingRow, error)
