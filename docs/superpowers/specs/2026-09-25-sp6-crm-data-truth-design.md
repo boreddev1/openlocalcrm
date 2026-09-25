@@ -60,7 +60,9 @@ SP6 does not change the existing `LookupPLZ` fallback in contact create or updat
 
 The update audit action is `CONSENT_UPDATE` when consent changes and `UPDATE` otherwise.
 
-### 2.4 Partial Updates
+### 2.4 Energy Validation and Partial Updates
+
+Create and update accept an energy value only when it is finite, non-negative, a whole number, and no greater than `99999999`. Fractional values, `NaN`, infinities, negative values, and values above that limit return HTTP 400. `NUMERIC(10,2)` controls storage and display scale; it does not permit fractional API input. Valid whole-number input is stored with scale 2 and exported with two decimal places.
 
 Omitted update fields do not erase stored consent or energy values:
 
@@ -131,7 +133,7 @@ The request accepts:
 
 The service records the timestamp and reason, sets the stage to `WIDERRUFEN`, and sets probability to zero. Repeating revocation returns the already-revoked deal without replacing the original revocation evidence.
 
-Create and update reject both `WIDERRUFEN` and `REVOKED` as direct input with HTTP 400. The SQL update and delete boundaries and the service mutation checks make `WIDERRUFEN` terminal.
+Create and update reject both `WIDERRUFEN` and `REVOKED` as direct input with HTTP 400. SQL mutation predicates exclude `WIDERRUFEN`; the service's normalized `isRevokedStage` check also blocks `REVOKED`. SP6 does not add `REVOKED` to the SQL predicates.
 
 ### 4.2 Deals Frontend
 
