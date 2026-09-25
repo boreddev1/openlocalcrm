@@ -44,41 +44,33 @@ func (s *Service) LogCall(ctx context.Context, input LogCallInput) (CallActivity
 		input.Disposition = "REACHED"
 	}
 
-	if s.querier != nil {
-		var contactUUID pgtype.UUID
-		if u, err := uuid.Parse(input.ContactID); err == nil {
-			contactUUID = pgtype.UUID{Bytes: u, Valid: true}
-		}
+	if s.querier == nil {
+		return CallActivity{}, fmt.Errorf("database required for logging calls")
+	}
 
-		created, err := s.querier.CreateCallActivity(ctx, db.CreateCallActivityParams{
-			ContactID:       contactUUID,
-			DurationSeconds: int32(input.DurationSeconds),
-			Disposition:     input.Disposition,
-			Notes:           input.Notes,
-		})
-		if err == nil {
-			call := CallActivity{
-				ID:              uuid.UUID(created.ID.Bytes).String(),
-				ContactID:       input.ContactID,
-				DurationSeconds: int(created.DurationSeconds),
-				Disposition:     created.Disposition,
-				Notes:           created.Notes,
-				CreatedAt:       created.CreatedAt.Time,
-			}
-			s.broadcast(call)
-			return call, nil
-		}
+	contactUUID, err := uuid.Parse(input.ContactID)
+	if err != nil {
+		return CallActivity{}, fmt.Errorf("invalid contact ID %q: %w", input.ContactID, err)
+	}
+
+	created, err := s.querier.CreateCallActivity(ctx, db.CreateCallActivityParams{
+		ContactID:       pgtype.UUID{Bytes: contactUUID, Valid: true},
+		DurationSeconds: int32(input.DurationSeconds),
+		Disposition:     input.Disposition,
+		Notes:           input.Notes,
+	})
+	if err != nil {
+		return CallActivity{}, fmt.Errorf("failed to persist call activity: %w", err)
 	}
 
 	call := CallActivity{
-		ID:              fmt.Sprintf("call-%d", time.Now().UnixNano()),
+		ID:              uuid.UUID(created.ID.Bytes).String(),
 		ContactID:       input.ContactID,
-		DurationSeconds: input.DurationSeconds,
-		Disposition:     input.Disposition,
-		Notes:           input.Notes,
-		CreatedAt:       time.Now().UTC(),
+		DurationSeconds: int(created.DurationSeconds),
+		Disposition:     created.Disposition,
+		Notes:           created.Notes,
+		CreatedAt:       created.CreatedAt.Time,
 	}
-
 	s.broadcast(call)
 	return call, nil
 }

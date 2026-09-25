@@ -40,3 +40,19 @@ func TestTelephonyService_LogCall(t *testing.T) {
 		t.Fatalf("unexpected notes: %s", call.Notes)
 	}
 }
+
+func TestTelephonyService_LogCall_PropagatesDBError(t *testing.T) {
+	// Create service with nil querier to trigger failure
+	svc := telephony.NewService(nil, nil)
+
+	_, err := svc.LogCall(context.Background(), telephony.LogCallInput{
+		ContactID:       "44444444-4444-4444-4444-444444444441",
+		DurationSeconds: 120,
+		Disposition:     "REACHED",
+		Notes:           "Kunde erreicht",
+	})
+
+	if err == nil {
+		t.Fatalf("LogCall must fail honestly when DB is unavailable, got nil error")
+	}
+}
