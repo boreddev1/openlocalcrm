@@ -151,7 +151,7 @@ Restore success and failure are audit-logged with actor, IP, and user agent. A c
 3. Inspect the foreign-key constraints copied by `INCLUDING ALL`.
 4. Drop every copied constraint that still references `public` before adding any scratch constraint. Leaving it in place would validate imported rows against live data instead of scratch data.
 5. Add equivalent foreign keys that reference `scratch.<parent table>`.
-6. Stream every current live row from `public` through the same table descriptors into the scratch schema with a scratch `search_path`; there is no upload or client-supplied backup source.
+6. Stream every current live row from `public` through the same table descriptors into the scratch schema; there is no upload or client-supplied backup source. The drill uses two distinct `db.Queries` handles: the source handle runs on a connection whose effective schema is `public`, while the target handle runs inside the scratch transaction after `SET LOCAL search_path` resolves writes to `scratch`. One shared `search_path` is forbidden because it would make the unqualified streamer SQL read the empty scratch tables and produce a false `0 = 0` pass.
 7. Compare per-table row counts.
 8. Enforce constraints immediately and run the FK verification.
 9. Drop the scratch schema in a guaranteed cleanup path, including failure paths.
@@ -225,7 +225,9 @@ There is no `X-Connector-Token` fallback and no fabricated success message.
   - each table row is emitted once and in FK-safe order;
   - JSONB fields are not base64 encoded;
   - `vector(1024)` and `TEXT[]` values survive the export/restore round trip with explicit casts;
-  - the drill reads live `public` data and accepts no body or uploaded backup;
+  - the drill reads live `public` data through a source handle and writes through a separate scratch target handle, never one shared `search_path`;
+  - a seeded non-empty source produces matching non-zero scratch counts rather than a false `0 = 0` pass;
+  - the drill accepts no body or uploaded backup;
   - replace-mode completion audit is written only after commit and survives the import;
   - merge upserts are idempotent;
   - replace truncation and inserts roll back as one transaction;
