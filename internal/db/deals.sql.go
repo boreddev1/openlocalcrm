@@ -78,14 +78,18 @@ func (q *Queries) CreateDeal(ctx context.Context, arg CreateDealParams) (Deal, e
 	return i, err
 }
 
-const deleteDeal = `-- name: DeleteDeal :exec
+const deleteDeal = `-- name: DeleteDeal :one
 DELETE FROM deals
 WHERE id = $1
+  AND stage <> 'WIDERRUFEN'
+RETURNING id
 `
 
-func (q *Queries) DeleteDeal(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteDeal, id)
-	return err
+func (q *Queries) DeleteDeal(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteDeal, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const getDealByID = `-- name: GetDealByID :one
@@ -212,9 +216,9 @@ const revokeDeal = `-- name: RevokeDeal :one
 UPDATE deals
 SET stage = 'WIDERRUFEN',
     probability = 0,
-    widerrufen_at = $2,
-    widerruf_grund = $3,
-    updated_at = NOW()
+    widerrufen_at = CASE WHEN stage = 'WIDERRUFEN' THEN widerrufen_at ELSE $2 END,
+    widerruf_grund = CASE WHEN stage = 'WIDERRUFEN' THEN widerruf_grund ELSE $3 END,
+    updated_at = CASE WHEN stage = 'WIDERRUFEN' THEN updated_at ELSE NOW() END
 WHERE id = $1
 RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
 `
@@ -263,6 +267,7 @@ SET title = $2,
     custom_fields = $11,
     updated_at = NOW()
 WHERE id = $1
+  AND stage <> 'WIDERRUFEN'
 RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
 `
 
@@ -323,6 +328,7 @@ SET stage = $2,
     closed_at = $4,
     updated_at = NOW()
 WHERE id = $1
+  AND stage <> 'WIDERRUFEN'
 RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
 `
 
@@ -367,6 +373,7 @@ UPDATE deals
 SET tags = CASE WHEN tags @> $1::jsonb THEN tags ELSE tags || $1::jsonb END,
     updated_at = NOW()
 WHERE id = $2
+  AND stage <> 'WIDERRUFEN'
 RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
 `
 

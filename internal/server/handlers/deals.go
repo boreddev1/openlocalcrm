@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -33,6 +34,24 @@ func NewDealHandler(service *deal.Service, trigger ...DealEventTrigger) *DealHan
 		h.trigger = trigger[0]
 	}
 	return h
+}
+
+func writeDealError(w http.ResponseWriter, err error, action string) {
+	switch {
+	case errors.Is(err, deal.ErrDealNotFound):
+		http.Error(w, `{"error":"deal_not_found"}`, http.StatusNotFound)
+	case errors.Is(err, deal.ErrDealRevoked):
+		http.Error(w, `{"error":"deal_conflict","message":"revoked deals are terminal"}`, http.StatusConflict)
+	case errors.Is(err, deal.ErrConcurrencyConflict):
+		http.Error(w, `{"error":"deal_conflict","message":"deal was modified by another user"}`, http.StatusConflict)
+	case errors.Is(err, deal.ErrDirectRevocation):
+		http.Error(w, `{"error":"validation_error","message":"Direct transition to WIDERRUFEN is prohibited; use POST /deals/{id}/revoke"}`, http.StatusBadRequest)
+	case errors.Is(err, deal.ErrInvalidDeal), errors.Is(err, deal.ErrInvalidDealValue), errors.Is(err, deal.ErrInvalidProbability):
+		http.Error(w, `{"error":"validation_error","message":"invalid deal data"}`, http.StatusBadRequest)
+	default:
+		log.Printf("[deal] failed to %s deal: %v", action, err)
+		http.Error(w, `{"error":"server_error","message":"failed to process deal"}`, http.StatusInternalServerError)
+	}
 }
 
 type CreateDealRequest struct {
@@ -73,11 +92,7 @@ func (h *DealHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
-		if err == deal.ErrInvalidDeal {
-			http.Error(w, `{"error":"validation_error","message":"title is required"}`, http.StatusBadRequest)
-			return
-		}
-		http.Error(w, `{"error":"server_error","message":"failed to create deal"}`, http.StatusInternalServerError)
+		writeDealError(w, err, "create")
 		return
 	}
 
@@ -129,7 +144,7 @@ func (h *DealHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	dealItem, err := h.service.GetByID(r.Context(), dealID)
 	if err != nil {
-		http.Error(w, `{"error":"deal_not_found"}`, http.StatusNotFound)
+		writeDealError(w, err, "get")
 		return
 	}
 
@@ -165,14 +180,9 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.EqualFold(req.Stage, "WIDERRUFEN") || strings.EqualFold(req.Stage, "REVOKED") {
-		http.Error(w, `{"error":"validation_error","message":"Direct transition to WIDERRUFEN is prohibited; use POST /deals/{id}/revoke"}`, http.StatusBadRequest)
-		return
-	}
-
 	existing, err := h.service.GetByID(r.Context(), dealID)
 	if err != nil {
-		http.Error(w, `{"error":"deal_not_found"}`, http.StatusNotFound)
+		writeDealError(w, err, "get for update")
 		return
 	}
 
@@ -230,7 +240,7 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Value:       val,
 	})
 	if err != nil {
-		http.Error(w, `{"error":"failed to update deal: `+err.Error()+`"}`, http.StatusInternalServerError)
+		writeDealError(w, err, "update")
 		return
 	}
 
@@ -261,7 +271,7 @@ func (h *DealHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.Delete(r.Context(), actorID, dealID); err != nil {
-		http.Error(w, `{"error":"failed to delete deal"}`, http.StatusInternalServerError)
+		writeDealError(w, err, "delete")
 		return
 	}
 
@@ -291,7 +301,7 @@ func (h *DealHandler) AttachSolarCalculation(w http.ResponseWriter, r *http.Requ
 
 	existing, err := h.service.GetByID(r.Context(), dealID)
 	if err != nil {
-		http.Error(w, `{"error":"deal_not_found"}`, http.StatusNotFound)
+		writeDealError(w, err, "get for update")
 		return
 	}
 
@@ -316,7 +326,7 @@ func (h *DealHandler) AttachSolarCalculation(w http.ResponseWriter, r *http.Requ
 		Value:       val,
 	})
 	if err != nil {
-		http.Error(w, `{"error":"failed to update deal with calculation"}`, http.StatusInternalServerError)
+		writeDealError(w, err, "attach solar calculation to")
 		return
 	}
 
@@ -357,7 +367,7 @@ func (h *DealHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 
 	revoked, err := h.service.Revoke(r.Context(), actorID, dealID, revokedAt, req.WiderrufGrund)
 	if err != nil {
-		http.Error(w, `{"error":"failed to revoke deal: `+err.Error()+`"}`, http.StatusInternalServerError)
+		writeDealError(w, err, "revoke")
 		return
 	}
 

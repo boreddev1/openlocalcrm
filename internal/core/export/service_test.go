@@ -2,6 +2,7 @@ package export_test
 
 import (
 	"context"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -143,5 +144,24 @@ func TestExportContactsCSV_AllColumns(t *testing.T) {
 	}
 	if !strings.Contains(foundRow, "3500.00") || !strings.Contains(foundRow, "11000.00") {
 		t.Errorf("energy consumption values missing in row: %s", foundRow)
+	}
+}
+
+func TestExportContactsCSV_EnergyConversionErrorIsReturned(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	exportSvc := export.NewService(querier, contact.NewService(querier, nil))
+	invalidEnergy := pgtype.Numeric{Int: big.NewInt(1), Exp: 4000, Valid: true}
+	_, err := querier.CreateContact(ctx, db.CreateContactParams{
+		FirstName:         "Invalid",
+		LastName:          "Energy",
+		StromverbrauchKwh: invalidEnergy,
+	})
+	if err != nil {
+		t.Fatalf("failed creating contact: %v", err)
+	}
+
+	if _, err := exportSvc.ExportContactsCSV(ctx); err == nil {
+		t.Fatal("expected energy conversion error")
 	}
 }

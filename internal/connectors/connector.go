@@ -30,17 +30,19 @@ func uuidStr(id pgtype.UUID) string {
 }
 
 type LeadIntakePayload struct {
-	FirstName   string `json:"first_name"`
-	LastName    string `json:"last_name"`
-	Email       string `json:"email"`
-	Phone       string `json:"phone"`
-	Street      string `json:"street"`
-	City        string `json:"city"`
-	Zip         string `json:"zip"`
-	DealTitle   string `json:"deal_title"`
-	DealValue   string `json:"deal_value"`
-	Source      string `json:"source"`
-	SetterNotes string `json:"setter_notes"`
+	FirstName    string               `json:"first_name"`
+	LastName     string               `json:"last_name"`
+	Email        string               `json:"email"`
+	Phone        string               `json:"phone"`
+	Street       string               `json:"street"`
+	City         string               `json:"city"`
+	Zip          string               `json:"zip"`
+	DealTitle    string               `json:"deal_title"`
+	DealValue    string               `json:"deal_value"`
+	Source       string               `json:"source"`
+	SetterNotes  string               `json:"setter_notes"`
+	ConsentPhone contact.OptionalBool `json:"consent_phone"`
+	ConsentEmail contact.OptionalBool `json:"consent_email"`
 }
 
 type Engine struct {
@@ -83,6 +85,8 @@ func (e *Engine) IngestLead(ctx context.Context, token string, payload LeadIntak
 		AddressStreet: payload.Street,
 		AddressCity:   payload.City,
 		AddressZip:    payload.Zip,
+		ConsentPhone:  payload.ConsentPhone,
+		ConsentEmail:  payload.ConsentEmail,
 	})
 	if err != nil {
 		return db.Contact{}, err

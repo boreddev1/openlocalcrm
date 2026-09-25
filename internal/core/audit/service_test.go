@@ -3,6 +3,7 @@ package audit_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -95,4 +96,76 @@ func TestAuditService_LogDiff_PIISanitization(t *testing.T) {
 	if storedNew["consent_updated_at"] != "2026-09-25T10:00:00Z" {
 		t.Errorf("UWG consent_updated_at was corrupted: %v", storedNew["consent_updated_at"])
 	}
+
+	var changes struct {
+		ChangedKeys []string `json:"changed_keys"`
+	}
+	if err := json.Unmarshal(entry.Changes, &changes); err != nil {
+		t.Fatalf("failed to unmarshal changes: %v", err)
+	}
+	changed := make(map[string]bool, len(changes.ChangedKeys))
+	for _, key := range changes.ChangedKeys {
+		changed[key] = true
+	}
+	if changed["first_name"] {
+		t.Errorf("unchanged field reported as changed: %v", changes.ChangedKeys)
+	}
+	if !changed["email"] || !changed["consent_email"] {
+		t.Errorf("changed fields missing from audit diff: %v", changes.ChangedKeys)
+	}
+}
+
+func TestAuditService_LogSanitizesNestedValues(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	svc := audit.NewService(querier)
+	userID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	entityID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+
+	changes := map[string]any{
+		"contact": map[string]any{
+			"email":         "nested@example.de",
+			"consent_email": true,
+			"profiles": []any{
+				map[string]any{"phone": "+49 69 12345678"},
+			},
+		},
+	}
+	if err := svc.Log(ctx, userID, "CONTACT", entityID, "CREATE", changes, "", ""); err != nil {
+		t.Fatalf("failed to log nested audit event: %v", err)
+	}
+
+	logs, err := querier.ListAuditLogsByEntity(ctx, db.ListAuditLogsByEntityParams{
+		EntityType: "CONTACT",
+		EntityID:   entityID,
+		Limit:      10,
+	})
+	if err != nil || len(logs) != 1 {
+		t.Fatalf("expected one audit log, got %d: %v", len(logs), err)
+	}
+	storedJSON := string(logs[0].Changes)
+	if storedJSON == "" || containsAny(storedJSON, "nested@example.de", "+49 69 12345678") {
+		t.Fatalf("nested PII was not sanitized: %s", storedJSON)
+	}
+
+	var stored map[string]any
+	if err := json.Unmarshal(logs[0].Changes, &stored); err != nil {
+		t.Fatalf("failed to unmarshal nested audit event: %v", err)
+	}
+	contactValues, ok := stored["contact"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected contact audit value: %#v", stored["contact"])
+	}
+	if contactValues["consent_email"] != true {
+		t.Errorf("nested consent evidence was altered: %#v", contactValues)
+	}
+}
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
 }

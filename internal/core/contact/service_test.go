@@ -3,6 +3,7 @@ package contact_test
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -158,8 +159,8 @@ func TestContactService_ConsentAndEnergyFields(t *testing.T) {
 	svc := contact.NewService(querier, auditService)
 
 	actorID := pgtype.UUID{Bytes: [16]byte{1, 1, 1}, Valid: true}
-	strom := 4500.50
-	gas := 12000.00
+	strom := 4500.0
+	gas := 12000.0
 
 	// 1. Create with consent
 	c1, err := svc.Create(ctx, actorID, contact.CreateContactInput{
@@ -167,12 +168,12 @@ func TestContactService_ConsentAndEnergyFields(t *testing.T) {
 		LastName:          "Mustermann",
 		Email:             "max@mustermann.de",
 		Phone:             "+49 69 112233",
-		ConsentPhone:      true,
-		ConsentEmail:      false,
-		StromverbrauchKwh: &strom,
-		GasverbrauchKwh:   &gas,
+		ConsentPhone:      contact.OptionalBool{Value: true, Present: true},
+		ConsentEmail:      contact.OptionalBool{Present: true},
+		StromverbrauchKwh: contact.OptionalFloat64{Value: strom, Present: true},
+		GasverbrauchKwh:   contact.OptionalFloat64{Value: gas, Present: true},
 		Zaehlernummer:     "1EMH12345678",
-		EigentuemerStatus: "EIGENTUEMER",
+		EigentuemerStatus: contact.OptionalString{Value: "EIGENTUEMER", Present: true},
 	})
 	require.NoError(t, err)
 	require.True(t, c1.ConsentPhone)
@@ -186,15 +187,12 @@ func TestContactService_ConsentAndEnergyFields(t *testing.T) {
 
 	// 2. Update without consent change -> consent_updated_at must remain identical, audit log must mask PII
 	c2, err := svc.Update(ctx, actorID, contact.UpdateContactInput{
-		ID:                c1.ID,
-		FirstName:         "Maximilian",
-		LastName:          "Mustermann",
-		Email:             "max.neu@mustermann.de",
-		Phone:             "+49 69 998877",
-		ConsentPhone:      true,
-		ConsentEmail:      false,
-		Zaehlernummer:     "1EMH12345678",
-		EigentuemerStatus: "EIGENTUEMER",
+		ID:            c1.ID,
+		FirstName:     "Maximilian",
+		LastName:      "Mustermann",
+		Email:         "max.neu@mustermann.de",
+		Phone:         "+49 69 998877",
+		Zaehlernummer: "1EMH12345678",
 	})
 	require.NoError(t, err)
 	require.Equal(t, initialConsentTime, c2.ConsentUpdatedAt.Time)
@@ -216,14 +214,12 @@ func TestContactService_ConsentAndEnergyFields(t *testing.T) {
 	// 3. Update with consent change -> consent_updated_at changes, audit log recorded
 	time.Sleep(10 * time.Millisecond)
 	c3, err := svc.Update(ctx, actorID, contact.UpdateContactInput{
-		ID:                c1.ID,
-		FirstName:         "Maximilian",
-		LastName:          "Mustermann",
-		Email:             "max.neu@mustermann.de",
-		ConsentPhone:      true,
-		ConsentEmail:      true, // Changed!
-		Zaehlernummer:     "1EMH12345678",
-		EigentuemerStatus: "EIGENTUEMER",
+		ID:            c1.ID,
+		FirstName:     "Maximilian",
+		LastName:      "Mustermann",
+		Email:         "max.neu@mustermann.de",
+		ConsentEmail:  contact.OptionalBool{Value: true, Present: true},
+		Zaehlernummer: "1EMH12345678",
 	})
 	require.NoError(t, err)
 	require.True(t, c3.ConsentEmail)
@@ -247,4 +243,153 @@ func TestContactService_ConsentAndEnergyFields(t *testing.T) {
 		}
 	}
 	require.True(t, foundConsentAudit, "expected CONSENT_UPDATE audit log entry")
+}
+
+func TestContactService_RejectsInvalidEnergyValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value float64
+	}{
+		{name: "negative", value: -1},
+		{name: "fractional", value: 1.5},
+		{name: "above numeric range", value: 100000000},
+		{name: "not a number", value: math.NaN()},
+		{name: "infinity", value: math.Inf(1)},
+		{name: "conversion overflow", value: math.MaxFloat64},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := contact.NewService(demo.NewInMemoryQuerier(), nil)
+			_, err := svc.Create(context.Background(), pgtype.UUID{}, contact.CreateContactInput{
+				FirstName:         "Energy",
+				LastName:          "Test",
+				StromverbrauchKwh: contact.OptionalFloat64{Value: tt.value, Present: true},
+			})
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestContactService_CreateAuditSanitizesPII(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	auditSvc := audit.NewService(querier)
+	svc := contact.NewService(querier, auditSvc)
+	actorID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+
+	created, err := svc.Create(ctx, actorID, contact.CreateContactInput{
+		FirstName:    "Erika",
+		LastName:     "Musterfrau",
+		Email:        "erika.musterfrau@example.de",
+		Phone:        "+49 69 12345678",
+		ConsentPhone: contact.OptionalBool{Value: true, Present: true},
+	})
+	require.NoError(t, err)
+
+	logs, err := querier.ListAuditLogsByEntity(ctx, db.ListAuditLogsByEntityParams{
+		EntityType: "CONTACT",
+		EntityID:   created.ID,
+		Limit:      10,
+	})
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	storedJSON := string(logs[0].Changes)
+	require.NotContains(t, storedJSON, "erika.musterfrau@example.de")
+	require.NotContains(t, storedJSON, "+49 69 12345678")
+
+	var stored map[string]any
+	require.NoError(t, json.Unmarshal(logs[0].Changes, &stored))
+	require.NotEqual(t, "erika.musterfrau@example.de", stored["email"])
+	require.Equal(t, true, stored["consent_phone"])
+}
+
+func TestContactService_EmptyOwnerStatusRoundTripsAsNull(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	svc := contact.NewService(querier, nil)
+	created, err := svc.Create(ctx, pgtype.UUID{}, contact.CreateContactInput{
+		FirstName:         "Klaus",
+		LastName:          "Schneider",
+		EigentuemerStatus: contact.OptionalString{Present: true},
+	})
+	require.NoError(t, err)
+	require.False(t, created.EigentuemerStatus.Valid)
+	require.Empty(t, created.EigentuemerStatus.String)
+
+	created, err = svc.Update(ctx, pgtype.UUID{}, contact.UpdateContactInput{
+		ID:                created.ID,
+		FirstName:         created.FirstName,
+		LastName:          created.LastName,
+		EigentuemerStatus: contact.OptionalString{Value: "Mieter", Present: true},
+	})
+	require.NoError(t, err)
+	created, err = svc.Update(ctx, pgtype.UUID{}, contact.UpdateContactInput{
+		ID:                created.ID,
+		FirstName:         created.FirstName,
+		LastName:          created.LastName,
+		EigentuemerStatus: contact.OptionalString{Present: true},
+	})
+	require.NoError(t, err)
+	require.False(t, created.EigentuemerStatus.Valid)
+	require.Empty(t, created.EigentuemerStatus.String)
+}
+
+func TestContactService_UpdateAuditPreservesNullAndConsentEvidence(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	svc := contact.NewService(querier, audit.NewService(querier))
+	actorID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	energy := 4200.0
+	created, err := svc.Create(ctx, actorID, contact.CreateContactInput{
+		FirstName:         "Klaus",
+		LastName:          "Schneider",
+		ConsentPhone:      contact.OptionalBool{Value: true, Present: true},
+		StromverbrauchKwh: contact.OptionalFloat64{Value: energy, Present: true},
+		GasverbrauchKwh:   contact.OptionalFloat64{Value: energy, Present: true},
+		EigentuemerStatus: contact.OptionalString{Value: "Eigentümer", Present: true},
+	})
+	require.NoError(t, err)
+	time.Sleep(10 * time.Millisecond)
+
+	_, err = svc.Update(ctx, actorID, contact.UpdateContactInput{
+		ID:                created.ID,
+		FirstName:         created.FirstName,
+		LastName:          created.LastName,
+		ConsentPhone:      contact.OptionalBool{Present: true},
+		StromverbrauchKwh: contact.OptionalFloat64{Present: true, Null: true},
+		GasverbrauchKwh:   contact.OptionalFloat64{Present: true, Null: true},
+		EigentuemerStatus: contact.OptionalString{Present: true, Null: true},
+	})
+	require.NoError(t, err)
+
+	logs, err := querier.ListAuditLogsByEntity(ctx, db.ListAuditLogsByEntityParams{
+		EntityType: "CONTACT",
+		EntityID:   created.ID,
+		Limit:      10,
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, logs)
+	entry := logs[0]
+	require.Equal(t, "CONSENT_UPDATE", entry.Action)
+	var oldValues, newValues map[string]any
+	require.NoError(t, json.Unmarshal(entry.OldValues, &oldValues))
+	require.NoError(t, json.Unmarshal(entry.NewValues, &newValues))
+	require.Equal(t, float64(energy), oldValues["stromverbrauch_kwh"])
+	require.Nil(t, newValues["stromverbrauch_kwh"])
+	require.Contains(t, newValues, "stromverbrauch_kwh")
+	require.Nil(t, newValues["gasverbrauch_kwh"])
+	require.Nil(t, newValues["eigentuemer_status"])
+	require.Equal(t, true, oldValues["consent_phone"])
+	require.Equal(t, false, newValues["consent_phone"])
+	require.NotNil(t, oldValues["consent_updated_at"])
+	require.NotNil(t, newValues["consent_updated_at"])
+	var changes struct {
+		ChangedKeys []string `json:"changed_keys"`
+	}
+	require.NoError(t, json.Unmarshal(entry.Changes, &changes))
+	require.Contains(t, changes.ChangedKeys, "stromverbrauch_kwh")
+	require.Contains(t, changes.ChangedKeys, "gasverbrauch_kwh")
+	require.Contains(t, changes.ChangedKeys, "eigentuemer_status")
+	require.Contains(t, changes.ChangedKeys, "consent_phone")
 }

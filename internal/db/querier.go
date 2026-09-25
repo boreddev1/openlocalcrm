@@ -49,7 +49,7 @@ type Querier interface {
 	DeleteAppointment(ctx context.Context, id pgtype.UUID) error
 	DeleteCompany(ctx context.Context, id pgtype.UUID) error
 	DeleteContact(ctx context.Context, id pgtype.UUID) error
-	DeleteDeal(ctx context.Context, id pgtype.UUID) error
+	DeleteDeal(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	DeleteEmailAccount(ctx context.Context, id pgtype.UUID) error
 	DeleteKBArticle(ctx context.Context, id pgtype.UUID) error
 	DeleteNote(ctx context.Context, id pgtype.UUID) error

@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/contact"
@@ -33,18 +34,18 @@ func TestContactHandler_Endpoints(t *testing.T) {
 	// 1. Create contact with consent and energy data
 	strom := 4200.0
 	gas := 15000.0
-	createBody, _ := json.Marshal(handlers.CreateContactRequest{
-		FirstName:         "Klaus",
-		LastName:          "Schneider",
-		Email:             "klaus.schneider@firma.de",
-		Phone:             "+49 69 555123",
-		AddressCity:       "Frankfurt",
-		ConsentPhone:      true,
-		ConsentEmail:      true,
-		StromverbrauchKwh: &strom,
-		GasverbrauchKwh:   &gas,
-		Zaehlernummer:     "1EMH123456",
-		EigentuemerStatus: "EIGENTUEMER",
+	createBody, _ := json.Marshal(map[string]any{
+		"first_name":         "Klaus",
+		"last_name":          "Schneider",
+		"email":              "klaus.schneider@firma.de",
+		"phone":              "+49 69 555123",
+		"address_city":       "Frankfurt",
+		"consent_phone":      true,
+		"consent_email":      true,
+		"stromverbrauch_kwh": strom,
+		"gasverbrauch_kwh":   gas,
+		"zaehlernummer":      "1EMH123456",
+		"eigentuemer_status": "EIGENTUEMER",
 	})
 	reqCreate := httptest.NewRequest("POST", "/api/v1/contacts", bytes.NewReader(createBody)).WithContext(ctx)
 	recCreate := httptest.NewRecorder()
@@ -94,10 +95,10 @@ func TestContactHandler_Endpoints(t *testing.T) {
 	}
 
 	// 5. Update contact
-	updateBody, _ := json.Marshal(handlers.CreateContactRequest{
-		FirstName: "Klaus",
-		LastName:  "Schneider-Müller",
-		Email:     "k.schneider@firma.de",
+	updateBody, _ := json.Marshal(map[string]any{
+		"first_name": "Klaus",
+		"last_name":  "Schneider-Müller",
+		"email":      "k.schneider@firma.de",
 	})
 	reqUpdate := httptest.NewRequest("PUT", "/api/v1/contacts/"+contactIDStr, bytes.NewReader(updateBody)).WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
 	recUpdate := httptest.NewRecorder()
@@ -112,5 +113,140 @@ func TestContactHandler_Endpoints(t *testing.T) {
 	h.Delete(recDelete, reqDelete)
 	if recDelete.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK on delete, got %d: %s", recDelete.Code, recDelete.Body.String())
+	}
+}
+
+func TestContactHandler_UpdatePreservesOmittedConsentAndNullableValues(t *testing.T) {
+	querier := demo.NewInMemoryQuerier()
+	svc := contact.NewService(querier, audit.NewService(querier))
+	h := handlers.NewContactHandler(svc)
+	actorID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	strom := 4200.0
+	gas := 12000.0
+	created, err := svc.Create(context.Background(), actorID, contact.CreateContactInput{
+		FirstName:         "Klaus",
+		LastName:          "Schneider",
+		Email:             "klaus@example.de",
+		ConsentPhone:      contact.OptionalBool{Value: true, Present: true},
+		ConsentEmail:      contact.OptionalBool{Value: true, Present: true},
+		StromverbrauchKwh: contact.OptionalFloat64{Value: strom, Present: true},
+		GasverbrauchKwh:   contact.OptionalFloat64{Value: gas, Present: true},
+		EigentuemerStatus: contact.OptionalString{Value: "Eigentümer", Present: true},
+	})
+	if err != nil {
+		t.Fatalf("failed to create contact: %v", err)
+	}
+
+	id := uuid.UUID(created.ID.Bytes).String()
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", id)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/contacts/"+id, bytes.NewBufferString(`{"first_name":"Klaus","last_name":"Schneider"}`))
+	req = req.WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+	rec := httptest.NewRecorder()
+	h.Update(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var updated db.Contact
+	if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+		t.Fatalf("failed to decode updated contact: %v", err)
+	}
+	if !updated.ConsentPhone || !updated.ConsentEmail {
+		t.Errorf("omitted consent was changed: phone=%v email=%v", updated.ConsentPhone, updated.ConsentEmail)
+	}
+	if !updated.ConsentUpdatedAt.Valid || !updated.ConsentUpdatedAt.Time.Equal(created.ConsentUpdatedAt.Time) {
+		t.Errorf("consent timestamp changed: got=%v want=%v", updated.ConsentUpdatedAt, created.ConsentUpdatedAt)
+	}
+	if !updated.StromverbrauchKwh.Valid || !updated.GasverbrauchKwh.Valid || !updated.EigentuemerStatus.Valid {
+		t.Errorf("omitted nullable values were changed: %+v", updated)
+	}
+}
+
+func TestContactHandler_UpdateClearsExplicitNulls(t *testing.T) {
+	querier := demo.NewInMemoryQuerier()
+	svc := contact.NewService(querier, audit.NewService(querier))
+	h := handlers.NewContactHandler(svc)
+	actorID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	strom := 4200.0
+	created, err := svc.Create(context.Background(), actorID, contact.CreateContactInput{
+		FirstName:         "Klaus",
+		LastName:          "Schneider",
+		StromverbrauchKwh: contact.OptionalFloat64{Value: strom, Present: true},
+		GasverbrauchKwh:   contact.OptionalFloat64{Value: strom, Present: true},
+		EigentuemerStatus: contact.OptionalString{Value: "Mieter", Present: true},
+	})
+	if err != nil {
+		t.Fatalf("failed to create contact: %v", err)
+	}
+
+	id := uuid.UUID(created.ID.Bytes).String()
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", id)
+	body := `{"first_name":"Klaus","last_name":"Schneider","stromverbrauch_kwh":null,"gasverbrauch_kwh":null,"eigentuemer_status":null}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/contacts/"+id, bytes.NewBufferString(body))
+	req = req.WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+	rec := httptest.NewRecorder()
+	h.Update(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var updated db.Contact
+	if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+		t.Fatalf("failed to decode updated contact: %v", err)
+	}
+	if updated.StromverbrauchKwh.Valid || updated.GasverbrauchKwh.Valid || updated.EigentuemerStatus.Valid {
+		t.Errorf("explicit nulls did not clear values: %+v", updated)
+	}
+}
+
+func TestContactHandler_UpdateRejectsNullConsent(t *testing.T) {
+	querier := demo.NewInMemoryQuerier()
+	svc := contact.NewService(querier, audit.NewService(querier))
+	h := handlers.NewContactHandler(svc)
+	created, err := svc.Create(context.Background(), pgtype.UUID{}, contact.CreateContactInput{
+		FirstName: "Klaus",
+		LastName:  "Schneider",
+	})
+	if err != nil {
+		t.Fatalf("failed to create contact: %v", err)
+	}
+
+	id := uuid.UUID(created.ID.Bytes).String()
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", id)
+	body := `{"first_name":"Klaus","last_name":"Schneider","consent_email":null}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/contacts/"+id, bytes.NewBufferString(body))
+	req = req.WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+	rec := httptest.NewRecorder()
+	h.Update(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestContactHandler_RejectsInvalidEnergy(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "fractional", body: `{"first_name":"Klaus","last_name":"Schneider","stromverbrauch_kwh":1.5}`},
+		{name: "negative", body: `{"first_name":"Klaus","last_name":"Schneider","gasverbrauch_kwh":-1}`},
+		{name: "above range", body: `{"first_name":"Klaus","last_name":"Schneider","stromverbrauch_kwh":100000000}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			querier := demo.NewInMemoryQuerier()
+			svc := contact.NewService(querier, audit.NewService(querier))
+			h := handlers.NewContactHandler(svc)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/contacts", bytes.NewBufferString(tt.body))
+			rec := httptest.NewRecorder()
+			h.Create(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 Bad Request, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }

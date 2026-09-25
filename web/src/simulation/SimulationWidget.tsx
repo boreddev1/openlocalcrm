@@ -189,7 +189,7 @@ export const SimulationWidget: React.FC = () => {
           consent_phone: true,
           consent_email: true,
           zaehlernummer: '1EMH' + Math.floor(100000000 + Math.random() * 900000000),
-          stromverbrauch_kwh: '9500.00',
+          stromverbrauch_kwh: 9500,
         };
 
         await apiFetch('/api/v1/contacts', {

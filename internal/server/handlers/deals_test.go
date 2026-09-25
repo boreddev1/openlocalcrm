@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -306,4 +308,93 @@ func TestDealHandler_Revoke(t *testing.T) {
 	require.Equal(t, "WIDERRUFEN", revoked.Stage)
 	require.Equal(t, int32(0), revoked.Probability)
 	require.True(t, revoked.WiderrufenAt.Valid)
+}
+
+type failingRevokeQuerier struct {
+	db.Querier
+	deal db.Deal
+}
+
+func (q *failingRevokeQuerier) GetDealByID(context.Context, pgtype.UUID) (db.Deal, error) {
+	return q.deal, nil
+}
+
+func (q *failingRevokeQuerier) RevokeDeal(context.Context, db.RevokeDealParams) (db.Deal, error) {
+	return db.Deal{}, errors.New("database secret: connection reset")
+}
+
+func TestDealHandler_RevokeErrorSemantics(t *testing.T) {
+	t.Run("missing", func(t *testing.T) {
+		querier := demo.NewInMemoryQuerier()
+		h := handlers.NewDealHandler(deal.NewService(querier, nil))
+		id := uuid.New().String()
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", id)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/deals/"+id+"/revoke", bytes.NewBufferString(`{}`))
+		req = req.WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+		rec := httptest.NewRecorder()
+		h.Revoke(rec, req)
+		require.Equal(t, http.StatusNotFound, rec.Code)
+		require.NotContains(t, rec.Body.String(), "record not found")
+	})
+
+	t.Run("unexpected", func(t *testing.T) {
+		id := uuid.New()
+		querier := &failingRevokeQuerier{deal: db.Deal{ID: pgtype.UUID{Bytes: id, Valid: true}, Stage: "WON"}}
+		h := handlers.NewDealHandler(deal.NewService(querier, nil))
+		idString := id.String()
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", idString)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/deals/"+idString+"/revoke", bytes.NewBufferString(`{}`))
+		req = req.WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+		rec := httptest.NewRecorder()
+		h.Revoke(rec, req)
+		require.Equal(t, http.StatusInternalServerError, rec.Code)
+		require.NotContains(t, rec.Body.String(), "database secret")
+		require.NotContains(t, rec.Body.String(), "connection reset")
+	})
+}
+
+func TestDealHandler_RevokedDealsReturnConflict(t *testing.T) {
+	for _, operation := range []string{"update", "attach", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			querier := demo.NewInMemoryQuerier()
+			svc := deal.NewService(querier, audit.NewService(querier))
+			h := handlers.NewDealHandler(svc)
+			adminID := uuid.New()
+			created, err := svc.Create(context.Background(), pgtype.UUID{Bytes: adminID, Valid: true}, deal.CreateDealInput{
+				Title:       "Terminal handler test",
+				Stage:       "WON",
+				Probability: 100,
+			})
+			require.NoError(t, err)
+			_, err = svc.Revoke(context.Background(), pgtype.UUID{Bytes: adminID, Valid: true}, created.ID, time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC), "Original")
+			require.NoError(t, err)
+
+			id := uuid.UUID(created.ID.Bytes).String()
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", id)
+			ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, auth.UserContextKey, &auth.AccessClaims{UserID: adminID, Role: "ADMIN"})
+			var req *http.Request
+			switch operation {
+			case "update":
+				req = httptest.NewRequest(http.MethodPut, "/api/v1/deals/"+id, bytes.NewBufferString(`{"stage":"LEAD"}`)).WithContext(ctx)
+			case "attach":
+				req = httptest.NewRequest(http.MethodPost, "/api/v1/deals/"+id+"/solar-calculation", bytes.NewBufferString(`{}`)).WithContext(ctx)
+			case "delete":
+				req = httptest.NewRequest(http.MethodDelete, "/api/v1/deals/"+id, nil).WithContext(ctx)
+			}
+			rec := httptest.NewRecorder()
+			switch operation {
+			case "update":
+				h.Update(rec, req)
+			case "attach":
+				h.AttachSolarCalculation(rec, req)
+			case "delete":
+				h.Delete(rec, req)
+			}
+			require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		})
+	}
 }

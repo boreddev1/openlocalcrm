@@ -2,6 +2,7 @@ package connectors_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -13,9 +14,11 @@ import (
 
 type MockContactQuerier struct {
 	db.Querier
+	created []db.CreateContactParams
 }
 
 func (m *MockContactQuerier) CreateContact(ctx context.Context, arg db.CreateContactParams) (db.Contact, error) {
+	m.created = append(m.created, arg)
 	var id pgtype.UUID
 	_ = id.Scan("33333333-3333-3333-3333-333333333333")
 	return db.Contact{
@@ -139,5 +142,26 @@ func TestConnectorLeadIntake_TriggerErrorDoesNotFailIngest(t *testing.T) {
 	}
 	if len(trigger.calledWith) != 1 {
 		t.Fatalf("expected trigger to be called once")
+	}
+}
+
+func TestConnectorLeadIntake_PropagatesConsentEvidence(t *testing.T) {
+	mockDB := &MockContactQuerier{}
+	contactSvc := contact.NewService(mockDB, nil)
+	engine := connectors.NewEngine(contactSvc, nil, "valid-token-123")
+	var payload connectors.LeadIntakePayload
+	if err := json.Unmarshal([]byte(`{"first_name":"Nina","last_name":"Weber","consent_phone":true,"consent_email":false}`), &payload); err != nil {
+		t.Fatalf("failed to decode connector payload: %v", err)
+	}
+
+	_, err := engine.IngestLead(context.Background(), "valid-token-123", payload)
+	if err != nil {
+		t.Fatalf("failed to ingest lead: %v", err)
+	}
+	if len(mockDB.created) != 1 {
+		t.Fatalf("expected one created contact, got %d", len(mockDB.created))
+	}
+	if !mockDB.created[0].ConsentPhone || mockDB.created[0].ConsentEmail {
+		t.Errorf("consent evidence was not propagated: phone=%v email=%v", mockDB.created[0].ConsentPhone, mockDB.created[0].ConsentEmail)
 	}
 }

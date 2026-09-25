@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -20,25 +22,43 @@ func NewContactHandler(service *contact.Service) *ContactHandler {
 	return &ContactHandler{service: service}
 }
 
+func writeContactError(w http.ResponseWriter, err error, action string) {
+	switch {
+	case errors.Is(err, contact.ErrContactNotFound):
+		http.Error(w, `{"error":"contact_not_found"}`, http.StatusNotFound)
+	case errors.Is(err, contact.ErrInvalidContact):
+		http.Error(w, `{"error":"validation_error","message":"first_name and last_name are required"}`, http.StatusBadRequest)
+	case errors.Is(err, contact.ErrInvalidEmail):
+		http.Error(w, `{"error":"validation_error","message":"invalid email address"}`, http.StatusBadRequest)
+	case errors.Is(err, contact.ErrInvalidConsent):
+		http.Error(w, `{"error":"validation_error","message":"consent fields must be booleans"}`, http.StatusBadRequest)
+	case errors.Is(err, contact.ErrInvalidEnergy):
+		http.Error(w, `{"error":"validation_error","message":"energy values must be finite non-negative whole numbers within numeric(10,2)"}`, http.StatusBadRequest)
+	default:
+		log.Printf("[contact] failed to %s contact: %v", action, err)
+		http.Error(w, `{"error":"server_error","message":"failed to process contact"}`, http.StatusInternalServerError)
+	}
+}
+
 type CreateContactRequest struct {
-	FirstName         string   `json:"first_name"`
-	LastName          string   `json:"last_name"`
-	Email             string   `json:"email"`
-	Phone             string   `json:"phone"`
-	Mobile            string   `json:"mobile"`
-	Position          string   `json:"position"`
-	LeadSource        string   `json:"lead_source"`
-	AddressStreet     string   `json:"address_street"`
-	AddressZip        string   `json:"address_zip"`
-	AddressCity       string   `json:"address_city"`
-	Latitude          *float64 `json:"latitude"`
-	Longitude         *float64 `json:"longitude"`
-	ConsentPhone      bool     `json:"consent_phone"`
-	ConsentEmail      bool     `json:"consent_email"`
-	StromverbrauchKwh *float64 `json:"stromverbrauch_kwh"`
-	GasverbrauchKwh   *float64 `json:"gasverbrauch_kwh"`
-	Zaehlernummer     string   `json:"zaehlernummer"`
-	EigentuemerStatus string   `json:"eigentuemer_status"`
+	FirstName         string                  `json:"first_name"`
+	LastName          string                  `json:"last_name"`
+	Email             string                  `json:"email"`
+	Phone             string                  `json:"phone"`
+	Mobile            string                  `json:"mobile"`
+	Position          string                  `json:"position"`
+	LeadSource        string                  `json:"lead_source"`
+	AddressStreet     string                  `json:"address_street"`
+	AddressZip        string                  `json:"address_zip"`
+	AddressCity       string                  `json:"address_city"`
+	Latitude          *float64                `json:"latitude"`
+	Longitude         *float64                `json:"longitude"`
+	ConsentPhone      contact.OptionalBool    `json:"consent_phone"`
+	ConsentEmail      contact.OptionalBool    `json:"consent_email"`
+	StromverbrauchKwh contact.OptionalFloat64 `json:"stromverbrauch_kwh"`
+	GasverbrauchKwh   contact.OptionalFloat64 `json:"gasverbrauch_kwh"`
+	Zaehlernummer     string                  `json:"zaehlernummer"`
+	EigentuemerStatus contact.OptionalString  `json:"eigentuemer_status"`
 }
 
 func (h *ContactHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -76,11 +96,7 @@ func (h *ContactHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
-		if err == contact.ErrInvalidContact {
-			http.Error(w, `{"error":"validation_error","message":"first_name and last_name are required"}`, http.StatusBadRequest)
-			return
-		}
-		http.Error(w, `{"error":"server_error","message":"failed to create contact"}`, http.StatusInternalServerError)
+		writeContactError(w, err, "create")
 		return
 	}
 
@@ -184,7 +200,7 @@ func (h *ContactHandler) Update(w http.ResponseWriter, r *http.Request) {
 		EigentuemerStatus: req.EigentuemerStatus,
 	})
 	if err != nil {
-		http.Error(w, `{"error":"failed to update contact: `+err.Error()+`"}`, http.StatusInternalServerError)
+		writeContactError(w, err, "update")
 		return
 	}
 
@@ -209,7 +225,7 @@ func (h *ContactHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.Delete(r.Context(), actorID, id); err != nil {
-		http.Error(w, `{"error":"failed to delete contact"}`, http.StatusInternalServerError)
+		writeContactError(w, err, "delete")
 		return
 	}
 

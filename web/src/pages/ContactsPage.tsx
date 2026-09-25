@@ -98,8 +98,8 @@ export const ContactsPage: React.FC = () => {
     gasverbrauch_kwh: '',
     eigentuemer_status: '',
     customer_type: 'GESCHAEFTSKUNDE',
-    consent_phone: true,
-    consent_email: true,
+    consent_phone: false,
+    consent_email: false,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -132,8 +132,8 @@ export const ContactsPage: React.FC = () => {
           ? Number(editingContact.gasverbrauch_kwh)
           : null,
       eigentuemer_status: editingContact.eigentuemer_status || null,
-      consent_phone: Boolean(editingContact.consent_phone),
-      consent_email: Boolean(editingContact.consent_email),
+      consent_phone: editingContact.consent_phone,
+      consent_email: editingContact.consent_email,
     });
   };
 
@@ -306,6 +306,8 @@ export const ContactsPage: React.FC = () => {
                   const zaehler =
                     getFieldText(contact.zaehlernummer) ||
                     (typeof contact.zaehlernummer === 'string' ? contact.zaehlernummer : '');
+                  const hasConsent =
+                    contact.consent_phone === true || contact.consent_email === true;
 
                   return (
                     <tr key={contact.id} className="hover:bg-slate-800/40 transition-colors">
@@ -351,8 +353,15 @@ export const ContactsPage: React.FC = () => {
                           </button>
                         )}
                         <div className="flex items-center gap-1.5 pt-1">
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                            <ShieldCheck className="w-3 h-3" /> Consent OK
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                              hasConsent
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            }`}
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            {hasConsent ? 'Consent OK' : 'Keine Einwilligung'}
                           </span>
                         </div>
                       </td>

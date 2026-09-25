@@ -13,13 +13,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 var (
-	ErrNotFound = errors.New("record not found")
+	ErrNotFound = pgx.ErrNoRows
 )
 
 type InMemoryQuerier struct {
@@ -976,11 +977,16 @@ func (q *InMemoryQuerier) CreateDeal(ctx context.Context, arg db.CreateDealParam
 	return d, nil
 }
 
-func (q *InMemoryQuerier) DeleteDeal(ctx context.Context, id pgtype.UUID) error {
+func (q *InMemoryQuerier) DeleteDeal(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	delete(q.deals, uuidToStr(id))
-	return nil
+	idString := uuidToStr(id)
+	dealItem, ok := q.deals[idString]
+	if !ok || dealItem.Stage == "WIDERRUFEN" {
+		return pgtype.UUID{}, ErrNotFound
+	}
+	delete(q.deals, idString)
+	return id, nil
 }
 
 func (q *InMemoryQuerier) GetDealByID(ctx context.Context, id pgtype.UUID) (db.Deal, error) {
@@ -1035,7 +1041,7 @@ func (q *InMemoryQuerier) UpdateDeal(ctx context.Context, arg db.UpdateDealParam
 
 	idStr := uuidToStr(arg.ID)
 	d, ok := q.deals[idStr]
-	if !ok {
+	if !ok || d.Stage == "WIDERRUFEN" {
 		return db.Deal{}, ErrNotFound
 	}
 	d.Title = arg.Title
@@ -1059,7 +1065,7 @@ func (q *InMemoryQuerier) UpdateDealStage(ctx context.Context, arg db.UpdateDeal
 
 	idStr := uuidToStr(arg.ID)
 	d, ok := q.deals[idStr]
-	if !ok {
+	if !ok || d.Stage == "WIDERRUFEN" {
 		return db.Deal{}, ErrNotFound
 	}
 	d.Stage = arg.Stage
@@ -1079,11 +1085,13 @@ func (q *InMemoryQuerier) RevokeDeal(ctx context.Context, arg db.RevokeDealParam
 	if !ok {
 		return db.Deal{}, ErrNotFound
 	}
-	d.Stage = "WIDERRUFEN"
-	d.Probability = 0
-	d.WiderrufenAt = arg.WiderrufenAt
-	d.WiderrufGrund = arg.WiderrufGrund
-	d.UpdatedAt = nowTimestamptz()
+	if d.Stage != "WIDERRUFEN" {
+		d.Stage = "WIDERRUFEN"
+		d.Probability = 0
+		d.WiderrufenAt = arg.WiderrufenAt
+		d.WiderrufGrund = arg.WiderrufGrund
+		d.UpdatedAt = nowTimestamptz()
+	}
 	q.deals[idStr] = d
 	return d, nil
 }
@@ -1094,7 +1102,7 @@ func (q *InMemoryQuerier) UpdateDealTags(ctx context.Context, arg db.UpdateDealT
 
 	idStr := uuidToStr(arg.ID)
 	d, ok := q.deals[idStr]
-	if !ok {
+	if !ok || d.Stage == "WIDERRUFEN" {
 		return db.Deal{}, ErrNotFound
 	}
 	d.Tags = appendJSONTagsDedup(d.Tags, arg.Tags)

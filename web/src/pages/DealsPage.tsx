@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   RefreshCw,
   Sparkles,
+  GripVertical,
 } from 'lucide-react';
 import { DndContext, DragEndEvent, useDraggable, useDroppable } from '@dnd-kit/core';
 import { OfferCalculatorModal } from '../components/calculator/OfferCalculatorModal';
@@ -31,6 +32,15 @@ interface Deal {
   widerrufen_at?: string;
   widerruf_grund?: string;
 }
+
+const localDateValue = (date: Date) =>
+  [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+
+const localDateTimestamp = (value: string) => new Date(`${value}T12:00:00`).toISOString();
 
 const STAGES = [
   {
@@ -80,11 +90,13 @@ const DealColumn = ({ id, children }: { id: string; children: React.ReactNode })
 
 const DraggableDealCard = ({ deal, children }: { deal: Deal; children: React.ReactNode }) => {
   const draggableId = deal.id?.startsWith('d-') ? deal.id : `d-${deal.id}`;
-  const { attributes, isDragging, listeners, setNodeRef, transform } = useDraggable({
-    id: draggableId,
-    data: { type: 'deal', deal },
-    disabled: deal.stage === 'WIDERRUFEN',
-  });
+  const revoked = deal.stage === 'WIDERRUFEN';
+  const { attributes, isDragging, listeners, setActivatorNodeRef, setNodeRef, transform } =
+    useDraggable({
+      id: draggableId,
+      data: { type: 'deal', deal },
+      disabled: revoked,
+    });
 
   return (
     <div
@@ -92,10 +104,22 @@ const DraggableDealCard = ({ deal, children }: { deal: Deal; children: React.Rea
       style={
         transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined
       }
-      {...attributes}
-      {...listeners}
       className={`bg-slate-950 border border-slate-800 hover:border-slate-700 p-4 rounded-xl shadow-sm transition-all space-y-3 group${isDragging ? ' opacity-60' : ''}`}
     >
+      <div className="flex justify-end">
+        <button
+          ref={setActivatorNodeRef}
+          type="button"
+          disabled={revoked}
+          aria-label={`${deal.title} verschieben`}
+          title={revoked ? 'Widerrufene Deals sind terminal' : 'Deal verschieben'}
+          className="p-1 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded disabled:cursor-not-allowed disabled:opacity-40"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="w-4 h-4" />
+        </button>
+      </div>
       {children}
     </div>
   );
@@ -117,7 +141,7 @@ export const DealsPage: React.FC = () => {
   });
   const [revokeModalDeal, setRevokeModalDeal] = useState<Deal | null>(null);
   const [revokeData, setRevokeData] = useState({
-    widerrufen_at: new Date().toISOString().split('T')[0],
+    widerrufen_at: localDateValue(new Date()),
     widerruf_grund: '',
   });
   const [revokeError, setRevokeError] = useState<string | null>(null);
@@ -183,7 +207,7 @@ export const DealsPage: React.FC = () => {
       apiFetch(`/api/v1/deals/${id}/revoke`, {
         method: 'POST',
         body: JSON.stringify({
-          widerrufen_at: widerrufen_at ? new Date(widerrufen_at).toISOString() : undefined,
+          widerrufen_at: widerrufen_at ? localDateTimestamp(widerrufen_at) : undefined,
           widerruf_grund,
         }),
       }),
@@ -219,7 +243,7 @@ export const DealsPage: React.FC = () => {
       if (newStage === 'WIDERRUFEN') {
         setRevokeModalDeal(deal);
         setRevokeData({
-          widerrufen_at: new Date().toISOString().split('T')[0],
+          widerrufen_at: localDateValue(new Date()),
           widerruf_grund: '',
         });
         setRevokeError(null);
@@ -382,7 +406,8 @@ export const DealsPage: React.FC = () => {
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 onClick={() => setEditingDeal({ ...deal })}
-                                className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded"
+                                disabled={deal.stage === 'WIDERRUFEN'}
+                                className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded disabled:cursor-not-allowed disabled:opacity-40"
                                 title="Deal bearbeiten"
                                 aria-label="Bearbeiten"
                               >
@@ -390,7 +415,8 @@ export const DealsPage: React.FC = () => {
                               </button>
                               <button
                                 onClick={() => setDeletingDeal(deal)}
-                                className="p-1 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded"
+                                disabled={deal.stage === 'WIDERRUFEN'}
+                                className="p-1 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded disabled:cursor-not-allowed disabled:opacity-40"
                                 title="Deal löschen"
                                 aria-label="Löschen"
                               >
@@ -436,7 +462,7 @@ export const DealsPage: React.FC = () => {
                                   onClick={() => {
                                     setRevokeModalDeal(deal);
                                     setRevokeData({
-                                      widerrufen_at: new Date().toISOString().split('T')[0],
+                                      widerrufen_at: localDateValue(new Date()),
                                       widerruf_grund: '',
                                     });
                                     setRevokeError(null);

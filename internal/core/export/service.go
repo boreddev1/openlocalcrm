@@ -77,12 +77,18 @@ func (s *Service) ExportContactsCSV(ctx context.Context) ([]byte, error) {
 		}
 		stromStr := ""
 		if c.StromverbrauchKwh.Valid {
-			stromVal, _ := c.StromverbrauchKwh.Float64Value()
+			stromVal, err := c.StromverbrauchKwh.Float64Value()
+			if err != nil {
+				return nil, fmt.Errorf("convert stromverbrauch_kwh: %w", err)
+			}
 			stromStr = fmt.Sprintf("%.2f", stromVal.Float64)
 		}
 		gasStr := ""
 		if c.GasverbrauchKwh.Valid {
-			gasVal, _ := c.GasverbrauchKwh.Float64Value()
+			gasVal, err := c.GasverbrauchKwh.Float64Value()
+			if err != nil {
+				return nil, fmt.Errorf("convert gasverbrauch_kwh: %w", err)
+			}
 			gasStr = fmt.Sprintf("%.2f", gasVal.Float64)
 		}
 
