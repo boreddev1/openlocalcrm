@@ -58,3 +58,11 @@ RETURNING *;
 -- name: DeleteDeal :exec
 DELETE FROM deals
 WHERE id = $1;
+
+-- name: UpdateDealTags :one
+UPDATE deals
+SET tags = CASE WHEN tags @> sqlc.arg(tags)::jsonb THEN tags ELSE tags || sqlc.arg(tags)::jsonb END,
+    updated_at = NOW()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+

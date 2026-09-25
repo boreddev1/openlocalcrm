@@ -84,6 +84,7 @@ type Querier interface {
 	ListEmailAttachmentsByMessage(ctx context.Context, messageID pgtype.UUID) ([]EmailAttachment, error)
 	ListEmailMessages(ctx context.Context, arg ListEmailMessagesParams) ([]EmailMessage, error)
 	ListEmailMessagesByThread(ctx context.Context, threadID string) ([]EmailMessage, error)
+	ListInactiveContacts(ctx context.Context, arg ListInactiveContactsParams) ([]Contact, error)
 	ListKBArticles(ctx context.Context) ([]ListKBArticlesRow, error)
 	ListNotes(ctx context.Context) ([]Note, error)
 	ListNotesByEntity(ctx context.Context, arg ListNotesByEntityParams) ([]Note, error)
@@ -106,8 +107,10 @@ type Querier interface {
 	UpdateAppointmentPushStatus(ctx context.Context, arg UpdateAppointmentPushStatusParams) (Appointment, error)
 	UpdateCompany(ctx context.Context, arg UpdateCompanyParams) (Company, error)
 	UpdateContact(ctx context.Context, arg UpdateContactParams) (Contact, error)
+	UpdateContactTags(ctx context.Context, arg UpdateContactTagsParams) (Contact, error)
 	UpdateDeal(ctx context.Context, arg UpdateDealParams) (Deal, error)
 	UpdateDealStage(ctx context.Context, arg UpdateDealStageParams) (Deal, error)
+	UpdateDealTags(ctx context.Context, arg UpdateDealTagsParams) (Deal, error)
 	UpdateEmailAccount(ctx context.Context, arg UpdateEmailAccountParams) (EmailAccount, error)
 	UpdateEmailAccountLastSynced(ctx context.Context, arg UpdateEmailAccountLastSyncedParams) error
 	UpdateEmailAccountSyncState(ctx context.Context, arg UpdateEmailAccountSyncStateParams) error

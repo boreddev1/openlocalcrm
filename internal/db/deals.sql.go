@@ -26,7 +26,7 @@ INSERT INTO deals (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 )
-RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund
+RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
 `
 
 type CreateDealParams struct {
@@ -73,6 +73,7 @@ func (q *Queries) CreateDeal(ctx context.Context, arg CreateDealParams) (Deal, e
 		&i.UpdatedAt,
 		&i.WiderrufenAt,
 		&i.WiderrufGrund,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -88,7 +89,7 @@ func (q *Queries) DeleteDeal(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getDealByID = `-- name: GetDealByID :one
-SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund FROM deals
+SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags FROM deals
 WHERE id = $1 LIMIT 1
 `
 
@@ -111,12 +112,13 @@ func (q *Queries) GetDealByID(ctx context.Context, id pgtype.UUID) (Deal, error)
 		&i.UpdatedAt,
 		&i.WiderrufenAt,
 		&i.WiderrufGrund,
+		&i.Tags,
 	)
 	return i, err
 }
 
 const listDeals = `-- name: ListDeals :many
-SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund FROM deals
+SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags FROM deals
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -151,6 +153,7 @@ func (q *Queries) ListDeals(ctx context.Context, arg ListDealsParams) ([]Deal, e
 			&i.UpdatedAt,
 			&i.WiderrufenAt,
 			&i.WiderrufGrund,
+			&i.Tags,
 		); err != nil {
 			return nil, err
 		}
@@ -163,7 +166,7 @@ func (q *Queries) ListDeals(ctx context.Context, arg ListDealsParams) ([]Deal, e
 }
 
 const listDealsByStage = `-- name: ListDealsByStage :many
-SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund FROM deals
+SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags FROM deals
 WHERE stage = $1
 ORDER BY created_at DESC
 `
@@ -193,6 +196,7 @@ func (q *Queries) ListDealsByStage(ctx context.Context, stage string) ([]Deal, e
 			&i.UpdatedAt,
 			&i.WiderrufenAt,
 			&i.WiderrufGrund,
+			&i.Tags,
 		); err != nil {
 			return nil, err
 		}
@@ -218,7 +222,7 @@ SET title = $2,
     custom_fields = $11,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund
+RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
 `
 
 type UpdateDealParams struct {
@@ -266,6 +270,7 @@ func (q *Queries) UpdateDeal(ctx context.Context, arg UpdateDealParams) (Deal, e
 		&i.UpdatedAt,
 		&i.WiderrufenAt,
 		&i.WiderrufGrund,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -277,7 +282,7 @@ SET stage = $2,
     closed_at = $4,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund
+RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
 `
 
 type UpdateDealStageParams struct {
@@ -311,6 +316,44 @@ func (q *Queries) UpdateDealStage(ctx context.Context, arg UpdateDealStageParams
 		&i.UpdatedAt,
 		&i.WiderrufenAt,
 		&i.WiderrufGrund,
+		&i.Tags,
+	)
+	return i, err
+}
+
+const updateDealTags = `-- name: UpdateDealTags :one
+UPDATE deals
+SET tags = CASE WHEN tags @> $1::jsonb THEN tags ELSE tags || $1::jsonb END,
+    updated_at = NOW()
+WHERE id = $2
+RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
+`
+
+type UpdateDealTagsParams struct {
+	Tags []byte      `json:"tags"`
+	ID   pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateDealTags(ctx context.Context, arg UpdateDealTagsParams) (Deal, error) {
+	row := q.db.QueryRow(ctx, updateDealTags, arg.Tags, arg.ID)
+	var i Deal
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.CompanyID,
+		&i.ContactID,
+		&i.Value,
+		&i.Currency,
+		&i.Stage,
+		&i.Probability,
+		&i.AssignedTo,
+		&i.ClosedAt,
+		&i.CustomFields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WiderrufenAt,
+		&i.WiderrufGrund,
+		&i.Tags,
 	)
 	return i, err
 }

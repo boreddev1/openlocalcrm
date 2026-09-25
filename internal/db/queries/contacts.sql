@@ -66,3 +66,17 @@ RETURNING *;
 -- name: DeleteContact :exec
 DELETE FROM contacts
 WHERE id = $1;
+
+-- name: UpdateContactTags :one
+UPDATE contacts
+SET tags = CASE WHEN tags @> sqlc.arg(tags)::jsonb THEN tags ELSE tags || sqlc.arg(tags)::jsonb END,
+    updated_at = NOW()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: ListInactiveContacts :many
+SELECT * FROM contacts
+WHERE updated_at < $1
+ORDER BY updated_at ASC
+LIMIT $2;
+

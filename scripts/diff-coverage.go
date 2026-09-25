@@ -204,6 +204,7 @@ func parseDiff(diffText string) map[string][]int {
 			currentFile = strings.TrimPrefix(line, "+++ b/")
 			// Filter out tests and auto-generated database files
 			if strings.HasSuffix(currentFile, "_test.go") ||
+				strings.HasSuffix(currentFile, ".sql.go") ||
 				strings.HasPrefix(currentFile, "internal/db/models.go") ||
 				strings.HasPrefix(currentFile, "internal/db/querier.go") {
 				currentFile = ""

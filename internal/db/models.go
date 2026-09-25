@@ -217,6 +217,7 @@ type Contact struct {
 	GasverbrauchKwh   pgtype.Numeric     `json:"gasverbrauch_kwh"`
 	Zaehlernummer     pgtype.Text        `json:"zaehlernummer"`
 	EigentuemerStatus pgtype.Text        `json:"eigentuemer_status"`
+	Tags              json.RawMessage    `json:"tags"`
 }
 
 type Deal struct {
@@ -235,6 +236,7 @@ type Deal struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	WiderrufenAt  pgtype.Timestamptz `json:"widerrufen_at"`
 	WiderrufGrund pgtype.Text        `json:"widerruf_grund"`
+	Tags          json.RawMessage    `json:"tags"`
 }
 
 type EmailAccount struct {
@@ -287,6 +289,7 @@ type EmailMessage struct {
 	DealID          pgtype.UUID        `json:"deal_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	Tags            json.RawMessage    `json:"tags"`
+	IsDraft         bool               `json:"is_draft"`
 }
 
 type IntakeForm struct {

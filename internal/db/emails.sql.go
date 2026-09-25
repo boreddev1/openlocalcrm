@@ -149,7 +149,7 @@ INSERT INTO email_messages (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
-RETURNING id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags
+RETURNING id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft
 `
 
 type CreateEmailMessageParams struct {
@@ -208,6 +208,7 @@ func (q *Queries) CreateEmailMessage(ctx context.Context, arg CreateEmailMessage
 		&i.DealID,
 		&i.CreatedAt,
 		&i.Tags,
+		&i.IsDraft,
 	)
 	return i, err
 }
@@ -254,7 +255,7 @@ func (q *Queries) GetEmailAccountByID(ctx context.Context, id pgtype.UUID) (Emai
 }
 
 const getEmailMessageByID = `-- name: GetEmailMessageByID :one
-SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags FROM email_messages
+SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft FROM email_messages
 WHERE id = $1 LIMIT 1
 `
 
@@ -280,6 +281,7 @@ func (q *Queries) GetEmailMessageByID(ctx context.Context, id pgtype.UUID) (Emai
 		&i.DealID,
 		&i.CreatedAt,
 		&i.Tags,
+		&i.IsDraft,
 	)
 	return i, err
 }
@@ -364,7 +366,7 @@ func (q *Queries) ListEmailAttachmentsByMessage(ctx context.Context, messageID p
 }
 
 const listEmailMessages = `-- name: ListEmailMessages :many
-SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags FROM email_messages
+SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft FROM email_messages
 ORDER BY received_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -402,6 +404,7 @@ func (q *Queries) ListEmailMessages(ctx context.Context, arg ListEmailMessagesPa
 			&i.DealID,
 			&i.CreatedAt,
 			&i.Tags,
+			&i.IsDraft,
 		); err != nil {
 			return nil, err
 		}
@@ -414,7 +417,7 @@ func (q *Queries) ListEmailMessages(ctx context.Context, arg ListEmailMessagesPa
 }
 
 const listEmailMessagesByThread = `-- name: ListEmailMessagesByThread :many
-SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags FROM email_messages
+SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft FROM email_messages
 WHERE thread_id = $1
 ORDER BY received_at ASC
 `
@@ -447,6 +450,7 @@ func (q *Queries) ListEmailMessagesByThread(ctx context.Context, threadID string
 			&i.DealID,
 			&i.CreatedAt,
 			&i.Tags,
+			&i.IsDraft,
 		); err != nil {
 			return nil, err
 		}
@@ -569,7 +573,7 @@ const updateEmailMessageTags = `-- name: UpdateEmailMessageTags :one
 UPDATE email_messages
 SET tags = $2
 WHERE id = $1
-RETURNING id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags
+RETURNING id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft
 `
 
 type UpdateEmailMessageTagsParams struct {
@@ -599,6 +603,7 @@ func (q *Queries) UpdateEmailMessageTags(ctx context.Context, arg UpdateEmailMes
 		&i.DealID,
 		&i.CreatedAt,
 		&i.Tags,
+		&i.IsDraft,
 	)
 	return i, err
 }

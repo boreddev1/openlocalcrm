@@ -2,6 +2,7 @@ package demo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
@@ -406,7 +407,7 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 		TriggerType: "NEW_LEAD",
 		TargetType:  "CONTACT",
 		IsActive:    true,
-		StepsJson:   []byte(`[{"title":"Tag 'PV-Interessent' zuweisen","action_type":"SET_TAG"},{"title":"Erstkontakt E-Mail-Entwurf vorbereiten (Gemma 12B)","action_type":"DRAFT_EMAIL"},{"title":"Follow-Up Telefontermin anlegen","action_type":"CREATE_TASK"}]`),
+		StepsJson:   []byte(`[{"step_number":1,"title":"Tag 'PV-Interessent' zuweisen","action_type":"SET_TAG","payload":{"tag":"PV-Interessent"}},{"step_number":2,"title":"Erstkontakt E-Mail-Entwurf vorbereiten (Gemma 12B)","action_type":"DRAFT_EMAIL","payload":{"template":"onboarding_intro"}},{"step_number":3,"title":"Follow-Up Telefontermin anlegen","action_type":"CREATE_TASK","payload":{"due_days":2,"priority":"HIGH"}}]`),
 		CreatedAt:   nowTimestamptz(),
 		UpdatedAt:   nowTimestamptz(),
 	}
@@ -417,7 +418,7 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 		TriggerType: "DEAL_WON",
 		TargetType:  "DEAL",
 		IsActive:    true,
-		StepsJson:   []byte(`[{"title":"Auftragsbestätigung & Widerrufsbelehrung § 355 BGB senden","action_type":"DRAFT_EMAIL"},{"title":"Übergabe-Task an Technik/Montage erstellen","action_type":"CREATE_TASK"}]`),
+		StepsJson:   []byte(`[{"step_number":1,"title":"Auftragsbestätigung & Widerrufsbelehrung § 355 BGB senden","action_type":"DRAFT_EMAIL","payload":{"template":"order_confirmation"}},{"step_number":2,"title":"Übergabe-Task an Technik/Montage erstellen","action_type":"CREATE_TASK","payload":{"title":"Zählerkasten-Planung & Materialbestellung","priority":"URGENT"}}]`),
 		CreatedAt:   nowTimestamptz(),
 		UpdatedAt:   nowTimestamptz(),
 	}
@@ -427,8 +428,8 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 		Description: "Erinnert Vertriebler an Leads ohne Interaktion seit 30 Tagen.",
 		TriggerType: "INACTIVITY_TIMEOUT",
 		TargetType:  "CONTACT",
-		IsActive:    false,
-		StepsJson:   []byte(`[{"title":"Reaktivierungs-Todo für Account Manager erstellen","action_type":"CREATE_TASK"}]`),
+		IsActive:    true,
+		StepsJson:   []byte(`[{"step_number":1,"title":"Reaktivierungs-Todo für Account Manager erstellen","action_type":"CREATE_TASK","payload":{"title":"Lead-Nachfassen telefonisch","priority":"MEDIUM"}}]`),
 		CreatedAt:   nowTimestamptz(),
 		UpdatedAt:   nowTimestamptz(),
 	}
@@ -873,6 +874,70 @@ func (q *InMemoryQuerier) UpdateContact(ctx context.Context, arg db.UpdateContac
 	return c, nil
 }
 
+func appendJSONTagsDedup(existingJSON []byte, incomingJSON []byte) []byte {
+	var tags []string
+	if len(existingJSON) > 0 {
+		_ = json.Unmarshal(existingJSON, &tags)
+	}
+	exists := make(map[string]bool, len(tags))
+	for _, t := range tags {
+		exists[t] = true
+	}
+
+	var incoming []string
+	if err := json.Unmarshal(incomingJSON, &incoming); err == nil {
+		for _, t := range incoming {
+			if !exists[t] {
+				tags = append(tags, t)
+				exists[t] = true
+			}
+		}
+	} else {
+		var single string
+		if err := json.Unmarshal(incomingJSON, &single); err == nil && single != "" {
+			if !exists[single] {
+				tags = append(tags, single)
+			}
+		}
+	}
+	b, _ := json.Marshal(tags)
+	return b
+}
+
+func (q *InMemoryQuerier) UpdateContactTags(ctx context.Context, arg db.UpdateContactTagsParams) (db.Contact, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	c, ok := q.contacts[idStr]
+	if !ok {
+		return db.Contact{}, ErrNotFound
+	}
+	c.Tags = appendJSONTagsDedup(c.Tags, arg.Tags)
+	c.UpdatedAt = nowTimestamptz()
+	q.contacts[idStr] = c
+	return c, nil
+}
+
+func (q *InMemoryQuerier) ListInactiveContacts(ctx context.Context, arg db.ListInactiveContactsParams) ([]db.Contact, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.Contact
+	for _, c := range q.contacts {
+		if c.UpdatedAt.Valid && c.UpdatedAt.Time.Before(arg.UpdatedAt.Time) {
+			list = append(list, c)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].UpdatedAt.Time.Before(list[j].UpdatedAt.Time)
+	})
+	if int(arg.Limit) > 0 && len(list) > int(arg.Limit) {
+		list = list[:arg.Limit]
+	}
+	return list, nil
+}
+
 // Deal methods
 func (q *InMemoryQuerier) CreateDeal(ctx context.Context, arg db.CreateDealParams) (db.Deal, error) {
 	q.mu.Lock()
@@ -986,6 +1051,21 @@ func (q *InMemoryQuerier) UpdateDealStage(ctx context.Context, arg db.UpdateDeal
 	d.Stage = arg.Stage
 	d.Probability = arg.Probability
 	d.ClosedAt = arg.ClosedAt
+	d.UpdatedAt = nowTimestamptz()
+	q.deals[idStr] = d
+	return d, nil
+}
+
+func (q *InMemoryQuerier) UpdateDealTags(ctx context.Context, arg db.UpdateDealTagsParams) (db.Deal, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	d, ok := q.deals[idStr]
+	if !ok {
+		return db.Deal{}, ErrNotFound
+	}
+	d.Tags = appendJSONTagsDedup(d.Tags, arg.Tags)
 	d.UpdatedAt = nowTimestamptz()
 	q.deals[idStr] = d
 	return d, nil
@@ -2110,6 +2190,9 @@ func (q *InMemoryQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg db.Up
 	run.Status = arg.Status
 	run.CurrentStep = arg.CurrentStep
 	run.CompletedAt = arg.CompletedAt
+	if len(arg.SnapshotJson) > 0 {
+		run.SnapshotJson = arg.SnapshotJson
+	}
 	q.workflowRuns[arg.ID] = run
 	return run, nil
 }
