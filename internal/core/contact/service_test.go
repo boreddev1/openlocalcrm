@@ -8,6 +8,7 @@ import (
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/contact"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
+	"github.com/stretchr/testify/require"
 )
 
 func TestContactService_Lifecycle(t *testing.T) {
@@ -95,4 +96,54 @@ func TestContactService_Lifecycle(t *testing.T) {
 	if err := svc.Delete(ctx, actorID, created.ID); err != nil {
 		t.Fatalf("failed to delete contact: %v", err)
 	}
+}
+
+func TestContactService_AutoGeocodingOnCreateAndPreservation(t *testing.T) {
+	q := demo.NewInMemoryQuerier()
+	svc := contact.NewService(q, nil)
+
+	// 1. Create with PLZ 10115 and nil coordinates -> coordinates automatically populated
+	c, err := svc.Create(context.Background(), pgtype.UUID{}, contact.CreateContactInput{
+		FirstName:   "Erika",
+		LastName:    "Musterfrau",
+		Email:       "erika@example.de",
+		AddressZip:  "10115",
+		AddressCity: "Berlin",
+	})
+	require.NoError(t, err)
+	require.True(t, c.Latitude.Valid)
+	require.True(t, c.Longitude.Valid)
+	require.InDelta(t, 52.53, c.Latitude.Float64, 0.1)
+	require.InDelta(t, 13.38, c.Longitude.Float64, 0.1)
+
+	// 2. Create with manual latitude set -> manual coordinate is preserved, NOT overwritten
+	manualLat := 49.0
+	c2, err := svc.Create(context.Background(), pgtype.UUID{}, contact.CreateContactInput{
+		FirstName:   "Hans",
+		LastName:    "Manual",
+		Email:       "hans@example.de",
+		AddressZip:  "10115",
+		AddressCity: "Berlin",
+		Latitude:    &manualLat,
+	})
+	require.NoError(t, err)
+	require.True(t, c2.Latitude.Valid)
+	require.Equal(t, 49.0, c2.Latitude.Float64)
+	require.False(t, c2.Longitude.Valid, "longitude was nil and latitude was set, so neither was auto-overwritten")
+
+	// 3. Update contact: when coordinates are already present, changing PLZ does not overwrite them
+	manualLon := 10.0
+	c3, err := svc.Update(context.Background(), pgtype.UUID{}, contact.UpdateContactInput{
+		ID:          c.ID,
+		FirstName:   "Erika",
+		LastName:    "Musterfrau",
+		Email:       "erika@example.de",
+		AddressZip:  "80331", // Munich PLZ
+		AddressCity: "München",
+		Latitude:    &manualLat,
+		Longitude:   &manualLon,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 49.0, c3.Latitude.Float64, "preserved manual latitude")
+	require.Equal(t, 10.0, c3.Longitude.Float64, "preserved manual longitude")
 }

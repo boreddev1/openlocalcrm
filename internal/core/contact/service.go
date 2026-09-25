@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
+	"github.com/openlocalcrm/openlocalcrm/internal/geocoding"
 )
 
 var (
@@ -78,6 +79,12 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateC
 	}
 	if input.Longitude != nil {
 		lon = pgtype.Float8{Float64: *input.Longitude, Valid: true}
+	}
+	if input.Latitude == nil && input.Longitude == nil && strings.TrimSpace(input.AddressZip) != "" {
+		if glat, glon, ok := geocoding.LookupPLZ(input.AddressZip); ok {
+			lat = pgtype.Float8{Float64: glat, Valid: true}
+			lon = pgtype.Float8{Float64: glon, Valid: true}
+		}
 	}
 
 	customFields := input.CustomFields
@@ -176,6 +183,12 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateC
 	}
 	if input.Longitude != nil {
 		lon = pgtype.Float8{Float64: *input.Longitude, Valid: true}
+	}
+	if input.Latitude == nil && input.Longitude == nil && strings.TrimSpace(input.AddressZip) != "" {
+		if glat, glon, ok := geocoding.LookupPLZ(input.AddressZip); ok {
+			lat = pgtype.Float8{Float64: glat, Valid: true}
+			lon = pgtype.Float8{Float64: glon, Valid: true}
+		}
 	}
 
 	customFields := input.CustomFields
