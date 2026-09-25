@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -40,6 +42,11 @@ type CreateDealRequest struct {
 	Probability int32  `json:"probability"`
 }
 
+type RevokeDealRequest struct {
+	WiderrufenAt  *time.Time `json:"widerrufen_at"`
+	WiderrufGrund string     `json:"widerruf_grund"`
+}
+
 func (h *DealHandler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 	var actorID pgtype.UUID
@@ -50,6 +57,11 @@ func (h *DealHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateDealRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
+		return
+	}
+
+	if strings.EqualFold(req.Stage, "WIDERRUFEN") || strings.EqualFold(req.Stage, "REVOKED") {
+		http.Error(w, `{"error":"validation_error","message":"Deals cannot be created directly in WIDERRUFEN stage; use POST /deals/{id}/revoke"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -150,6 +162,11 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var req UpdateDealRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
+		return
+	}
+
+	if strings.EqualFold(req.Stage, "WIDERRUFEN") || strings.EqualFold(req.Stage, "REVOKED") {
+		http.Error(w, `{"error":"validation_error","message":"Direct transition to WIDERRUFEN is prohibited; use POST /deals/{id}/revoke"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -309,4 +326,41 @@ func (h *DealHandler) AttachSolarCalculation(w http.ResponseWriter, r *http.Requ
 		"deal":        updated,
 		"calculation": calc,
 	})
+}
+
+func (h *DealHandler) Revoke(w http.ResponseWriter, r *http.Request) {
+	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
+	var actorID pgtype.UUID
+	if claims != nil {
+		_ = actorID.Scan(claims.UserID.String())
+	}
+
+	idStr := chi.URLParam(r, "id")
+	var dealID pgtype.UUID
+	if err := dealID.Scan(idStr); err != nil {
+		http.Error(w, `{"error":"invalid_id"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req RevokeDealRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
+			return
+		}
+	}
+
+	revokedAt := time.Now().UTC()
+	if req.WiderrufenAt != nil && !req.WiderrufenAt.IsZero() {
+		revokedAt = *req.WiderrufenAt
+	}
+
+	revoked, err := h.service.Revoke(r.Context(), actorID, dealID, revokedAt, req.WiderrufGrund)
+	if err != nil {
+		http.Error(w, `{"error":"failed to revoke deal: `+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(revoked)
 }

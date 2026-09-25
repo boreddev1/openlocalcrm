@@ -302,3 +302,30 @@ func (s *Service) Delete(ctx context.Context, actorID, dealID pgtype.UUID) error
 	}
 	return nil
 }
+
+func (s *Service) Revoke(ctx context.Context, actorID pgtype.UUID, id pgtype.UUID, widerrufenAt time.Time, grund string) (db.Deal, error) {
+	if widerrufenAt.IsZero() {
+		widerrufenAt = time.Now().UTC()
+	}
+
+	dealItem, err := s.queries.RevokeDeal(ctx, db.RevokeDealParams{
+		ID:            id,
+		WiderrufenAt:  pgtype.Timestamptz{Time: widerrufenAt, Valid: true},
+		WiderrufGrund: pgtype.Text{String: grund, Valid: grund != ""},
+	})
+	if err != nil {
+		return db.Deal{}, err
+	}
+
+	if s.audit != nil {
+		if err := s.audit.Log(ctx, actorID, "DEAL", dealItem.ID, "REVOKE", map[string]any{
+			"stage":          "WIDERRUFEN",
+			"widerrufen_at":  widerrufenAt,
+			"widerruf_grund": grund,
+		}, "", ""); err != nil {
+			log.Printf("[audit] failed to log deal revocation: %v", err)
+		}
+	}
+
+	return dealItem, nil
+}

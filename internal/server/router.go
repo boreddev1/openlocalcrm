@@ -359,6 +359,7 @@ func NewRouter(cfg Config) http.Handler {
 					dr.Get("/{id}", dealH.Get)
 					dr.Put("/{id}", dealH.Update)
 					dr.Delete("/{id}", dealH.Delete)
+					dr.With(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE")).Post("/{id}/revoke", dealH.Revoke)
 					dr.Post("/{id}/solar-calculation", dealH.AttachSolarCalculation)
 				})
 			}

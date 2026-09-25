@@ -3,11 +3,13 @@ package deal_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/deal"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDealService_Lifecycle(t *testing.T) {
@@ -72,4 +74,28 @@ func TestDealService_Lifecycle(t *testing.T) {
 	if err := svc.Delete(ctx, actorID, created.ID); err != nil {
 		t.Fatalf("failed to delete deal: %v", err)
 	}
+}
+
+func TestDealService_Revoke(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	auditSvc := audit.NewService(querier)
+	svc := deal.NewService(querier, auditSvc)
+
+	actorID := pgtype.UUID{Bytes: [16]byte{1, 1, 1}, Valid: true}
+	d, err := svc.Create(ctx, actorID, deal.CreateDealInput{
+		Title:       "Photovoltaikanlage 10 kWp",
+		Stage:       "WON",
+		Probability: 100,
+	})
+	require.NoError(t, err)
+
+	revokedAt := time.Now().UTC()
+	reason := "Kunde widerruft Haustürgeschäft fristgerecht (§355 BGB)"
+	revoked, err := svc.Revoke(ctx, actorID, d.ID, revokedAt, reason)
+	require.NoError(t, err)
+	require.Equal(t, "WIDERRUFEN", revoked.Stage)
+	require.Equal(t, int32(0), revoked.Probability)
+	require.True(t, revoked.WiderrufenAt.Valid)
+	require.Equal(t, reason, revoked.WiderrufGrund.String)
 }

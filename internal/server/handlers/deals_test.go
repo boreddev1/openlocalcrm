@@ -18,6 +18,7 @@ import (
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/openlocalcrm/openlocalcrm/internal/server/handlers"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDealHandler_Endpoints(t *testing.T) {
@@ -194,4 +195,115 @@ func TestDealHandler_TriggersDealWonWorkflow(t *testing.T) {
 	if len(trigger.calls) != 1 {
 		t.Fatalf("expected still 1 trigger call (no duplicate on non-stage change), got %d", len(trigger.calls))
 	}
+}
+
+func TestDealHandler_Create_RejectsWiderrufenStage(t *testing.T) {
+	querier := demo.NewInMemoryQuerier()
+	auditService := audit.NewService(querier)
+	svc := deal.NewService(querier, auditService)
+	h := handlers.NewDealHandler(svc)
+
+	adminUUID := uuid.New()
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: adminUUID,
+		Role:   "ADMIN",
+	})
+
+	body, _ := json.Marshal(handlers.CreateDealRequest{
+		Title: "Direct Widerruf Test",
+		Stage: "WIDERRUFEN",
+	})
+	req := httptest.NewRequest("POST", "/api/v1/deals", bytes.NewReader(body)).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.Create(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "WIDERRUFEN")
+}
+
+func TestDealHandler_Update_RejectsWiderrufenStage(t *testing.T) {
+	querier := demo.NewInMemoryQuerier()
+	auditService := audit.NewService(querier)
+	svc := deal.NewService(querier, auditService)
+	h := handlers.NewDealHandler(svc)
+
+	adminUUID := uuid.New()
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: adminUUID,
+		Role:   "ADMIN",
+	})
+
+	d, err := svc.Create(ctx, pgtype.UUID{Bytes: adminUUID, Valid: true}, deal.CreateDealInput{
+		Title: "Direct Widerruf Update Test",
+		Stage: "LEAD",
+	})
+	require.NoError(t, err)
+	dealIDStr := uuid.UUID(d.ID.Bytes).String()
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", dealIDStr)
+
+	body, _ := json.Marshal(map[string]any{
+		"stage": "WIDERRUFEN",
+	})
+	req := httptest.NewRequest("PUT", "/api/v1/deals/"+dealIDStr, bytes.NewReader(body)).WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
+	rec := httptest.NewRecorder()
+	h.Update(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "WIDERRUFEN")
+}
+
+func TestDealHandler_Revoke(t *testing.T) {
+	querier := demo.NewInMemoryQuerier()
+	auditService := audit.NewService(querier)
+	dealService := deal.NewService(querier, auditService)
+	dealH := handlers.NewDealHandler(dealService)
+
+	adminUUID := uuid.New()
+	benutzerUUID := uuid.New()
+
+	// Seed deal
+	d, err := dealService.Create(context.Background(), pgtype.UUID{Bytes: adminUUID, Valid: true}, deal.CreateDealInput{
+		Title:       "PV Anlage Widerruf Test",
+		Stage:       "WON",
+		Probability: 100,
+	})
+	require.NoError(t, err)
+	dealIDStr := uuid.UUID(d.ID.Bytes).String()
+
+	r := chi.NewRouter()
+	r.Route("/deals", func(dr chi.Router) {
+		dr.With(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE")).Post("/{id}/revoke", dealH.Revoke)
+	})
+
+	revokeBody, _ := json.Marshal(handlers.RevokeDealRequest{
+		WiderrufGrund: "Fristgerechter Widerruf nach Haustürgeschäft",
+	})
+
+	// 1. BENUTZER role receives 403 Forbidden
+	reqBenutzer := httptest.NewRequest("POST", "/deals/"+dealIDStr+"/revoke", bytes.NewReader(revokeBody))
+	reqBenutzer = reqBenutzer.WithContext(context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: benutzerUUID,
+		Role:   "BENUTZER",
+	}))
+	recBenutzer := httptest.NewRecorder()
+	r.ServeHTTP(recBenutzer, reqBenutzer)
+	require.Equal(t, http.StatusForbidden, recBenutzer.Code)
+
+	// 2. ADMIN role succeeds with 200 OK
+	reqAdmin := httptest.NewRequest("POST", "/deals/"+dealIDStr+"/revoke", bytes.NewReader(revokeBody))
+	reqAdmin = reqAdmin.WithContext(context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: adminUUID,
+		Role:   "ADMIN",
+	}))
+	recAdmin := httptest.NewRecorder()
+	r.ServeHTTP(recAdmin, reqAdmin)
+	require.Equal(t, http.StatusOK, recAdmin.Code)
+
+	var revoked db.Deal
+	_ = json.NewDecoder(recAdmin.Body).Decode(&revoked)
+	require.Equal(t, "WIDERRUFEN", revoked.Stage)
+	require.Equal(t, int32(0), revoked.Probability)
+	require.True(t, revoked.WiderrufenAt.Valid)
 }
