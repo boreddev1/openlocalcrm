@@ -120,13 +120,18 @@ export const ContactsPage: React.FC = () => {
     updateMutation.mutate({
       ...editingContact,
       stromverbrauch_kwh:
-        editingContact.stromverbrauch_kwh !== undefined && editingContact.stromverbrauch_kwh !== ''
+        editingContact.stromverbrauch_kwh !== null &&
+        editingContact.stromverbrauch_kwh !== undefined &&
+        editingContact.stromverbrauch_kwh !== ''
           ? Number(editingContact.stromverbrauch_kwh)
           : null,
       gasverbrauch_kwh:
-        editingContact.gasverbrauch_kwh !== undefined && editingContact.gasverbrauch_kwh !== ''
+        editingContact.gasverbrauch_kwh !== null &&
+        editingContact.gasverbrauch_kwh !== undefined &&
+        editingContact.gasverbrauch_kwh !== ''
           ? Number(editingContact.gasverbrauch_kwh)
           : null,
+      eigentuemer_status: editingContact.eigentuemer_status || null,
       consent_phone: Boolean(editingContact.consent_phone),
       consent_email: Boolean(editingContact.consent_email),
     });

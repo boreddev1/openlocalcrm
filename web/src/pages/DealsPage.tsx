@@ -15,7 +15,7 @@ import {
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
-import { DndContext, DragEndEvent } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, useDraggable, useDroppable } from '@dnd-kit/core';
 import { OfferCalculatorModal } from '../components/calculator/OfferCalculatorModal';
 
 interface Deal {
@@ -65,6 +65,41 @@ const STAGES = [
     color: 'border-red-500/30 bg-red-500/5 text-red-400',
   },
 ];
+
+const DealColumn = ({ id, children }: { id: string; children: React.ReactNode }) => {
+  const { setNodeRef } = useDroppable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex flex-col h-full"
+    >
+      {children}
+    </div>
+  );
+};
+
+const DraggableDealCard = ({ deal, children }: { deal: Deal; children: React.ReactNode }) => {
+  const draggableId = deal.id?.startsWith('d-') ? deal.id : `d-${deal.id}`;
+  const { attributes, isDragging, listeners, setNodeRef, transform } = useDraggable({
+    id: draggableId,
+    data: { type: 'deal', deal },
+    disabled: deal.stage === 'WIDERRUFEN',
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={
+        transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined
+      }
+      {...attributes}
+      {...listeners}
+      className={`bg-slate-950 border border-slate-800 hover:border-slate-700 p-4 rounded-xl shadow-sm transition-all space-y-3 group${isDragging ? ' opacity-60' : ''}`}
+    >
+      {children}
+    </div>
+  );
+};
 
 export const DealsPage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -178,9 +213,8 @@ export const DealsPage: React.FC = () => {
     const { active, over } = event;
     if (!over) return;
 
-    const dealId = active.id as string;
     const newStage = over.id as string;
-    const deal = deals.find((d) => d.id === dealId);
+    const deal = active.data.current?.deal as Deal | undefined;
     if (deal && deal.stage !== newStage) {
       if (newStage === 'WIDERRUFEN') {
         setRevokeModalDeal(deal);
@@ -206,7 +240,8 @@ export const DealsPage: React.FC = () => {
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingDeal) return;
-    updateMutation.mutate(editingDeal);
+    const { stage, ...dealWithoutStage } = editingDeal;
+    updateMutation.mutate(stage === 'WIDERRUFEN' ? dealWithoutStage : editingDeal);
   };
 
   const filteredDeals = deals.filter((d) => {
@@ -311,11 +346,7 @@ export const DealsPage: React.FC = () => {
               );
 
               return (
-                <div
-                  key={stage.id}
-                  id={stage.id}
-                  className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex flex-col h-full"
-                >
+                <DealColumn key={stage.id} id={stage.id}>
                   {/* Column Header */}
                   <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
                     <div className="flex items-center gap-2">
@@ -345,11 +376,7 @@ export const DealsPage: React.FC = () => {
                       </div>
                     ) : (
                       stageDeals.map((deal) => (
-                        <div
-                          key={deal.id}
-                          id={deal.id?.startsWith('d-') ? deal.id : `d-${deal.id}`}
-                          className="bg-slate-950 border border-slate-800 hover:border-slate-700 p-4 rounded-xl shadow-sm transition-all space-y-3 group"
-                        >
+                        <DraggableDealCard key={deal.id} deal={deal}>
                           <div className="flex items-start justify-between gap-2">
                             <div className="font-semibold text-sm text-slate-200">{deal.title}</div>
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -457,11 +484,11 @@ export const DealsPage: React.FC = () => {
                               Grund: {deal.widerruf_grund}
                             </div>
                           )}
-                        </div>
+                        </DraggableDealCard>
                       ))
                     )}
                   </div>
-                </div>
+                </DealColumn>
               );
             })}
           </div>
