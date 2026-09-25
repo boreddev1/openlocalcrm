@@ -442,3 +442,81 @@ func TestAutomationService_ExecuteStep_CreateTask(t *testing.T) {
 	require.Len(t, runs, 1)
 	require.Equal(t, "COMPLETED", runs[0].Status)
 }
+
+func TestAutomation_TestRunWorkflow_PausesAtDraftEmail(t *testing.T) {
+	q := demo.NewInMemoryQuerier()
+	svc := automation.NewService(q)
+
+	// Use real seeded contact: 44444444-4444-4444-4444-444444444441 (Dr. Michael Weber)
+	run, err := svc.TestRunWorkflow(context.Background(), "wf-1", automation.TargetInput{
+		TargetID:   "44444444-4444-4444-4444-444444444441",
+		TargetType: "CONTACT",
+		TargetName: "Dr. Michael Weber",
+	})
+	if err != nil {
+		t.Fatalf("TestRunWorkflow failed: %v", err)
+	}
+
+	if run.WorkflowID != "wf-1" {
+		t.Errorf("expected workflow_id wf-1, got %s", run.WorkflowID)
+	}
+	if run.Status != "WAITING_APPROVAL" {
+		t.Errorf("expected status WAITING_APPROVAL, got %s", run.Status)
+	}
+	if run.CurrentStep != 2 {
+		t.Errorf("expected paused at step 2 (DRAFT_EMAIL), got %d", run.CurrentStep)
+	}
+}
+
+func TestAutomation_TestRunWorkflow_RequiresTarget(t *testing.T) {
+	q := demo.NewInMemoryQuerier()
+	svc := automation.NewService(q)
+
+	_, err := svc.TestRunWorkflow(context.Background(), "wf-1", automation.TargetInput{
+		TargetID: "",
+	})
+	if err == nil {
+		t.Fatal("expected error when target_id is empty, got nil")
+	}
+}
+
+func TestAutomation_ListRuns_ExposesSnapshotAndError(t *testing.T) {
+	q := demo.NewInMemoryQuerier()
+	svc := automation.NewService(q)
+
+	// Seed a failed run with snapshot containing an error
+	_, err := q.CreateWorkflowRun(context.Background(), db.CreateWorkflowRunParams{
+		ID:           "run-failed-test",
+		WorkflowID:   "wf-1",
+		TargetID:     "44444444-4444-4444-4444-444444444441",
+		TargetType:   "CONTACT",
+		TargetName:   "Dr. Michael Weber",
+		Status:       "FAILED",
+		CurrentStep:  1,
+		SnapshotJson: []byte(`{"error":"Schritt 1 fehlgeschlagen"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkflowRun failed: %v", err)
+	}
+
+	runs, err := svc.ListRuns(context.Background())
+	if err != nil {
+		t.Fatalf("ListRuns failed: %v", err)
+	}
+	var found *automation.WorkflowRun
+	for i := range runs {
+		if runs[i].ID == "run-failed-test" {
+			found = &runs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected to find run-failed-test in ListRuns")
+	}
+	if found.Error != "Schritt 1 fehlgeschlagen" {
+		t.Errorf("expected run.Error to be %q, got %q", "Schritt 1 fehlgeschlagen", found.Error)
+	}
+	if found.Snapshot == nil {
+		t.Error("expected run.Snapshot to be populated, got nil")
+	}
+}

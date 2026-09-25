@@ -467,6 +467,7 @@ func NewRouter(cfg Config) http.Handler {
 					autr.Get("/", automationH.ListWorkflows)
 					autr.Get("/runs", automationH.ListRuns)
 					autr.With(auth.RequireRole("ADMIN")).Post("/", automationH.CreateWorkflow)
+					autr.With(auth.RequireRole("ADMIN")).Post("/{id}/test-run", automationH.TestRunWorkflow)
 					autr.With(auth.RequireRole("ADMIN")).Post("/runs/{id}/approve", automationH.ApproveStep)
 				})
 			}

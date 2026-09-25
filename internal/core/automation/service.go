@@ -45,15 +45,23 @@ type Workflow struct {
 }
 
 type WorkflowRun struct {
-	ID          string     `json:"id"`
-	WorkflowID  string     `json:"workflow_id"`
-	TargetID    string     `json:"target_id"`
-	TargetType  string     `json:"target_type"`
-	TargetName  string     `json:"target_name"`
-	Status      string     `json:"status"` // IN_PROGRESS, WAITING_APPROVAL, COMPLETED, CANCELLED
-	CurrentStep int        `json:"current_step"`
-	StartedAt   time.Time  `json:"started_at"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	ID          string         `json:"id"`
+	WorkflowID  string         `json:"workflow_id"`
+	TargetID    string         `json:"target_id"`
+	TargetType  string         `json:"target_type"`
+	TargetName  string         `json:"target_name"`
+	Status      string         `json:"status"` // IN_PROGRESS, WAITING_APPROVAL, COMPLETED, CANCELLED, FAILED
+	CurrentStep int            `json:"current_step"`
+	StartedAt   time.Time      `json:"started_at"`
+	CompletedAt *time.Time     `json:"completed_at,omitempty"`
+	Snapshot    map[string]any `json:"snapshot,omitempty"`
+	Error       string         `json:"error,omitempty"`
+}
+
+type TargetInput struct {
+	TargetID   string `json:"target_id"`
+	TargetType string `json:"target_type"`
+	TargetName string `json:"target_name"`
 }
 
 // UserNotifier is a narrow interface for creating notifications with SSE broadcast.
@@ -211,6 +219,11 @@ func (s *Service) TriggerEvent(ctx context.Context, triggerType, targetID, targe
 			run.CompletedAt = &now
 		}
 
+		run.Snapshot = snapshot
+		if e, ok := snapshot["error"].(string); ok {
+			run.Error = e
+		}
+
 		if s.querier != nil {
 			snapBytes, _ := json.Marshal(snapshot)
 			_, dbErr := s.querier.CreateWorkflowRun(ctx, db.CreateWorkflowRunParams{
@@ -303,6 +316,11 @@ func (s *Service) ApproveStep(ctx context.Context, runID string) (*WorkflowRun, 
 		now := time.Now().UTC()
 		run.Status = "COMPLETED"
 		run.CompletedAt = &now
+	}
+
+	run.Snapshot = snapshot
+	if e, ok := snapshot["error"].(string); ok {
+		run.Error = e
 	}
 
 	// Update run status in DB
@@ -551,6 +569,14 @@ func (s *Service) GetRunByID(ctx context.Context, runID string) (*WorkflowRun, e
 		t := r.CompletedAt.Time
 		compAt = &t
 	}
+	var snap map[string]any
+	var errMsg string
+	if len(r.SnapshotJson) > 0 {
+		_ = json.Unmarshal(r.SnapshotJson, &snap)
+		if e, ok := snap["error"].(string); ok {
+			errMsg = e
+		}
+	}
 	return &WorkflowRun{
 		ID:          r.ID,
 		WorkflowID:  r.WorkflowID,
@@ -561,6 +587,8 @@ func (s *Service) GetRunByID(ctx context.Context, runID string) (*WorkflowRun, e
 		CurrentStep: int(r.CurrentStep),
 		StartedAt:   r.StartedAt.Time,
 		CompletedAt: compAt,
+		Snapshot:    snap,
+		Error:       errMsg,
 	}, nil
 }
 
@@ -577,6 +605,14 @@ func (s *Service) ListRuns(ctx context.Context) ([]WorkflowRun, error) {
 				t := r.CompletedAt.Time
 				compAt = &t
 			}
+			var snap map[string]any
+			var errMsg string
+			if len(r.SnapshotJson) > 0 {
+				_ = json.Unmarshal(r.SnapshotJson, &snap)
+				if e, ok := snap["error"].(string); ok {
+					errMsg = e
+				}
+			}
 			result[i] = WorkflowRun{
 				ID:          r.ID,
 				WorkflowID:  r.WorkflowID,
@@ -587,9 +623,94 @@ func (s *Service) ListRuns(ctx context.Context) ([]WorkflowRun, error) {
 				CurrentStep: int(r.CurrentStep),
 				StartedAt:   r.StartedAt.Time,
 				CompletedAt: compAt,
+				Snapshot:    snap,
+				Error:       errMsg,
 			}
 		}
 		return result, nil
 	}
 	return []WorkflowRun{}, nil
+}
+
+// TestRunWorkflow executes a workflow test run for a specific target up to the first DRAFT_EMAIL action
+// (which pauses for HITL approval) or until completion/failure.
+func (s *Service) TestRunWorkflow(ctx context.Context, workflowID string, target TargetInput) (*WorkflowRun, error) {
+	if s.querier == nil {
+		return nil, fmt.Errorf("datenbank erforderlich für testlauf")
+	}
+	if strings.TrimSpace(target.TargetID) == "" || strings.TrimSpace(target.TargetType) == "" {
+		return nil, fmt.Errorf("target_id und target_type sind erforderlich für den testlauf")
+	}
+
+	dbWf, err := s.querier.GetWorkflowByID(ctx, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("workflow %q nicht gefunden: %w", workflowID, err)
+	}
+
+	var steps []StepDefinition
+	if err := json.Unmarshal(dbWf.StepsJson, &steps); err != nil {
+		return nil, fmt.Errorf("ungültige workflow-schritte: %w", err)
+	}
+
+	run := WorkflowRun{
+		ID:          fmt.Sprintf("run-%d", time.Now().UnixNano()),
+		WorkflowID:  dbWf.ID,
+		TargetID:    target.TargetID,
+		TargetType:  target.TargetType,
+		TargetName:  target.TargetName,
+		Status:      "IN_PROGRESS",
+		CurrentStep: 0,
+		StartedAt:   time.Now().UTC(),
+	}
+
+	snapshot := make(map[string]any)
+
+	// Execute steps until the first step requiring approval (DRAFT_EMAIL)
+	for _, step := range steps {
+		run.CurrentStep = step.StepNumber
+		if step.ActionType == "DRAFT_EMAIL" {
+			// Pause before executing DRAFT_EMAIL (HITL approval required)
+			run.Status = "WAITING_APPROVAL"
+			break
+		}
+		if err := s.executeStep(ctx, step, &run, snapshot); err != nil {
+			log.Printf("[automation] test run step %d failed: %v", step.StepNumber, err)
+			run.Status = "FAILED"
+			now := time.Now().UTC()
+			run.CompletedAt = &now
+			snapshot["error"] = fmt.Sprintf("Schritt %d (%s) fehlgeschlagen: %v", step.StepNumber, step.Title, err)
+			run.Error = snapshot["error"].(string)
+			break
+		}
+	}
+
+	if run.Status == "IN_PROGRESS" {
+		now := time.Now().UTC()
+		run.Status = "COMPLETED"
+		run.CompletedAt = &now
+	}
+
+	run.Snapshot = snapshot
+	if run.Error == "" {
+		if e, ok := snapshot["error"].(string); ok {
+			run.Error = e
+		}
+	}
+
+	snapBytes, _ := json.Marshal(snapshot)
+	_, err = s.querier.CreateWorkflowRun(ctx, db.CreateWorkflowRunParams{
+		ID:           run.ID,
+		WorkflowID:   run.WorkflowID,
+		TargetID:     run.TargetID,
+		TargetType:   run.TargetType,
+		TargetName:   run.TargetName,
+		Status:       run.Status,
+		CurrentStep:  int32(run.CurrentStep),
+		SnapshotJson: snapBytes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fehler beim speichern des testlaufs: %w", err)
+	}
+
+	return &run, nil
 }

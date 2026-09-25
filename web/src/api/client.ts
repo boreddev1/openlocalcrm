@@ -191,3 +191,20 @@ export function tagEmailMessage(id: string, tags: string[]): Promise<any> {
     body: JSON.stringify({ tags }),
   });
 }
+
+export interface TestRunPayload {
+  target_id: string;
+  target_type: string;
+  target_name: string;
+}
+
+export const testRunWorkflow = (id: string, payload: TestRunPayload) =>
+  apiFetch<any>(`/api/v1/automations/${id}/test-run`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const approveWorkflowStep = (runId: string) =>
+  apiFetch<any>(`/api/v1/automations/runs/${runId}/approve`, {
+    method: 'POST',
+  });

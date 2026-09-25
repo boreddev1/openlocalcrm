@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
@@ -75,4 +77,37 @@ func (h *AutomationHandler) ApproveStep(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(run)
+}
+
+// TestRunWorkflow handles POST /automations/{id}/test-run
+// Validates target input and executes a test run for the specified workflow.
+func (h *AutomationHandler) TestRunWorkflow(w http.ResponseWriter, r *http.Request) {
+	wfID := chi.URLParam(r, "id")
+	if wfID == "" {
+		http.Error(w, `{"error":"workflow_id_required"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req automation.TargetInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid_request_body"}`, http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.TargetID) == "" || strings.TrimSpace(req.TargetType) == "" {
+		http.Error(w, `{"error":"missing_target","message":"target_id and target_type are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	run, err := h.service.TestRunWorkflow(r.Context(), wfID, req)
+	if err != nil {
+		if strings.Contains(err.Error(), "nicht gefunden") {
+			http.Error(w, fmt.Sprintf(`{"error":"not_found","message":%q}`, err.Error()), http.StatusNotFound)
+			return
+		}
+		http.Error(w, fmt.Sprintf(`{"error":"test_run_failed","message":%q}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(run)
 }
