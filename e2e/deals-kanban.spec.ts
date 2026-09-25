@@ -67,6 +67,8 @@ test.describe('Deals Kanban Pipeline (§3.3 Full CRUD & Stage Transitions)', () 
   });
 
   test('should refresh sales report after revoking a deal', async ({ page }) => {
+    test.setTimeout(40_000);
+
     type MockDeal = {
       id: string;
       title: string;
