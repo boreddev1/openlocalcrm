@@ -213,6 +213,7 @@ export const DealsPage: React.FC = () => {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deals'] });
+      queryClient.invalidateQueries({ queryKey: ['sales-report'] });
       setRevokeModalDeal(null);
       setRevokeError(null);
       setFeedbackBanner('Deal erfolgreich widerrufen (§355 BGB).');
