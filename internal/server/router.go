@@ -444,7 +444,6 @@ func NewRouter(cfg Config) http.Handler {
 					appr.Post("/", appointmentH.Create)
 					appr.Put("/{id}", appointmentH.Update)
 					appr.Delete("/{id}", appointmentH.Delete)
-					appr.Post("/{id}/push-external", appointmentH.PushExternal)
 					appr.Get("/{id}/ics", appointmentH.DownloadICS)
 				})
 			}

@@ -69,13 +69,7 @@ func TestAppointmentService_CRUD_And_ICS(t *testing.T) {
 		t.Fatalf("expected updated title, got %s", updated.Title)
 	}
 
-	// 5. Push external
-	err = svc.PushExternal(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("failed pushing external: %v", err)
-	}
-
-	// 6. Generate RFC 5545 ICS
+	// 5. Generate RFC 5545 ICS
 	ics := svc.GenerateICS(updated)
 	if !strings.Contains(ics, "BEGIN:VCALENDAR") || !strings.Contains(ics, "END:VCALENDAR") {
 		t.Fatalf("invalid ICS structure:\n%s", ics)
@@ -88,5 +82,35 @@ func TestAppointmentService_CRUD_And_ICS(t *testing.T) {
 	err = svc.Delete(ctx, created.ID)
 	if err != nil {
 		t.Fatalf("failed deleting appointment: %v", err)
+	}
+}
+
+func TestAppointmentService_GenerateICS_EscapesSpecialCharactersAndUsesPublish(t *testing.T) {
+	svc := appointment.NewService(nil, nil)
+	app := appointment.Appointment{
+		ID:        "test-app-1",
+		Title:     "Treffen mit Müller, Meier; Schmidt",
+		Location:  "Büro: Raum 1.02; Nebengebäude",
+		Notes:     "Zeile 1\nZeile 2, mit Komma; und Semikolon",
+		StartTime: time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC),
+		EndTime:   time.Date(2026, 9, 25, 11, 0, 0, 0, time.UTC),
+		ICSUID:    "test-uid-123@openlocalcrm",
+	}
+
+	ics := svc.GenerateICS(app)
+	if !strings.Contains(ics, "METHOD:PUBLISH") {
+		t.Errorf("expected METHOD:PUBLISH, got:\n%s", ics)
+	}
+	if strings.Contains(ics, "METHOD:REQUEST") {
+		t.Errorf("expected no METHOD:REQUEST, got:\n%s", ics)
+	}
+	if !strings.Contains(ics, "SUMMARY:Treffen mit Müller\\, Meier\\; Schmidt") {
+		t.Errorf("expected escaped summary, got:\n%s", ics)
+	}
+	if !strings.Contains(ics, "LOCATION:Büro: Raum 1.02\\; Nebengebäude") {
+		t.Errorf("expected escaped location, got:\n%s", ics)
+	}
+	if !strings.Contains(ics, "DESCRIPTION:Zeile 1\\nZeile 2\\, mit Komma\\; und Semikolon") {
+		t.Errorf("expected escaped description, got:\n%s", ics)
 	}
 }

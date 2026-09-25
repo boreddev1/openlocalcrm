@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -151,39 +154,30 @@ func (h *AppointmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
-func (h *AppointmentHandler) PushExternal(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if err := h.svc.PushExternal(r.Context(), id); err != nil {
-		http.Error(w, `{"error":"failed to push appointment"}`, http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":   "synced",
-		"provider": "microsoft_and_google",
-	})
-}
-
 func (h *AppointmentHandler) DownloadICS(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	app, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
-		app = appointment.Appointment{
-			ID:        id,
-			Title:     "Kundentermin",
-			StartTime: time.Now().Add(24 * time.Hour),
-			EndTime:   time.Now().Add(25 * time.Hour),
-			Location:  "Kundenadresse",
-			Notes:     "OpenLocalCRM Termin",
-			ICSUID:    id + "@openlocalcrm.crm",
+		if errors.Is(err, appointment.ErrAppointmentNotFound) || strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(strings.ToLower(err.Error()), "no rows") {
+			http.Error(w, `{"error":"not_found","message":"Termin nicht gefunden"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"failed to get appointment"}`, http.StatusInternalServerError)
+		return
+	}
+
+	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
+	if claims != nil && claims.Role != "ADMIN" {
+		if app.AssignedTo != "" && app.AssignedTo != claims.Email && app.AssignedTo != claims.UserID.String() {
+			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihre eigenen Termine als ICS exportieren"}`, http.StatusForbidden)
+			return
 		}
 	}
 
 	icsContent := h.svc.GenerateICS(app)
 
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="termin.ics"`)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="termin-%s.ics"`, app.ID))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(icsContent))
 }
