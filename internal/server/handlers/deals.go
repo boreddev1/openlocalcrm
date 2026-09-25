@@ -1,24 +1,36 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/deal"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
-type DealHandler struct {
-	service *deal.Service
+type DealEventTrigger interface {
+	TriggerEvent(ctx context.Context, triggerType, targetID, targetType, targetName string) ([]automation.WorkflowRun, error)
 }
 
-func NewDealHandler(service *deal.Service) *DealHandler {
-	return &DealHandler{service: service}
+type DealHandler struct {
+	service *deal.Service
+	trigger DealEventTrigger
+}
+
+func NewDealHandler(service *deal.Service, trigger ...DealEventTrigger) *DealHandler {
+	h := &DealHandler{service: service}
+	if len(trigger) > 0 {
+		h.trigger = trigger[0]
+	}
+	return h
 }
 
 type CreateDealRequest struct {
@@ -203,6 +215,12 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, `{"error":"failed to update deal: `+err.Error()+`"}`, http.StatusInternalServerError)
 		return
+	}
+
+	if existing.Stage != "WON" && updated.Stage == "WON" && h.trigger != nil {
+		if _, trigErr := h.trigger.TriggerEvent(r.Context(), "DEAL_WON", idStr, "DEAL", updated.Title); trigErr != nil {
+			log.Printf("[deal_warning] automation trigger DEAL_WON failed for deal %s: %v", idStr, trigErr)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

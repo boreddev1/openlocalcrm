@@ -82,6 +82,10 @@ func NewService(querier db.Querier, notifier ...UserNotifier) *Service {
 	return s
 }
 
+func (s *Service) SetNotifier(n UserNotifier) {
+	s.notifier = n
+}
+
 func (s *Service) SetEmailDrafter(d EmailDrafter) {
 	s.drafter = d
 }

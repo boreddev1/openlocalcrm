@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/mailclient"
@@ -22,20 +25,37 @@ var (
 	ErrMessageNotFound = errors.New("email message not found")
 )
 
+type EventTrigger interface {
+	TriggerEvent(ctx context.Context, triggerType, targetID, targetType, targetName string) ([]automation.WorkflowRun, error)
+}
+
+func uuidStr(id pgtype.UUID) string {
+	return uuid.UUID(id.Bytes).String()
+}
+
 type Service struct {
 	queries db.Querier
 	audit   *audit.Service
 	storage storage.StorageService
 	sseHub  *sse.Hub
+	trigger EventTrigger
 }
 
-func NewService(queries db.Querier, audit *audit.Service, storage storage.StorageService, sseHub *sse.Hub) *Service {
-	return &Service{
+func NewService(queries db.Querier, audit *audit.Service, storage storage.StorageService, sseHub *sse.Hub, trigger ...EventTrigger) *Service {
+	s := &Service{
 		queries: queries,
 		audit:   audit,
 		storage: storage,
 		sseHub:  sseHub,
 	}
+	if len(trigger) > 0 {
+		s.trigger = trigger[0]
+	}
+	return s
+}
+
+func (s *Service) SetTrigger(trigger EventTrigger) {
+	s.trigger = trigger
 }
 
 func (s *Service) EnsureDefaultAccount(ctx context.Context) (pgtype.UUID, error) {
@@ -141,6 +161,18 @@ func (s *Service) IngestMessage(ctx context.Context, input IngestEmailInput) (db
 				"contact_id":   msg.ContactID,
 			},
 		})
+	}
+
+	if s.trigger != nil {
+		targetID := uuidStr(msg.ID)
+		targetType := "EMAIL"
+		if msg.ContactID.Valid {
+			targetID = uuidStr(msg.ContactID)
+			targetType = "CONTACT"
+		}
+		if _, trigErr := s.trigger.TriggerEvent(ctx, "INBOUND_EMAIL", targetID, targetType, msg.Subject); trigErr != nil {
+			log.Printf("[email_warning] automation trigger INBOUND_EMAIL failed for message %s: %v", uuidStr(msg.ID), trigErr)
+		}
 	}
 
 	return msg, nil

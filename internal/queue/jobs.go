@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -12,6 +14,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
@@ -27,6 +30,12 @@ type EmailSyncer interface {
 // instead of requiring a live AI backend.
 type EmailTriager interface {
 	TriageEmail(ctx context.Context, sender, subject, body string) (*ai.TriageResult, error)
+}
+
+// AutomationTrigger is the subset of internal/core/automation's Service needed
+// to trigger workflows for events like INACTIVITY_TIMEOUT.
+type AutomationTrigger interface {
+	TriggerEvent(ctx context.Context, triggerType, targetID, targetType, targetName string) ([]automation.WorkflowRun, error)
 }
 
 // JobInserter is the subset of *river.Client[pgx.Tx] the workers need to
@@ -55,10 +64,11 @@ func (h *ClientHolder) Insert(ctx context.Context, args river.JobArgs, opts *riv
 // injects these instead of the workers reaching for global state, so
 // cmd/worker can wire real services and tests can wire fakes.
 type Deps struct {
-	Queries  db.Querier
-	EmailSvc EmailSyncer
-	Triager  EmailTriager
-	Inserter JobInserter
+	Queries       db.Querier
+	EmailSvc      EmailSyncer
+	Triager       EmailTriager
+	Inserter      JobInserter
+	AutomationSvc AutomationTrigger
 }
 
 func uuidStr(id pgtype.UUID) string {
@@ -178,11 +188,46 @@ func (w *EmailTriageWorker) Work(ctx context.Context, job *river.Job[EmailTriage
 	return nil
 }
 
+// InactivityScanArgs defines the payload for an inactivity scan job.
+type InactivityScanArgs struct{}
+
+func (InactivityScanArgs) Kind() string { return "inactivity_scan" }
+
+// InactivityScanWorker scans contacts that have not been updated in over 30 days
+// and triggers the INACTIVITY_TIMEOUT automation event.
+type InactivityScanWorker struct {
+	river.WorkerDefaults[InactivityScanArgs]
+	deps Deps
+}
+
+func (w *InactivityScanWorker) Work(ctx context.Context, job *river.Job[InactivityScanArgs]) error {
+	if w.deps.AutomationSvc == nil {
+		return nil
+	}
+	cutoff := time.Now().Add(-30 * 24 * time.Hour)
+	contacts, err := w.deps.Queries.ListInactiveContacts(ctx, db.ListInactiveContactsParams{
+		UpdatedAt: pgtype.Timestamptz{Time: cutoff, Valid: true},
+		Limit:     100,
+	})
+	if err != nil {
+		return fmt.Errorf("inactivity scan: failed to list inactive contacts: %w", err)
+	}
+
+	for _, c := range contacts {
+		name := strings.TrimSpace(c.FirstName + " " + c.LastName)
+		if _, err := w.deps.AutomationSvc.TriggerEvent(ctx, "INACTIVITY_TIMEOUT", uuidStr(c.ID), "CONTACT", name); err != nil {
+			log.Printf("[worker] failed to trigger INACTIVITY_TIMEOUT for contact %s: %v", uuidStr(c.ID), err)
+		}
+	}
+	return nil
+}
+
 // RegisterWorkers registers all job workers into the River worker pool
 func RegisterWorkers(workers *river.Workers, deps Deps) {
 	river.AddWorker(workers, &EmailSyncAllWorker{deps: deps})
 	river.AddWorker(workers, &EmailSyncWorker{deps: deps})
 	river.AddWorker(workers, &EmailTriageWorker{deps: deps})
+	river.AddWorker(workers, &InactivityScanWorker{deps: deps})
 }
 
 // NewEmailSyncAllWorkerForTest constructs an EmailSyncAllWorker with
@@ -201,4 +246,10 @@ func NewEmailSyncWorkerForTest(deps Deps) *EmailSyncWorker {
 // deps, for use by tests outside this package.
 func NewEmailTriageWorkerForTest(deps Deps) *EmailTriageWorker {
 	return &EmailTriageWorker{deps: deps}
+}
+
+// NewInactivityScanWorkerForTest constructs an InactivityScanWorker with injected
+// deps, for use by tests outside this package.
+func NewInactivityScanWorkerForTest(deps Deps) *InactivityScanWorker {
+	return &InactivityScanWorker{deps: deps}
 }

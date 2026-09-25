@@ -46,6 +46,13 @@ func NewClient(ctx context.Context, dbPool *pgxpool.Pool, deps Deps) (*river.Cli
 				},
 				&river.PeriodicJobOpts{ID: "email-sync-all", RunOnStart: true},
 			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(1*time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return InactivityScanArgs{}, nil
+				},
+				&river.PeriodicJobOpts{ID: "inactivity-scan", RunOnStart: true},
+			),
 		},
 	})
 	if err != nil {

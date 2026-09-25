@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/email"
 	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
@@ -66,6 +67,70 @@ func TestIngestEmailMessage(t *testing.T) {
 
 	if len(mockDB.createdMessages) != 1 {
 		t.Fatalf("expected 1 message stored in database")
+	}
+}
+
+type MockEmailTrigger struct {
+	calls []struct {
+		TriggerType string
+		TargetID    string
+		TargetType  string
+		TargetName  string
+	}
+	err error
+}
+
+func (m *MockEmailTrigger) TriggerEvent(ctx context.Context, triggerType, targetID, targetType, targetName string) ([]automation.WorkflowRun, error) {
+	m.calls = append(m.calls, struct {
+		TriggerType string
+		TargetID    string
+		TargetType  string
+		TargetName  string
+	}{
+		TriggerType: triggerType,
+		TargetID:    targetID,
+		TargetType:  targetType,
+		TargetName:  targetName,
+	})
+	return nil, m.err
+}
+
+func TestIngestEmailMessage_TriggersInboundEmailWorkflow(t *testing.T) {
+	mockDB := &MockEmailQuerier{}
+	trigger := &MockEmailTrigger{}
+	svc := email.NewService(mockDB, nil, nil, nil, trigger)
+
+	var accountID pgtype.UUID
+	_ = accountID.Scan("11111111-1111-1111-1111-111111111111")
+
+	_, err := svc.IngestMessage(context.Background(), email.IngestEmailInput{
+		AccountID:       accountID,
+		MessageID:       "<msg-002@client.de>",
+		SenderEmail:     "anna@solar-kunden.de",
+		SenderName:      "Anna Schmidt",
+		RecipientEmails: []string{"info@openlocalcrm.local"},
+		Subject:         "Dachsanierung & PV-Speicher",
+		ReceivedAt:      time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected ingest error: %v", err)
+	}
+
+	if len(trigger.calls) != 1 {
+		t.Fatalf("expected 1 trigger call, got %d", len(trigger.calls))
+	}
+	call := trigger.calls[0]
+	if call.TriggerType != "INBOUND_EMAIL" {
+		t.Errorf("expected INBOUND_EMAIL, got %s", call.TriggerType)
+	}
+	if call.TargetType != "EMAIL" {
+		t.Errorf("expected EMAIL, got %s", call.TargetType)
+	}
+	if call.TargetName != "Dachsanierung & PV-Speicher" {
+		t.Errorf("expected subject in targetName, got %s", call.TargetName)
+	}
+	if call.TargetID != "22222222-2222-2222-2222-222222222222" {
+		t.Errorf("expected message ID, got %s", call.TargetID)
 	}
 }
 

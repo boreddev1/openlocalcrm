@@ -162,6 +162,7 @@ func NewRouter(cfg Config) http.Handler {
 	var userH *handlers.UserHandler
 	var backupH *handlers.BackupHandler
 	var settingsH *handlers.SettingsHandler
+	var automationH *handlers.AutomationHandler
 	var authLimiter *auth.RateLimiter
 	var aiLimiter *auth.RateLimiter
 
@@ -172,8 +173,10 @@ func NewRouter(cfg Config) http.Handler {
 		dealSvc := deal.NewService(cfg.DB, auditSvc)
 		todoSvc := todo.NewService(cfg.DB, auditSvc)
 		noteSvc := note.NewService(cfg.DB, cfg.SSEHub)
-		emailSvc := email.NewService(cfg.DB, auditSvc, cfg.Storage, cfg.SSEHub)
 		notificationSvc := notification.NewService(cfg.DB, cfg.SSEHub)
+		automationSvc := automation.NewService(cfg.DB)
+		automationSvc.SetNotifier(notificationSvc)
+		emailSvc := email.NewService(cfg.DB, auditSvc, cfg.Storage, cfg.SSEHub, automationSvc)
 		exportSvc := export.NewService(cfg.DB, contactSvc)
 
 		var dbtx db.DBTX
@@ -197,7 +200,7 @@ func NewRouter(cfg Config) http.Handler {
 		if connectorToken == "" && cfg.DemoMode {
 			connectorToken = "demo-connector-token"
 		}
-		connectorEngine := connectors.NewEngine(contactSvc, dealSvc, connectorToken)
+		connectorEngine := connectors.NewEngine(contactSvc, dealSvc, connectorToken, automationSvc)
 
 		authLimiter = auth.NewRateLimiter(20, time.Minute, 5*time.Minute)
 		aiLimiter = auth.NewRateLimiter(30, time.Minute, 2*time.Minute)
@@ -214,7 +217,7 @@ func NewRouter(cfg Config) http.Handler {
 		authH = handlers.NewAuthHandlerWithService(authSvc)
 		contactH = handlers.NewContactHandler(contactSvc)
 		companyH = handlers.NewCompanyHandler(companySvc)
-		dealH = handlers.NewDealHandler(dealSvc)
+		dealH = handlers.NewDealHandler(dealSvc, automationSvc)
 		todoH = handlers.NewTodoHandler(todoSvc)
 		noteH = handlers.NewNoteHandler(noteSvc, aiGateway)
 		emailH = handlers.NewEmailHandler(emailSvc, cfg.DemoMode)
@@ -225,6 +228,7 @@ func NewRouter(cfg Config) http.Handler {
 		userH = handlers.NewUserHandler(cfg.DB)
 		backupH = handlers.NewBackupHandler(cfg.DB)
 		settingsH = handlers.NewSettingsHandler()
+		automationH = handlers.NewAutomationHandler(automationSvc)
 	}
 
 	if authLimiter == nil {
@@ -422,12 +426,14 @@ func NewRouter(cfg Config) http.Handler {
 			appointmentSvc := appointment.NewService(cfg.DB, cfg.SSEHub)
 			telephonySvc := telephony.NewService(cfg.DB, cfg.SSEHub)
 			reportsSvc := reports.NewService(cfg.DB)
-			automationSvc := automation.NewService(cfg.DB)
 
 			appointmentH := handlers.NewAppointmentHandler(appointmentSvc)
 			telephonyH := handlers.NewTelephonyHandler(telephonySvc)
 			reportsH := handlers.NewReportsHandler(reportsSvc)
-			automationH := handlers.NewAutomationHandler(automationSvc)
+			if automationH == nil {
+				automationSvc := automation.NewService(cfg.DB)
+				automationH = handlers.NewAutomationHandler(automationSvc)
+			}
 
 			if appointmentH != nil {
 				protected.Route("/appointments", func(appr chi.Router) {

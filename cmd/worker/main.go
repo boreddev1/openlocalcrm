@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/email"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/queue"
@@ -48,7 +49,8 @@ func main() {
 
 	queries := db.New(dbPool)
 	auditSvc := audit.NewService(queries)
-	emailSvc := email.NewService(queries, auditSvc, nil, nil)
+	automationSvc := automation.NewService(queries)
+	emailSvc := email.NewService(queries, auditSvc, nil, nil, automationSvc)
 
 	obsSvc := ai.NewObservabilityService(dbPool)
 	aiGateway := ai.NewGateway(ai.GatewayConfig{
@@ -60,9 +62,10 @@ func main() {
 	triageSvc := ai.NewTriageService(aiGateway, obsSvc)
 
 	deps := queue.Deps{
-		Queries:  queries,
-		EmailSvc: emailSvc,
-		Triager:  triageSvc,
+		Queries:       queries,
+		EmailSvc:      emailSvc,
+		Triager:       triageSvc,
+		AutomationSvc: automationSvc,
 	}
 
 	var client *river.Client[pgx.Tx]
