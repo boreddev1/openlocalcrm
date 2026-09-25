@@ -28,6 +28,8 @@ interface Deal {
   contact_name?: string;
   notes?: string;
   signed_at?: string;
+  widerrufen_at?: string;
+  widerruf_grund?: string;
 }
 
 const STAGES = [
@@ -57,6 +59,11 @@ const STAGES = [
     color: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400',
   },
   { id: 'LOST', label: 'Verloren', color: 'border-rose-500/30 bg-rose-500/5 text-rose-400' },
+  {
+    id: 'WIDERRUFEN',
+    label: 'Widerrufen (§355)',
+    color: 'border-red-500/30 bg-red-500/5 text-red-400',
+  },
 ];
 
 export const DealsPage: React.FC = () => {
@@ -73,6 +80,12 @@ export const DealsPage: React.FC = () => {
     due_date: '2026-11-25',
     notes: '',
   });
+  const [revokeModalDeal, setRevokeModalDeal] = useState<Deal | null>(null);
+  const [revokeData, setRevokeData] = useState({
+    widerrufen_at: new Date().toISOString().split('T')[0],
+    widerruf_grund: '',
+  });
+  const [revokeError, setRevokeError] = useState<string | null>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
 
   const { data: rawDeals = [] } = useQuery<Deal[]>({
@@ -122,6 +135,35 @@ export const DealsPage: React.FC = () => {
     },
   });
 
+  const revokeMutation = useMutation({
+    mutationFn: ({
+      id,
+      widerrufen_at,
+      widerruf_grund,
+    }: {
+      id: string;
+      widerrufen_at: string;
+      widerruf_grund: string;
+    }) =>
+      apiFetch(`/api/v1/deals/${id}/revoke`, {
+        method: 'POST',
+        body: JSON.stringify({
+          widerrufen_at: widerrufen_at ? new Date(widerrufen_at).toISOString() : undefined,
+          widerruf_grund,
+        }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deals'] });
+      setRevokeModalDeal(null);
+      setRevokeError(null);
+      setFeedbackBanner('Deal erfolgreich widerrufen (§355 BGB).');
+      setTimeout(() => setFeedbackBanner(null), 4000);
+    },
+    onError: (err: any) => {
+      setRevokeError(err?.message || 'Fehler beim Erfassen des Widerrufs.');
+    },
+  });
+
   const [formData, setFormData] = useState({
     title: '',
     value: '18500.00',
@@ -140,6 +182,15 @@ export const DealsPage: React.FC = () => {
     const newStage = over.id as string;
     const deal = deals.find((d) => d.id === dealId);
     if (deal && deal.stage !== newStage) {
+      if (newStage === 'WIDERRUFEN') {
+        setRevokeModalDeal(deal);
+        setRevokeData({
+          widerrufen_at: new Date().toISOString().split('T')[0],
+          widerruf_grund: '',
+        });
+        setRevokeError(null);
+        return;
+      }
       updateMutation.mutate({ ...deal, stage: newStage });
     }
   };
@@ -336,12 +387,15 @@ export const DealsPage: React.FC = () => {
                           <div className="pt-2 border-t border-slate-900 flex items-center justify-between gap-2">
                             <select
                               value={deal.stage}
+                              disabled={deal.stage === 'WIDERRUFEN'}
                               onChange={(e) =>
                                 updateMutation.mutate({ ...deal, stage: e.target.value })
                               }
-                              className="text-[11px] bg-slate-900 border border-slate-800 text-slate-300 rounded px-2 py-1 focus:outline-none"
+                              className="text-[11px] bg-slate-900 border border-slate-800 text-slate-300 rounded px-2 py-1 focus:outline-none disabled:opacity-50"
                             >
-                              {STAGES.map((s) => (
+                              {STAGES.filter(
+                                (s) => s.id !== 'WIDERRUFEN' || deal.stage === 'WIDERRUFEN',
+                              ).map((s) => (
                                 <option key={s.id} value={s.id}>
                                   {s.label}
                                 </option>
@@ -349,6 +403,24 @@ export const DealsPage: React.FC = () => {
                             </select>
 
                             <div className="flex items-center gap-1.5">
+                              {deal.stage !== 'WIDERRUFEN' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRevokeModalDeal(deal);
+                                    setRevokeData({
+                                      widerrufen_at: new Date().toISOString().split('T')[0],
+                                      widerruf_grund: '',
+                                    });
+                                    setRevokeError(null);
+                                  }}
+                                  className="text-[10px] px-2 py-0.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                  title="Widerruf erfassen (§355 BGB)"
+                                >
+                                  <AlertCircle className="w-2.5 h-2.5" />
+                                  <span>Widerruf erfassen</span>
+                                </button>
+                              )}
                               <button
                                 onClick={() => {
                                   setResubmissionDeal(deal);
@@ -372,8 +444,19 @@ export const DealsPage: React.FC = () => {
                                   <ShieldCheck className="w-3 h-3" /> §355 OK
                                 </span>
                               )}
+                              {deal.stage === 'WIDERRUFEN' && (
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 font-medium inline-flex items-center gap-1">
+                                  <AlertCircle className="w-3 h-3" /> Widerrufen
+                                </span>
+                              )}
                             </div>
                           </div>
+
+                          {deal.stage === 'WIDERRUFEN' && deal.widerruf_grund && (
+                            <div className="text-[10px] text-red-400/90 bg-red-950/40 p-1.5 rounded border border-red-900/30 italic">
+                              Grund: {deal.widerruf_grund}
+                            </div>
+                          )}
                         </div>
                       ))
                     )}
@@ -450,7 +533,7 @@ export const DealsPage: React.FC = () => {
                   onChange={(e) => setFormData({ ...formData, stage: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                 >
-                  {STAGES.map((s) => (
+                  {STAGES.filter((s) => s.id !== 'WIDERRUFEN').map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.label}
                     </option>
@@ -543,10 +626,13 @@ export const DealsPage: React.FC = () => {
                 <label className="block text-xs font-medium text-slate-400 mb-1">Phase</label>
                 <select
                   value={editingDeal.stage}
+                  disabled={editingDeal.stage === 'WIDERRUFEN'}
                   onChange={(e) => setEditingDeal({ ...editingDeal, stage: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
                 >
-                  {STAGES.map((s) => (
+                  {STAGES.filter(
+                    (s) => s.id !== 'WIDERRUFEN' || editingDeal.stage === 'WIDERRUFEN',
+                  ).map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.label}
                     </option>
@@ -733,6 +819,107 @@ export const DealsPage: React.FC = () => {
                 {deleteMutation.isPending ? 'Löscht...' : 'Endgültig löschen'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deal Revocation Modal (§355 BGB) */}
+      {revokeModalDeal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-red-900/50 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="font-bold text-slate-100 text-lg flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-red-400" />
+                <span>Widerruf erfassen (§355 BGB)</span>
+              </h3>
+              <button
+                onClick={() => {
+                  setRevokeModalDeal(null);
+                  setRevokeError(null);
+                }}
+                className="text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-300">
+              Deal: <strong className="text-red-200">{revokeModalDeal.title}</strong> (
+              {revokeModalDeal.value
+                ? `${parseFloat(revokeModalDeal.value).toLocaleString('de-DE')} ${revokeModalDeal.currency}`
+                : '0,00 EUR'}
+              )
+              <p className="mt-1 text-slate-400">
+                Durch das Erfassen wird der Deal in die Phase <strong>WIDERRUFEN</strong>{' '}
+                verschoben, die Abschlusswahrscheinlichkeit auf 0 % gesetzt und der Widerruf
+                revisionssicher protokolliert.
+              </p>
+            </div>
+
+            {revokeError && (
+              <div className="p-3 bg-red-950/50 border border-red-800 rounded-xl text-xs text-red-200 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <span>{revokeError}</span>
+              </div>
+            )}
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                revokeMutation.mutate({
+                  id: revokeModalDeal.id,
+                  widerrufen_at: revokeData.widerrufen_at,
+                  widerruf_grund: revokeData.widerruf_grund,
+                });
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Widerrufsdatum *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={revokeData.widerrufen_at}
+                  onChange={(e) => setRevokeData({ ...revokeData, widerrufen_at: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-red-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Widerrufsgrund / Details
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="z.B. Fristgerechter Widerruf des Verbrauchers nach Haustürgeschäft gem. § 355 BGB..."
+                  value={revokeData.widerruf_grund}
+                  onChange={(e) => setRevokeData({ ...revokeData, widerruf_grund: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-red-500 resize-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRevokeModalDeal(null);
+                    setRevokeError(null);
+                  }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="submit"
+                  disabled={revokeMutation.isPending}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-red-600/20 disabled:opacity-50"
+                >
+                  {revokeMutation.isPending ? 'Speichert...' : 'Widerruf bestätigen'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

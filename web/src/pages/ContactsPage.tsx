@@ -94,6 +94,9 @@ export const ContactsPage: React.FC = () => {
     address_zip: '',
     address_city: '',
     zaehlernummer: '',
+    stromverbrauch_kwh: '',
+    gasverbrauch_kwh: '',
+    eigentuemer_status: '',
     customer_type: 'GESCHAEFTSKUNDE',
     consent_phone: true,
     consent_email: true,
@@ -101,13 +104,32 @@ export const ContactsPage: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    createMutation.mutate(formData);
+    createMutation.mutate({
+      ...formData,
+      stromverbrauch_kwh: formData.stromverbrauch_kwh
+        ? Number(formData.stromverbrauch_kwh)
+        : undefined,
+      gasverbrauch_kwh: formData.gasverbrauch_kwh ? Number(formData.gasverbrauch_kwh) : undefined,
+      eigentuemer_status: formData.eigentuemer_status || undefined,
+    });
   };
 
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingContact) return;
-    updateMutation.mutate(editingContact);
+    updateMutation.mutate({
+      ...editingContact,
+      stromverbrauch_kwh:
+        editingContact.stromverbrauch_kwh !== undefined && editingContact.stromverbrauch_kwh !== ''
+          ? Number(editingContact.stromverbrauch_kwh)
+          : null,
+      gasverbrauch_kwh:
+        editingContact.gasverbrauch_kwh !== undefined && editingContact.gasverbrauch_kwh !== ''
+          ? Number(editingContact.gasverbrauch_kwh)
+          : null,
+      consent_phone: Boolean(editingContact.consent_phone),
+      consent_email: Boolean(editingContact.consent_email),
+    });
   };
 
   const handleExportCSV = async () => {
@@ -590,6 +612,53 @@ export const ContactsPage: React.FC = () => {
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Stromverbrauch (kWh/Jahr)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.stromverbrauch_kwh}
+                    onChange={(e) =>
+                      setFormData({ ...formData, stromverbrauch_kwh: e.target.value })
+                    }
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Gasverbrauch (kWh/Jahr)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.gasverbrauch_kwh}
+                    onChange={(e) => setFormData({ ...formData, gasverbrauch_kwh: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Eigentümerstatus
+                </label>
+                <select
+                  value={formData.eigentuemer_status}
+                  onChange={(e) => setFormData({ ...formData, eigentuemer_status: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="Eigentümer">Eigentümer</option>
+                  <option value="Mieter">Mieter</option>
+                  <option value="Pächter">Pächter</option>
+                  <option value="">Nicht angegeben</option>
+                </select>
+              </div>
+
               {/* UWG § 7 Consent Toggles */}
               <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
                 <div className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
@@ -797,6 +866,94 @@ export const ContactsPage: React.FC = () => {
                   }
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Stromverbrauch (kWh/Jahr)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={editingContact.stromverbrauch_kwh ?? ''}
+                    onChange={(e) =>
+                      setEditingContact({
+                        ...editingContact,
+                        stromverbrauch_kwh: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Gasverbrauch (kWh/Jahr)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={editingContact.gasverbrauch_kwh ?? ''}
+                    onChange={(e) =>
+                      setEditingContact({
+                        ...editingContact,
+                        gasverbrauch_kwh: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Eigentümerstatus
+                </label>
+                <select
+                  value={editingContact.eigentuemer_status ?? ''}
+                  onChange={(e) =>
+                    setEditingContact({ ...editingContact, eigentuemer_status: e.target.value })
+                  }
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="Eigentümer">Eigentümer</option>
+                  <option value="Mieter">Mieter</option>
+                  <option value="Pächter">Pächter</option>
+                  <option value="">Nicht angegeben</option>
+                </select>
+              </div>
+
+              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+                <div className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>DSGVO & UWG § 7 Werbe-Einwilligung</span>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-slate-300">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingContact.consent_email ?? false}
+                      onChange={(e) =>
+                        setEditingContact({ ...editingContact, consent_email: e.target.checked })
+                      }
+                      className="rounded text-emerald-500 bg-slate-900 border-slate-700"
+                    />
+                    <span>E-Mail Opt-in</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingContact.consent_phone ?? false}
+                      onChange={(e) =>
+                        setEditingContact({ ...editingContact, consent_phone: e.target.checked })
+                      }
+                      className="rounded text-emerald-500 bg-slate-900 border-slate-700"
+                    />
+                    <span>Telefon Opt-in</span>
+                  </label>
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
