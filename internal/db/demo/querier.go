@@ -1497,6 +1497,34 @@ func (q *InMemoryQuerier) CreateEmailMessage(ctx context.Context, arg db.CreateE
 	return msg, nil
 }
 
+func (q *InMemoryQuerier) CreateDraftEmailMessage(ctx context.Context, arg db.CreateDraftEmailMessageParams) (db.EmailMessage, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	msg := db.EmailMessage{
+		ID:              newUUID(),
+		AccountID:       arg.AccountID,
+		ThreadID:        arg.ThreadID,
+		MessageID:       arg.MessageID,
+		Direction:       "OUTBOUND",
+		SenderEmail:     arg.SenderEmail,
+		SenderName:      arg.SenderName,
+		RecipientEmails: arg.RecipientEmails,
+		Subject:         arg.Subject,
+		BodyText:        arg.BodyText,
+		BodyHtml:        arg.BodyHtml,
+		ReceivedAt:      nowTimestamptz(),
+		IsRead:          false,
+		IsDraft:         true,
+		ContactID:       arg.ContactID,
+		DealID:          arg.DealID,
+		Tags:            []byte("[]"),
+		CreatedAt:       nowTimestamptz(),
+	}
+	q.emailMessages[uuidToStr(msg.ID)] = msg
+	return msg, nil
+}
+
 func (q *InMemoryQuerier) GetEmailAccountByID(ctx context.Context, id pgtype.UUID) (db.EmailAccount, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()

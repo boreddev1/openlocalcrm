@@ -195,6 +195,8 @@ func NewRouter(cfg Config) http.Handler {
 		triageSvc := ai.NewTriageService(aiGateway, obsSvc)
 		researchSvc := ai.NewResearchService(aiGateway, obsSvc)
 		chatSvc := ai.NewChatService(aiGateway, obsSvc, researchSvc, cfg.DB)
+		aiDrafter := automation.NewAIDrafter(cfg.DB, aiGateway)
+		automationSvc.SetEmailDrafter(aiDrafter)
 
 		connectorToken := os.Getenv("CONNECTOR_API_TOKEN")
 		if connectorToken == "" && cfg.DemoMode {

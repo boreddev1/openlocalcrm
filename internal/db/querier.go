@@ -26,6 +26,7 @@ type Querier interface {
 	CreateContact(ctx context.Context, arg CreateContactParams) (Contact, error)
 	// internal/db/queries/deals.sql
 	CreateDeal(ctx context.Context, arg CreateDealParams) (Deal, error)
+	CreateDraftEmailMessage(ctx context.Context, arg CreateDraftEmailMessageParams) (EmailMessage, error)
 	// internal/db/queries/emails.sql
 	CreateEmailAccount(ctx context.Context, arg CreateEmailAccountParams) (EmailAccount, error)
 	CreateEmailAttachment(ctx context.Context, arg CreateEmailAttachmentParams) (EmailAttachment, error)

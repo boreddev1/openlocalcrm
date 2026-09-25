@@ -12,6 +12,82 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createDraftEmailMessage = `-- name: CreateDraftEmailMessage :one
+INSERT INTO email_messages (
+    account_id,
+    thread_id,
+    message_id,
+    direction,
+    sender_email,
+    sender_name,
+    recipient_emails,
+    subject,
+    body_text,
+    body_html,
+    received_at,
+    is_read,
+    is_draft,
+    contact_id,
+    deal_id
+) VALUES (
+    $1, $2, $3, 'OUTBOUND', $4, $5, $6, $7, $8, $9, NOW(), FALSE, TRUE, $10, $11
+)
+RETURNING id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft
+`
+
+type CreateDraftEmailMessageParams struct {
+	AccountID       pgtype.UUID `json:"account_id"`
+	ThreadID        string      `json:"thread_id"`
+	MessageID       string      `json:"message_id"`
+	SenderEmail     string      `json:"sender_email"`
+	SenderName      pgtype.Text `json:"sender_name"`
+	RecipientEmails []byte      `json:"recipient_emails"`
+	Subject         string      `json:"subject"`
+	BodyText        pgtype.Text `json:"body_text"`
+	BodyHtml        pgtype.Text `json:"body_html"`
+	ContactID       pgtype.UUID `json:"contact_id"`
+	DealID          pgtype.UUID `json:"deal_id"`
+}
+
+func (q *Queries) CreateDraftEmailMessage(ctx context.Context, arg CreateDraftEmailMessageParams) (EmailMessage, error) {
+	row := q.db.QueryRow(ctx, createDraftEmailMessage,
+		arg.AccountID,
+		arg.ThreadID,
+		arg.MessageID,
+		arg.SenderEmail,
+		arg.SenderName,
+		arg.RecipientEmails,
+		arg.Subject,
+		arg.BodyText,
+		arg.BodyHtml,
+		arg.ContactID,
+		arg.DealID,
+	)
+	var i EmailMessage
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.ThreadID,
+		&i.MessageID,
+		&i.InReplyTo,
+		&i.Direction,
+		&i.SenderEmail,
+		&i.SenderName,
+		&i.RecipientEmails,
+		&i.Subject,
+		&i.BodyText,
+		&i.BodyHtml,
+		&i.ReceivedAt,
+		&i.IsRead,
+		&i.ContactID,
+		&i.DealID,
+		&i.CreatedAt,
+		&i.Tags,
+		&i.IsDraft,
+	)
+	return i, err
+}
+
 const createEmailAccount = `-- name: CreateEmailAccount :one
 INSERT INTO email_accounts (
     name,
