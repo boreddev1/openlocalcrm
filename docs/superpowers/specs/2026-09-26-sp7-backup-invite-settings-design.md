@@ -90,9 +90,9 @@ The current application inventory contains 22 tables. SP7 backup and restore als
 
 ### 3.3 Handwritten Row Streamers
 
-`internal/db/queries/backup.sql` is the canonical SQL source for the 22 pre-SP7 table selects and the restore upserts. Its row queries return `row_to_json(...)` values ordered by primary key.
+`internal/db/queries/backup.sql` is the canonical SQL source for the 22 pre-SP7 table selects and their restore upserts. `user_invites` and `email_templates` have their own select and upsert queries in `invites.sql` and `email_templates.sql`. All 24 row queries return `row_to_json(...)` values ordered by primary key.
 
-sqlc `:many` methods materialize `[]T`; they must not be used by the export path. A handwritten `internal/db/backup_stream.go` in `package db` implements the streaming methods because generated methods cannot expose the unexported `Queries.db` handle for caller-driven `rows.Next()` iteration. The handwritten methods reuse the generated, package-private query constants, call `q.db.Query`, and emit one scanned JSON row at a time. They never append rows to a slice.
+sqlc `:many` methods materialize `[]T`; they must not be used by the export path. A handwritten `internal/db/backup_stream.go` in `package db` implements all 24 streaming methods because generated methods cannot expose the unexported `Queries.db` handle for caller-driven `rows.Next()` iteration. The handwritten methods reuse the generated, package-private query constants, call `q.db.Query`, and emit one scanned JSON row at a time. They never append rows to a slice.
 
 Existing helpers such as `ListCompanies`, `ListContacts`, `ListDeals`, and `ListTodos` are prohibited in the export path because they accumulate `[]T` in memory.
 
@@ -113,6 +113,8 @@ The response is a versioned JSON envelope:
 ```
 
 The handler writes the metadata and table boundaries, then passes each scanned row directly to `json.Encoder`. It does not build an `ExportPayload` or another whole-dump slice. JSONB and other `[]byte` fields remain JSON values rather than base64 strings because rows originate from `row_to_json`.
+
+Round-trip typing is explicit in the static restore queries. `knowledge_base_articles.embedding` is cast back to `vector(1024)`, while `knowledge_base_articles.tags` and `company_research.industry_keywords` are cast from JSON arrays back to `TEXT[]`. Row JSON alone is not passed directly into these typed columns, and the vector dimension is never reduced to the obsolete 768 contract.
 
 ### 3.5 Failure and Audit Behavior
 
@@ -138,18 +140,18 @@ Merge is the default mode. Replace mode requires an explicit request flag, trunc
 
 Static per-table upsert statements come from `backup.sql` and are regenerated with sqlc. Restore runs them through `db.Queries.WithTx`; identifiers are never assembled from request strings.
 
-Restore creates audit events for the attempt and final result with actor, IP, and user agent. Successful completion is reported only after commit.
+Restore success and failure are audit-logged with actor, IP, and user agent. A completion event is inserted only after the restore transaction commits; it is never inserted inside a replace transaction because restoring `audit_logs` would delete that event. Failure is logged after rollback. The HTTP response reports success only when the post-commit audit insert also succeeds.
 
 ### 4.2 Scratch-Schema Drill
 
-`POST /api/v1/backup/drill` performs a real import and verification when a PostgreSQL pool is available:
+`POST /api/v1/backup/drill` has no request body. When a PostgreSQL pool is available, it performs a live export of the current `public` tables into the scratch schema and verifies that imported result:
 
 1. Create a unique scratch schema.
 2. Clone each application table with `CREATE TABLE scratch.<table> (LIKE public.<table> INCLUDING ALL)`.
 3. Inspect the foreign-key constraints copied by `INCLUDING ALL`.
 4. Drop every copied constraint that still references `public` before adding any scratch constraint. Leaving it in place would validate imported rows against live data instead of scratch data.
 5. Add equivalent foreign keys that reference `scratch.<parent table>`.
-6. Import the streamed backup through the same static upsert path with a scratch `search_path`.
+6. Stream every current live row from `public` through the same table descriptors into the scratch schema with a scratch `search_path`; there is no upload or client-supplied backup source.
 7. Compare per-table row counts.
 8. Enforce constraints immediately and run the FK verification.
 9. Drop the scratch schema in a guaranteed cleanup path, including failure paths.
@@ -222,6 +224,9 @@ There is no `X-Connector-Token` fallback and no fabricated success message.
   - no export path calls a `List*` helper;
   - each table row is emitted once and in FK-safe order;
   - JSONB fields are not base64 encoded;
+  - `vector(1024)` and `TEXT[]` values survive the export/restore round trip with explicit casts;
+  - the drill reads live `public` data and accepts no body or uploaded backup;
+  - replace-mode completion audit is written only after commit and survives the import;
   - merge upserts are idempotent;
   - replace truncation and inserts roll back as one transaction;
   - unknown tables/columns, invalid JSON, and oversized bodies fail;
