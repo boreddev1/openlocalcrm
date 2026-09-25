@@ -54,7 +54,7 @@ func (s *Service) ExportContactsCSV(ctx context.Context) ([]byte, error) {
 		"ID",
 		"Vorname",
 		"Nachname",
-		"E-Mail",
+		"Email",
 		"Telefon",
 		"Position",
 		"Strasse",
@@ -62,11 +62,30 @@ func (s *Service) ExportContactsCSV(ctx context.Context) ([]byte, error) {
 		"Ort",
 		"Einwilligung_Telefon",
 		"Einwilligung_Email",
+		"Einwilligung_Aktualisiert_Am",
+		"Stromverbrauch_kWh",
+		"Gasverbrauch_kWh",
 		"Zaehlernummer",
+		"Eigentuemer_Status",
 		"Erstellt_Am",
 	})
 
 	for _, c := range contacts {
+		consentTimeStr := ""
+		if c.ConsentUpdatedAt.Valid {
+			consentTimeStr = c.ConsentUpdatedAt.Time.Format("2006-01-02 15:04:05")
+		}
+		stromStr := ""
+		if c.StromverbrauchKwh.Valid {
+			stromVal, _ := c.StromverbrauchKwh.Float64Value()
+			stromStr = fmt.Sprintf("%.2f", stromVal.Float64)
+		}
+		gasStr := ""
+		if c.GasverbrauchKwh.Valid {
+			gasVal, _ := c.GasverbrauchKwh.Float64Value()
+			gasStr = fmt.Sprintf("%.2f", gasVal.Float64)
+		}
+
 		_ = w.Write([]string{
 			sanitizeCSVField(c.ID.String()),
 			sanitizeCSVField(c.FirstName),
@@ -79,7 +98,11 @@ func (s *Service) ExportContactsCSV(ctx context.Context) ([]byte, error) {
 			sanitizeCSVField(c.AddressCity.String),
 			fmt.Sprintf("%t", c.ConsentPhone),
 			fmt.Sprintf("%t", c.ConsentEmail),
+			consentTimeStr,
+			stromStr,
+			gasStr,
 			sanitizeCSVField(c.Zaehlernummer.String),
+			sanitizeCSVField(c.EigentuemerStatus.String),
 			c.CreatedAt.Time.Format("2006-01-02 15:04:05"),
 		})
 	}

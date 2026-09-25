@@ -21,18 +21,24 @@ func NewContactHandler(service *contact.Service) *ContactHandler {
 }
 
 type CreateContactRequest struct {
-	FirstName     string   `json:"first_name"`
-	LastName      string   `json:"last_name"`
-	Email         string   `json:"email"`
-	Phone         string   `json:"phone"`
-	Mobile        string   `json:"mobile"`
-	Position      string   `json:"position"`
-	LeadSource    string   `json:"lead_source"`
-	AddressStreet string   `json:"address_street"`
-	AddressZip    string   `json:"address_zip"`
-	AddressCity   string   `json:"address_city"`
-	Latitude      *float64 `json:"latitude"`
-	Longitude     *float64 `json:"longitude"`
+	FirstName         string   `json:"first_name"`
+	LastName          string   `json:"last_name"`
+	Email             string   `json:"email"`
+	Phone             string   `json:"phone"`
+	Mobile            string   `json:"mobile"`
+	Position          string   `json:"position"`
+	LeadSource        string   `json:"lead_source"`
+	AddressStreet     string   `json:"address_street"`
+	AddressZip        string   `json:"address_zip"`
+	AddressCity       string   `json:"address_city"`
+	Latitude          *float64 `json:"latitude"`
+	Longitude         *float64 `json:"longitude"`
+	ConsentPhone      bool     `json:"consent_phone"`
+	ConsentEmail      bool     `json:"consent_email"`
+	StromverbrauchKwh *float64 `json:"stromverbrauch_kwh"`
+	GasverbrauchKwh   *float64 `json:"gasverbrauch_kwh"`
+	Zaehlernummer     string   `json:"zaehlernummer"`
+	EigentuemerStatus string   `json:"eigentuemer_status"`
 }
 
 func (h *ContactHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -49,18 +55,24 @@ func (h *ContactHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.service.Create(r.Context(), actorID, contact.CreateContactInput{
-		FirstName:     req.FirstName,
-		LastName:      req.LastName,
-		Email:         req.Email,
-		Phone:         req.Phone,
-		Mobile:        req.Mobile,
-		Position:      req.Position,
-		LeadSource:    req.LeadSource,
-		AddressStreet: req.AddressStreet,
-		AddressZip:    req.AddressZip,
-		AddressCity:   req.AddressCity,
-		Latitude:      req.Latitude,
-		Longitude:     req.Longitude,
+		FirstName:         req.FirstName,
+		LastName:          req.LastName,
+		Email:             req.Email,
+		Phone:             req.Phone,
+		Mobile:            req.Mobile,
+		Position:          req.Position,
+		LeadSource:        req.LeadSource,
+		AddressStreet:     req.AddressStreet,
+		AddressZip:        req.AddressZip,
+		AddressCity:       req.AddressCity,
+		Latitude:          req.Latitude,
+		Longitude:         req.Longitude,
+		ConsentPhone:      req.ConsentPhone,
+		ConsentEmail:      req.ConsentEmail,
+		StromverbrauchKwh: req.StromverbrauchKwh,
+		GasverbrauchKwh:   req.GasverbrauchKwh,
+		Zaehlernummer:     req.Zaehlernummer,
+		EigentuemerStatus: req.EigentuemerStatus,
 	})
 
 	if err != nil {
@@ -151,19 +163,25 @@ func (h *ContactHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.service.Update(r.Context(), actorID, contact.UpdateContactInput{
-		ID:            id,
-		FirstName:     req.FirstName,
-		LastName:      req.LastName,
-		Email:         req.Email,
-		Phone:         req.Phone,
-		Mobile:        req.Mobile,
-		Position:      req.Position,
-		LeadSource:    req.LeadSource,
-		AddressStreet: req.AddressStreet,
-		AddressZip:    req.AddressZip,
-		AddressCity:   req.AddressCity,
-		Latitude:      req.Latitude,
-		Longitude:     req.Longitude,
+		ID:                id,
+		FirstName:         req.FirstName,
+		LastName:          req.LastName,
+		Email:             req.Email,
+		Phone:             req.Phone,
+		Mobile:            req.Mobile,
+		Position:          req.Position,
+		LeadSource:        req.LeadSource,
+		AddressStreet:     req.AddressStreet,
+		AddressZip:        req.AddressZip,
+		AddressCity:       req.AddressCity,
+		Latitude:          req.Latitude,
+		Longitude:         req.Longitude,
+		ConsentPhone:      req.ConsentPhone,
+		ConsentEmail:      req.ConsentEmail,
+		StromverbrauchKwh: req.StromverbrauchKwh,
+		GasverbrauchKwh:   req.GasverbrauchKwh,
+		Zaehlernummer:     req.Zaehlernummer,
+		EigentuemerStatus: req.EigentuemerStatus,
 	})
 	if err != nil {
 		http.Error(w, `{"error":"failed to update contact: `+err.Error()+`"}`, http.StatusInternalServerError)

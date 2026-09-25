@@ -30,13 +30,21 @@ func TestContactHandler_Endpoints(t *testing.T) {
 		Role:   "ADMIN",
 	})
 
-	// 1. Create contact
+	// 1. Create contact with consent and energy data
+	strom := 4200.0
+	gas := 15000.0
 	createBody, _ := json.Marshal(handlers.CreateContactRequest{
-		FirstName:   "Klaus",
-		LastName:    "Schneider",
-		Email:       "klaus.schneider@firma.de",
-		Phone:       "+49 69 555123",
-		AddressCity: "Frankfurt",
+		FirstName:         "Klaus",
+		LastName:          "Schneider",
+		Email:             "klaus.schneider@firma.de",
+		Phone:             "+49 69 555123",
+		AddressCity:       "Frankfurt",
+		ConsentPhone:      true,
+		ConsentEmail:      true,
+		StromverbrauchKwh: &strom,
+		GasverbrauchKwh:   &gas,
+		Zaehlernummer:     "1EMH123456",
+		EigentuemerStatus: "EIGENTUEMER",
 	})
 	reqCreate := httptest.NewRequest("POST", "/api/v1/contacts", bytes.NewReader(createBody)).WithContext(ctx)
 	recCreate := httptest.NewRecorder()
@@ -48,6 +56,15 @@ func TestContactHandler_Endpoints(t *testing.T) {
 
 	var created db.Contact
 	_ = json.NewDecoder(recCreate.Body).Decode(&created)
+	if !created.ConsentPhone || !created.ConsentEmail {
+		t.Fatalf("expected consent flags true, got phone=%v, email=%v", created.ConsentPhone, created.ConsentEmail)
+	}
+	if !created.ConsentUpdatedAt.Valid {
+		t.Fatalf("expected valid consent_updated_at")
+	}
+	if created.Zaehlernummer.String != "1EMH123456" {
+		t.Fatalf("expected zaehlernummer 1EMH123456, got %s", created.Zaehlernummer.String)
+	}
 	contactIDStr := uuid.UUID(created.ID.Bytes).String()
 
 	// 2. List contacts

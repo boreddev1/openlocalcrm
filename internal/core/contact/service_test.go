@@ -2,11 +2,14 @@ package contact_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/contact"
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/stretchr/testify/require"
 )
@@ -146,4 +149,102 @@ func TestContactService_AutoGeocodingOnCreateAndPreservation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 49.0, c3.Latitude.Float64, "preserved manual latitude")
 	require.Equal(t, 10.0, c3.Longitude.Float64, "preserved manual longitude")
+}
+
+func TestContactService_ConsentAndEnergyFields(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	auditService := audit.NewService(querier)
+	svc := contact.NewService(querier, auditService)
+
+	actorID := pgtype.UUID{Bytes: [16]byte{1, 1, 1}, Valid: true}
+	strom := 4500.50
+	gas := 12000.00
+
+	// 1. Create with consent
+	c1, err := svc.Create(ctx, actorID, contact.CreateContactInput{
+		FirstName:         "Max",
+		LastName:          "Mustermann",
+		Email:             "max@mustermann.de",
+		Phone:             "+49 69 112233",
+		ConsentPhone:      true,
+		ConsentEmail:      false,
+		StromverbrauchKwh: &strom,
+		GasverbrauchKwh:   &gas,
+		Zaehlernummer:     "1EMH12345678",
+		EigentuemerStatus: "EIGENTUEMER",
+	})
+	require.NoError(t, err)
+	require.True(t, c1.ConsentPhone)
+	require.False(t, c1.ConsentEmail)
+	require.True(t, c1.ConsentUpdatedAt.Valid)
+	initialConsentTime := c1.ConsentUpdatedAt.Time
+
+	// Energy fields verified
+	require.Equal(t, "1EMH12345678", c1.Zaehlernummer.String)
+	require.Equal(t, "EIGENTUEMER", c1.EigentuemerStatus.String)
+
+	// 2. Update without consent change -> consent_updated_at must remain identical, audit log must mask PII
+	c2, err := svc.Update(ctx, actorID, contact.UpdateContactInput{
+		ID:                c1.ID,
+		FirstName:         "Maximilian",
+		LastName:          "Mustermann",
+		Email:             "max.neu@mustermann.de",
+		Phone:             "+49 69 998877",
+		ConsentPhone:      true,
+		ConsentEmail:      false,
+		Zaehlernummer:     "1EMH12345678",
+		EigentuemerStatus: "EIGENTUEMER",
+	})
+	require.NoError(t, err)
+	require.Equal(t, initialConsentTime, c2.ConsentUpdatedAt.Time)
+
+	// Verify that the UPDATE audit log masked email and phone (F-52)
+	logs, err := querier.ListAuditLogsByEntity(ctx, db.ListAuditLogsByEntityParams{
+		EntityType: "CONTACT",
+		EntityID:   c1.ID,
+		Limit:      10,
+	})
+	require.NoError(t, err)
+	require.True(t, len(logs) >= 2)
+	var updateOld, updateNew map[string]any
+	json.Unmarshal(logs[0].OldValues, &updateOld)
+	json.Unmarshal(logs[0].NewValues, &updateNew)
+	require.NotEqual(t, "max.neu@mustermann.de", updateNew["email"])
+	require.NotEqual(t, "+49 69 998877", updateNew["phone"])
+
+	// 3. Update with consent change -> consent_updated_at changes, audit log recorded
+	time.Sleep(10 * time.Millisecond)
+	c3, err := svc.Update(ctx, actorID, contact.UpdateContactInput{
+		ID:                c1.ID,
+		FirstName:         "Maximilian",
+		LastName:          "Mustermann",
+		Email:             "max.neu@mustermann.de",
+		ConsentPhone:      true,
+		ConsentEmail:      true, // Changed!
+		Zaehlernummer:     "1EMH12345678",
+		EigentuemerStatus: "EIGENTUEMER",
+	})
+	require.NoError(t, err)
+	require.True(t, c3.ConsentEmail)
+	require.True(t, c3.ConsentUpdatedAt.Time.After(initialConsentTime))
+
+	// Verify CONSENT_UPDATE audit log
+	logsAfter, _ := querier.ListAuditLogsByEntity(ctx, db.ListAuditLogsByEntityParams{
+		EntityType: "CONTACT",
+		EntityID:   c1.ID,
+		Limit:      10,
+	})
+	foundConsentAudit := false
+	for _, l := range logsAfter {
+		if l.Action == "CONSENT_UPDATE" {
+			foundConsentAudit = true
+			var newV map[string]any
+			json.Unmarshal(l.NewValues, &newV)
+			require.Equal(t, true, newV["consent_email"])
+			require.Equal(t, true, newV["consent_phone"])
+			break
+		}
+	}
+	require.True(t, foundConsentAudit, "expected CONSENT_UPDATE audit log entry")
 }

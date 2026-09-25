@@ -29,7 +29,7 @@ func TestExportHandler(t *testing.T) {
 		h.ExportContactsCSV(rec, req)
 		require.Equal(t, http.StatusOK, rec.Code)
 		require.Equal(t, "text/csv; charset=utf-8", rec.Header().Get("Content-Type"))
-		require.Contains(t, rec.Body.String(), "Vorname,Nachname,E-Mail")
+		require.Contains(t, rec.Body.String(), "Vorname,Nachname,Email")
 	})
 
 	t.Run("ImportContactsCSV missing file", func(t *testing.T) {
