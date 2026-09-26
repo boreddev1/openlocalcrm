@@ -18,7 +18,7 @@
 - SQL lives in `internal/db/queries/*.sql`; run `/Users/ewenwitte/go/bin/sqlc generate` and commit generated files.
 - No ORM and no whole-dump `[]T` accumulator. Export code must not call generated `List*` or generated `:many` row methods.
 - `knowledge_base_articles.embedding` remains `vector(1024)`; `tags` and `industry_keywords` round-trip as `TEXT[]` with explicit casts.
-- The drill uses separate source (`public`) and target (`scratch`) `db.Queries` handles. Never share one `search_path` between reads and writes.
+- The drill uses separate source (`public`) and target (`scratch`) `db.Queries` handles. The target sets `search_path` to `scratch` only, so a missing scratch table fails instead of writing live data.
 - Restore defaults to merge. Replace is explicit, transactional, and reverse-ordered.
 - Restore success is reported only after commit and post-commit audit. Rollback and post-commit audit failure use distinct error codes.
 - Demo restore/drill return HTTP 501. Demo export is allowed only through a row-streaming demo source, never `List*` helpers.
@@ -51,6 +51,7 @@
 - `internal/core/emailtemplate/service.go` — template CRUD and real AI generation.
 - `internal/server/handlers/invites.go` — public validate/accept endpoints.
 - `internal/server/handlers/email_templates.go` — admin template CRUD/generation endpoints.
+- `scripts/test-backup-integration.sh` — disposable pgvector gate for vector/TEXT[]/FK round-trips.
 - `web/src/pages/AcceptInvitePage.tsx` — public token validation and password form.
 
 **Modify**
@@ -63,6 +64,7 @@
 - `cmd/server/main.go` — pass the real pool; leave demo pool nil.
 - `web/src/pages/SettingsPage.tsx` — invite link, streamed backup upload/download, TOTP disable, templates, Bearer webhook.
 - `web/src/App.tsx`, `web/src/api/client.ts`, `web/src/context/AuthContext.tsx` — public invite route, streamed helpers, TOTP session field.
+- `Makefile` — run the real-PostgreSQL backup integration test from `make check`.
 - `e2e/auth.spec.ts`, `e2e/connectors.spec.ts`, `e2e/live-simulation.spec.ts` — honest real-request assertions.
 
 ---
@@ -489,7 +491,29 @@ func requestMeta(r *http.Request, claims *auth.AccessClaims) backup.RequestMeta 
 
 - [ ] **Step 8: Stream the browser download**
 
-Add `downloadToFile` to `web/src/api/client.ts`; it must attach CSRF/auth cookies, call `response.body.getReader()`, and write chunks to a blob without `response.json()` or `JSON.stringify`. Replace `handleDownloadBackup` with this helper and surface non-2xx JSON errors.
+Add `downloadToFile` to `web/src/api/client.ts`. It attaches credentials, reads `response.body.getReader()` into chunks, and creates the Blob, object URL, and download click **only after the reader returns `done: true` without throwing**. If `Content-Length` is present, require `receivedBytes === contentLength` before saving. Any stream error, reset, or length mismatch discards all chunks and throws; it must never produce a file.
+
+```ts
+const reader = response.body?.getReader();
+if (!reader) throw new Error('Backup-Stream nicht verfügbar');
+const chunks: Uint8Array[] = [];
+let receivedBytes = 0;
+for (;;) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  if (value) {
+    chunks.push(value);
+    receivedBytes += value.byteLength;
+  }
+}
+const expected = Number(response.headers.get('Content-Length') || 0);
+if (expected > 0 && receivedBytes !== expected) {
+  throw new Error(`Backup unvollständig: ${receivedBytes}/${expected} Bytes`);
+}
+const blob = new Blob(chunks as BlobPart[], { type: 'application/json' });
+```
+
+Replace `handleDownloadBackup` with this helper and surface non-2xx JSON errors. Add a Playwright regression that fulfills `/api/v1/backup/export` with HTTP 200, interrupts the body, and asserts no download is started.
 
 - [ ] **Step 9: Run export tests and web checks**
 
@@ -513,7 +537,9 @@ Expected: PASS.
 - Modify: `internal/server/router.go`
 - Modify: `cmd/server/main.go`
 - Modify: `web/src/pages/SettingsPage.tsx`
-- Test: `internal/core/backup/restore_test.go`, `internal/core/backup/scratch_integration_test.go`, `internal/server/handlers/backup_test.go`
+- Create: `scripts/test-backup-integration.sh`
+- Modify: `Makefile`
+- Test: `internal/core/backup/restore_test.go`, `internal/core/backup/scratch_postgres_test.go`, `internal/server/handlers/backup_test.go`
 
 **Interfaces:**
 - Consumes: Task 2 row source and table registry.
@@ -552,22 +578,26 @@ Unit tests must prove:
 - post-commit audit failure returns `ErrRestoreAuditFailed` with `Committed == true`;
 - rollback returns `ErrRestoreRolledBack` with `Committed == false`;
 - demo restore/drill return 501;
-- a fake scratch manager records `CREATE SCHEMA`, copied-FK drops, scratch-FK additions, and guaranteed drop.
+- a fake scratch manager records `CREATE SCHEMA`, copied-FK drops, scratch-FK additions, and guaranteed drop;
+- a missing scratch table fails the drill and leaves every `public` count unchanged.
 
-Use a build-tagged PostgreSQL test for actual FK enforcement:
+Create `internal/core/backup/scratch_postgres_test.go` as a normal test that skips unless `TEST_DATABASE_URL` is set:
 
 ```go
-//go:build integration
-
-func TestScratchDrillCopiesSeededRowsWithoutFalseZeroPass(t *testing.T) {
+func TestScratchDrillRoundTripsTypedRowsWithoutFalseZeroPass(t *testing.T) {
     dbURL := os.Getenv("TEST_DATABASE_URL")
     if dbURL == "" { t.Skip("TEST_DATABASE_URL not set") }
-    // Seed at least one user, company, contact, and deal in public.
-    // Run Drill. Require every seeded table's scratch count > 0 and equal to public.
+    // Seed users, companies, contacts, deals, company_research.industry_keywords,
+    // and knowledge_base_articles.tags plus one non-null vector(1024) embedding.
+    // Run Drill. Require seeded scratch counts to be non-zero and equal public.
+    // Assert tags, industry_keywords, and the 1024-float vector equal the source.
     // Query pg_constraint and require no scratch FK references public.
+    // Drop one scratch table, rerun, and require failure with unchanged public counts.
     // Require the scratch schema is absent after success and injected failure.
 }
 ```
+
+Create `scripts/test-backup-integration.sh` to run this test in the canonical gate. It uses `TEST_DATABASE_URL` when provided. Otherwise it starts a disposable `pgvector/pgvector:pg16` container, applies migrations through `00009`, records the already-applied `00010_foreign_key_indexes.sql` in `schema_migrations` without editing or executing that historical file, runs `00011` onward, exports `TEST_DATABASE_URL`, runs the test, and removes the container. Add `check-backup-integration` to the `Makefile` and invoke it from `make check`.
 
 - [ ] **Step 2: Run red tests**
 
@@ -581,24 +611,34 @@ Expected: FAIL because restore and scratch behavior do not exist.
 
 Add `Upsert<Table>Row :exec` for the 22 `backup.sql` tables and `TruncateBackupTables :exec`. The truncate statement lists tables in reverse order and ends with `RESTART IDENTITY CASCADE`.
 
-Use explicit `jsonb_to_record` casts. The mandatory non-JSONB casts are:
+Use `jsonb_to_record(sqlc.arg(row)::jsonb) AS r(...)` and select from the typed record fields. Do not use `r->>'json_array'` for array columns. The mandatory array, vector, enum, and text-PK forms are:
 
 ```sql
 -- knowledge_base_articles
-(r->>'embedding')::vector(1024)
-(r->>'tags')::text[]
+ARRAY(SELECT jsonb_array_elements_text(COALESCE(r.tags, '[]'::jsonb)))
+(r.embedding #>> '{}')::vector(1024)
 
 -- company_research
-(r->>'industry_keywords')::text[]
+ARRAY(SELECT jsonb_array_elements_text(COALESCE(r.industry_keywords, '[]'::jsonb)))
 
--- enum-backed columns
-(r->>'role')::user_role
-(r->>'status')::user_status
-(r->>'priority')::todo_status
-(r->>'direction')::email_direction
+-- users
+r.role::user_role
+r.status::user_status
+
+-- todos
+r.status::todo_status
+r.priority::todo_priority
+
+-- email_messages
+r.direction::email_direction
+
+-- workflows, workflow_runs, workflow_steps
+r.id
+r.workflow_id
+r.run_id
 ```
 
-Every upsert uses `ON CONFLICT (id) DO UPDATE` and updates every non-PK column. `email_templates` uses `ON CONFLICT (key)` in its own query file.
+For UUID-keyed tables use `r.id::uuid` and `ON CONFLICT (id)`. For `workflows`, `workflow_runs`, and `workflow_steps`, `id` and their text foreign keys remain `r.id`, `r.workflow_id`, and `r.run_id` without UUID casts. Every upsert updates every non-PK column. `email_templates` uses `ON CONFLICT (key)` in its own query file.
 
 - [ ] **Step 4: Spool and validate before transaction work**
 
@@ -664,8 +704,8 @@ Add `Pool *pgxpool.Pool` to `server.Config` and pass `dbPool` from `main.go`; de
 4. drop any copied scratch FK before adding replacements;
 5. rewrite `REFERENCES public.` to `REFERENCES scratch.` and add the FK to the scratch child;
 6. acquire a source connection and create `db.New(sourceConn)` with effective schema `public`;
-7. begin a separate target transaction, `SET LOCAL search_path TO scratch, public`, and create `db.New(targetTx)`;
-8. stream source rows into target upserts;
+7. begin a separate target transaction, verify all 24 scratch tables exist, then run `SET LOCAL search_path TO scratch` only and create `db.New(targetTx)`;
+8. stream source rows into target upserts; a missing scratch table must fail the transaction and can never fall back to `public`;
 9. compare nonzero seeded counts and enforce constraints;
 10. `DROP SCHEMA ... CASCADE` in a deferred cleanup path.
 
@@ -677,15 +717,18 @@ Add `POST /api/v1/backup/restore` under the existing admin backup group. Keep dr
 
 ```bash
 go test ./internal/core/backup ./internal/server/handlers ./internal/db/... -count=1
+./scripts/test-backup-integration.sh
 ```
 
-With a disposable already-migrated PostgreSQL test database:
+The script is also called by `make check`:
 
-```bash
-TEST_DATABASE_URL='postgres://...' go test -tags=integration ./internal/core/backup -run TestScratchDrill -count=1
+```make
+.PHONY: check-backup-integration
+check-backup-integration:
+	./scripts/test-backup-integration.sh
 ```
 
-Expected: PASS; scratch counts equal seeded public counts, no scratch FK references public, and scratch schema is gone.
+Add `check-backup-integration` as a prerequisite of `check`. Expected: PASS; vector(1024), `TEXT[]`, and ordinary FK rows round-trip exactly, scratch counts are non-zero and equal public, a missing scratch table cannot write to public, no scratch FK references public, and the scratch schema is gone.
 
 - [ ] **Step 10: Commit Task 2**
 
@@ -693,6 +736,7 @@ Expected: PASS; scratch counts equal seeded public counts, no scratch FK referen
 git add internal/db/queries/backup.sql internal/db/*.sql.go internal/db/backup_stream.go \
   internal/db/demo internal/core/backup internal/server/handlers/backup.go \
   internal/server/handlers/backup_test.go internal/server/router.go cmd/server/main.go \
+  scripts/test-backup-integration.sh Makefile \
   web/src/api/client.ts web/src/pages/SettingsPage.tsx e2e
 git commit -m "feat(backup): implement full streaming backup, restore, and real restore drill (B1, B2)"
 ```
@@ -792,6 +836,15 @@ RETURNING u.*;
 - Public: `GET /api/v1/auth/accept-invite?token=...` returns `{valid,email,first_name,expires_at}` without mutation.
 - Public, CSRF-exempt, rate-limited: `POST /api/v1/auth/accept-invite` accepts `{token,password}`.
 
+Register both accept-invite routes next to login, before `api.Group(func(protected chi.Router) ...)`; placing POST inside the protected group would make CSRF rejection the default instead of the documented exemption:
+
+```go
+if inviteH != nil {
+    api.With(auth.RateLimitMiddleware(loginLimiter)).Get("/auth/accept-invite", inviteH.Validate)
+    api.With(auth.RateLimitMiddleware(loginLimiter)).Post("/auth/accept-invite", inviteH.Accept)
+}
+```
+
 Audit `USER_INVITE_CREATED`, `USER_INVITE_ACCEPTED`, and rejected acceptance without raw-token material. Run `/Users/ewenwitte/go/bin/sqlc generate` after adding the two invite statements and implement their demo methods before compiling.
 
 - [ ] **Step 5: Run invite tests**
@@ -888,7 +941,7 @@ await expect(page.getByText(/Einladung erstellt/)).toBeVisible();
 await expect(page.getByRole('textbox', { name: /Einladungslink/i })).toHaveValue(/\/accept-invite\?token=/);
 ```
 
-Add a clean-context invite acceptance test. Replace the TOTP local-toggle assertion with a request assertion for `POST /api/v1/auth/totp/disable` and a server error case. Update the connector test to fill the empty token field and assert the request has `Authorization: Bearer ...` and no `X-Connector-Token`. Update the drill test to accept an honest 501 in demo mode.
+Add a clean-context invite acceptance test. Replace the TOTP local-toggle assertion with a request assertion for `POST /api/v1/auth/totp/disable` and a server error case. Update the connector test to fill the empty token field and assert the request has `Authorization: Bearer ...` and no `X-Connector-Token`. Update the drill test to accept an honest 501 in demo mode. Add an export test that aborts a 200 response body and asserts that no download event occurs.
 
 - [ ] **Step 2: Run red Playwright tests**
 
