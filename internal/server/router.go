@@ -11,12 +11,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/connectors"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/appointment"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/backup"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/company"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/contact"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/deal"
@@ -35,7 +37,11 @@ import (
 )
 
 type Config struct {
-	DB         db.Querier
+	DB db.Querier
+	// Pool is the real PostgreSQL pool. It stays nil in demo mode, which is how
+	// the restore and the restore drill honestly report 501 instead of
+	// simulating a success.
+	Pool       *pgxpool.Pool
 	SSEHub     *sse.Hub
 	Storage    storage.StorageService
 	PubKey     ed25519.PublicKey
@@ -228,7 +234,16 @@ func NewRouter(cfg Config) http.Handler {
 		notificationH = handlers.NewNotificationHandler(notificationSvc)
 		exportH = handlers.NewExportHandler(exportSvc)
 		userH = handlers.NewUserHandler(cfg.DB)
-		backupH = handlers.NewBackupHandler(cfg.DB)
+		// Both *db.Queries and the demo querier implement the streaming row
+		// source, so the router never has to know which one it holds. A
+		// Querier that does not gets a service without a row source, and
+		// backup.CanExport then reports false so the handler answers 501
+		// before it commits a 200 it could never fill.
+		rowSource, hasRowSource := cfg.DB.(backup.RowSource)
+		if !hasRowSource {
+			rowSource = nil
+		}
+		backupH = handlers.NewBackupHandler(backup.NewService(rowSource, auditSvc, cfg.Pool, cfg.DB))
 		settingsH = handlers.NewSettingsHandler()
 		automationH = handlers.NewAutomationHandler(automationSvc)
 	}
@@ -317,6 +332,7 @@ func NewRouter(cfg Config) http.Handler {
 					br.Use(auth.RequireRole("ADMIN"))
 					br.Post("/drill", backupH.Drill)
 					br.Get("/export", backupH.Export)
+					br.Post("/restore", backupH.Restore)
 				})
 			}
 

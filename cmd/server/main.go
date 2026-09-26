@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
@@ -183,10 +184,13 @@ func main() {
 	sseHub := sse.NewHub()
 
 	var querier db.Querier
+	// The pool stays nil in demo mode, which is how the restore endpoints
+	// report 501 instead of pretending a drill succeeded.
+	var dbPool *pgxpool.Pool
 	if isDemoMode {
 		querier = demo.NewInMemoryQuerier()
 	} else {
-		dbPool, err := db.ConnectWithRetry(ctx, dbURL, 15, 1*time.Second)
+		dbPool, err = db.ConnectWithRetry(ctx, dbURL, 15, 1*time.Second)
 		if err != nil {
 			log.Fatalf("[FATAL] PostgreSQL database connection failed: %v", err)
 		}
@@ -202,6 +206,7 @@ func main() {
 
 	r := server.NewRouter(server.Config{
 		DB:       querier,
+		Pool:     dbPool,
 		SSEHub:   sseHub,
 		Storage:  localStorage,
 		PubKey:   pubKey,

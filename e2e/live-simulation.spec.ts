@@ -51,7 +51,11 @@ test.describe('10-Minute Continuous Live User & E-Mail Simulation Suite', () => 
     const restoreDrillBtn = page.getByRole('button', { name: /Restore-Drill ausführen/i });
     await expect(restoreDrillBtn).toBeVisible();
     await restoreDrillBtn.click();
-    await expect(page.getByText(/Restore-Drill erfolgreich/i)).toBeVisible();
+    // Demo mode has no PostgreSQL pool, so the drill cannot perform a real
+    // scratch-schema round trip. It must report that honestly instead of
+    // claiming a pass it never verified.
+    await expect(page.getByText(/Prüfung fehlgeschlagen/i)).toBeVisible();
+    await expect(page.getByText(/Restore-Drill erfolgreich/i)).toHaveCount(0);
 
     // Test E-Mail Templates tab (§4.6 / §5.1)
     await page.getByRole('button', { name: /E-Mail-Vorlagen/i }).click();

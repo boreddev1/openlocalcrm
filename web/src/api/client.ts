@@ -97,6 +97,151 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
   throw new ApiError(res.status, errorMessage, errJson);
 }
 
+// --- Backup (streaming download / upload) ----------------------------------
+
+/**
+ * Streams an authenticated endpoint straight to a file.
+ *
+ * The Blob, the object URL and the download click are created only after the
+ * reader reports `done` without throwing. An interrupted stream therefore never
+ * produces a file: every buffered chunk is discarded and an error is thrown. If
+ * the server sent a Content-Length, the received byte count must match it before
+ * anything is saved, so a truncated body can never masquerade as a complete
+ * backup.
+ */
+export async function downloadToFile(
+  endpoint: string,
+  fileName: string,
+  options: RequestInit = {},
+): Promise<number> {
+  const headers = new Headers(options.headers || {});
+  if (!headers.has('X-CSRF-Token')) {
+    const csrfToken = getCookie('csrf_token');
+    if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(endpoint, { ...options, headers, credentials: 'include' });
+  } catch (netErr: any) {
+    throw new ApiError(
+      0,
+      `Verbindung zum Server fehlgeschlagen (${netErr?.message || 'Netzwerkfehler'})`,
+    );
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let message = `HTTP ${res.status}: ${res.statusText}`;
+    let data: any = null;
+    try {
+      data = JSON.parse(text);
+      if (data && (data.message || data.error)) message = data.message || data.error;
+    } catch {
+      if (text) message = text;
+    }
+    if (res.status === 401) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('auth:logout'));
+      }
+    }
+    throw new ApiError(res.status, message, data);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new ApiError(res.status, 'Backup-Stream nicht verfügbar');
+
+  const chunks: Uint8Array[] = [];
+  let receivedBytes = 0;
+  for (;;) {
+    let step: ReadableStreamReadResult<Uint8Array>;
+    try {
+      step = await reader.read();
+    } catch (streamErr: any) {
+      throw new ApiError(
+        0,
+        `Backup-Stream abgebrochen (${streamErr?.message || 'Verbindung unterbrochen'})`,
+      );
+    }
+    if (step.done) break;
+    if (step.value) {
+      chunks.push(step.value);
+      receivedBytes += step.value.byteLength;
+    }
+  }
+
+  const expected = Number(res.headers.get('Content-Length') || 0);
+  if (expected > 0 && receivedBytes !== expected) {
+    throw new ApiError(0, `Backup unvollständig: ${receivedBytes}/${expected} Bytes`);
+  }
+
+  const blob = new Blob(chunks as BlobPart[], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  return receivedBytes;
+}
+
+export interface RestoreResponse {
+  mode: string;
+  counts: Record<string, number>;
+  committed: boolean;
+}
+
+/**
+ * Uploads a backup envelope. The committed flag in the error payload is the
+ * only trustworthy answer: a rolled-back restore and a committed restore with a
+ * failed audit insert are both HTTP 500 but mean opposite things.
+ */
+export async function uploadBackup(
+  file: File,
+  mode: 'merge' | 'replace',
+): Promise<RestoreResponse> {
+  const headers = new Headers();
+  const csrfToken = getCookie('csrf_token');
+  if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
+
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1/backup/restore?mode=${mode}`, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: file,
+    });
+  } catch (netErr: any) {
+    throw new ApiError(
+      0,
+      `Verbindung zum Server fehlgeschlagen (${netErr?.message || 'Netzwerkfehler'})`,
+    );
+  }
+
+  const text = await res.text();
+  let data: any;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const committed = Boolean(data && data.committed);
+    throw new ApiError(res.status, (data && (data.message || data.error)) || `HTTP ${res.status}`, {
+      ...data,
+      committed,
+    });
+  }
+  return data as RestoreResponse;
+}
+
 // --- E-Mail (SMTP/IMAP) --------------------------------------------------
 
 export interface EmailAccount {

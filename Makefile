@@ -1,4 +1,4 @@
-.PHONY: help build up down restart logs test test-e2e check-licenses run-local clean
+.PHONY: help build up down restart logs test test-e2e check-licenses run-local clean check-backup-integration
 
 help: ## Show help instructions
 	@echo "OpenLocalCRM — Single-Tenant Production & Development Commands:"
@@ -79,7 +79,7 @@ lint: ## Run Go static analysis, frontend ESLint and TypeScript checks
 	go vet ./...
 	cd web && pnpm lint && pnpm typecheck
 
-check: setup-hooks fmt lint check-licenses test ## Run full suite of local quality checks
+check: setup-hooks fmt lint check-licenses check-backup-integration test ## Run full suite of local quality checks
 
 setup-hooks: ## Configure and enable enterprise Git pre-commit and pre-push hooks
 	git config core.hooksPath .githooks
@@ -91,6 +91,9 @@ simulate: ## Run 10-minute visual live simulation in browser
 
 check-licenses: ## Verify Open Source License compliance
 	./scripts/check-licenses.sh
+
+check-backup-integration: ## Verify the backup round trip against a real pgvector database
+	./scripts/test-backup-integration.sh
 
 run-local: build-web ## Run Go binary locally
 	go run ./cmd/server

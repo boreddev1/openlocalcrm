@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -135,11 +136,52 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 		t.Fatalf("expected 200 OK for admin deleting contact, got %d", adminDelRes.StatusCode)
 	}
 
-	// 9. Backup drill as admin succeeds
+	// 9. Backup drill as admin: demo mode has no PostgreSQL pool, so a real
+	// scratch-schema round trip is impossible. The endpoint must say so (501)
+	// instead of reporting a healthy check it never performed.
 	drillReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/backup/drill", nil)
 	drillReq.Header.Set("Authorization", "Bearer "+adminToken)
 	drillRes, err := client.Do(drillReq)
-	if err != nil || drillRes.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 OK for backup drill, got %d", drillRes.StatusCode)
+	if err != nil {
+		t.Fatalf("backup drill request failed: %v", err)
+	}
+	if drillRes.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected 501 for a demo-mode backup drill, got %d", drillRes.StatusCode)
+	}
+	drillBody, _ := io.ReadAll(drillRes.Body)
+	if bytes.Contains(drillBody, []byte(`"passed":true`)) || bytes.Contains(drillBody, []byte("healthy")) {
+		t.Fatalf("demo drill must not claim success: %s", drillBody)
+	}
+
+	// 10. Export still works in demo mode: it streams the in-memory fixtures
+	// through the same row source without buffering a whole table.
+	exportReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/backup/export", nil)
+	exportReq.Header.Set("Authorization", "Bearer "+adminToken)
+	exportRes, err := client.Do(exportReq)
+	if err != nil || exportRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for backup export, got %d", exportRes.StatusCode)
+	}
+	var envelope struct {
+		Format string                       `json:"format"`
+		Tables map[string][]json.RawMessage `json:"tables"`
+	}
+	if err := json.NewDecoder(exportRes.Body).Decode(&envelope); err != nil {
+		t.Fatalf("backup export is not a valid envelope: %v", err)
+	}
+	if envelope.Format != "openlocalcrm-backup" || len(envelope.Tables) != 24 {
+		t.Fatalf("unexpected backup envelope: format=%q tables=%d", envelope.Format, len(envelope.Tables))
+	}
+
+	// 11. Restore needs a pool too, so it reports 501 rather than pretending.
+	restoreReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/backup/restore",
+		bytes.NewReader([]byte(`{"format":"openlocalcrm-backup","version":1,"tables":{}}`)))
+	restoreReq.Header.Set("Authorization", "Bearer "+adminToken)
+	restoreReq.Header.Set("X-CSRF-Token", "missing-csrf-is-not-the-point")
+	restoreRes, err := client.Do(restoreReq)
+	if err != nil {
+		t.Fatalf("backup restore request failed: %v", err)
+	}
+	if restoreRes.StatusCode == http.StatusOK {
+		t.Fatalf("demo restore must never report success")
 	}
 }

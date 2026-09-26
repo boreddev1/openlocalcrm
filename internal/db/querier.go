@@ -61,8 +61,56 @@ type Querier interface {
 	DeleteRefreshToken(ctx context.Context, tokenHash string) error
 	DeleteTodo(ctx context.Context, id pgtype.UUID) error
 	DeleteUserRefreshTokens(ctx context.Context, userID pgtype.UUID) error
+	ExportAIAuditLogsRows(ctx context.Context) ([][]byte, error)
+	ExportAIResearchJobsRows(ctx context.Context) ([][]byte, error)
+	ExportAppointmentsRows(ctx context.Context) ([][]byte, error)
+	ExportAuditLogsRows(ctx context.Context) ([][]byte, error)
+	ExportCallActivitiesRows(ctx context.Context) ([][]byte, error)
+	ExportCompaniesRows(ctx context.Context) ([][]byte, error)
+	ExportCompanyResearchRows(ctx context.Context) ([][]byte, error)
+	ExportContactsRows(ctx context.Context) ([][]byte, error)
+	ExportDealsRows(ctx context.Context) ([][]byte, error)
+	ExportEmailAccountsRows(ctx context.Context) ([][]byte, error)
+	ExportEmailAttachmentsRows(ctx context.Context) ([][]byte, error)
+	ExportEmailMessagesRows(ctx context.Context) ([][]byte, error)
 	ExportEmailTemplatesRows(ctx context.Context) ([][]byte, error)
+	ExportIntakeFormsRows(ctx context.Context) ([][]byte, error)
+	ExportKnowledgeBaseArticlesRows(ctx context.Context) ([][]byte, error)
+	ExportNotesRows(ctx context.Context) ([][]byte, error)
+	ExportNotificationsRows(ctx context.Context) ([][]byte, error)
+	ExportRefreshTokensRows(ctx context.Context) ([][]byte, error)
+	ExportTodosRows(ctx context.Context) ([][]byte, error)
 	ExportUserInvitesRows(ctx context.Context) ([][]byte, error)
+	// internal/db/queries/backup.sql
+	//
+	// B1/B2: canonical SQL for the bounded-memory backup export, the static
+	// restore upserts, and the reverse-ordered replace-mode truncation.
+	//
+	// Contract rules that this file is the single source of truth for:
+	//
+	//   * Every selector returns `row_to_json(t)` ordered by primary key, so the
+	//     wire format keeps JSONB/array/vector columns as JSON values instead of
+	//     base64 strings.
+	//   * Every restore statement is `:exec` and takes exactly one bind parameter,
+	//     `sqlc.arg(row)::jsonb`. No identifier is ever assembled from request
+	//     data.
+	//   * Restore uses typed `jsonb_to_record` fields, never `r->>'field'`: a JSON
+	//     null must yield SQL NULL, which `''::uuid` would turn into a cast error.
+	//   * TEXT[] columns are rebuilt with
+	//     `ARRAY(SELECT jsonb_array_elements_text(COALESCE(r.col, '[]'::jsonb)))`
+	//     and the embedding is cast back to `vector(1024)`. The 1024-dimensional
+	//     embedding contract is never reduced to the obsolete 768 contract.
+	//   * `workflows`, `workflow_runs` and `workflow_steps` keep text primary and
+	//     foreign keys, so `r.id`, `r.workflow_id` and `r.run_id` stay uncast.
+	//   * Enum and vector types are schema-qualified with `public.`. The scratch
+	//     restore drill pins `search_path` to the scratch schema only, so an
+	//     unqualified `user_role` or `vector` would be unresolvable there. Only the
+	//     *types* are qualified; table names stay unqualified on purpose, so a
+	//     missing scratch table fails instead of silently resolving to public.
+	ExportUsersRows(ctx context.Context) ([][]byte, error)
+	ExportWorkflowRunsRows(ctx context.Context) ([][]byte, error)
+	ExportWorkflowStepsRows(ctx context.Context) ([][]byte, error)
+	ExportWorkflowsRows(ctx context.Context) ([][]byte, error)
 	GetAIResearchJobByID(ctx context.Context, id pgtype.UUID) (AiResearchJob, error)
 	GetAppointmentByID(ctx context.Context, id pgtype.UUID) (Appointment, error)
 	GetCompanyByID(ctx context.Context, id pgtype.UUID) (Company, error)
@@ -116,6 +164,7 @@ type Querier interface {
 	SearchCompanies(ctx context.Context, arg SearchCompaniesParams) ([]Company, error)
 	SearchContacts(ctx context.Context, arg SearchContactsParams) ([]Contact, error)
 	SearchKBArticlesByEmbedding(ctx context.Context, arg SearchKBArticlesByEmbeddingParams) ([]SearchKBArticlesByEmbeddingRow, error)
+	TruncateBackupTables(ctx context.Context) error
 	UpdateAIResearchJobStatus(ctx context.Context, arg UpdateAIResearchJobStatusParams) (AiResearchJob, error)
 	UpdateAppointment(ctx context.Context, arg UpdateAppointmentParams) (Appointment, error)
 	UpdateAppointmentPushStatus(ctx context.Context, arg UpdateAppointmentPushStatusParams) (Appointment, error)
@@ -141,8 +190,30 @@ type Querier interface {
 	UpdateUserTOTP(ctx context.Context, arg UpdateUserTOTPParams) error
 	UpdateUserTOTPLastUsedStep(ctx context.Context, arg UpdateUserTOTPLastUsedStepParams) error
 	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) (WorkflowRun, error)
+	UpsertAIAuditLogsRow(ctx context.Context, row []byte) error
+	UpsertAIResearchJobsRow(ctx context.Context, row []byte) error
+	UpsertAppointmentsRow(ctx context.Context, row []byte) error
+	UpsertAuditLogsRow(ctx context.Context, row []byte) error
+	UpsertCallActivitiesRow(ctx context.Context, row []byte) error
+	UpsertCompaniesRow(ctx context.Context, row []byte) error
+	UpsertCompanyResearchRow(ctx context.Context, row []byte) error
+	UpsertContactsRow(ctx context.Context, row []byte) error
+	UpsertDealsRow(ctx context.Context, row []byte) error
+	UpsertEmailAccountsRow(ctx context.Context, row []byte) error
+	UpsertEmailAttachmentsRow(ctx context.Context, row []byte) error
+	UpsertEmailMessagesRow(ctx context.Context, row []byte) error
 	UpsertEmailTemplatesRow(ctx context.Context, dollar_1 []byte) error
+	UpsertIntakeFormsRow(ctx context.Context, row []byte) error
+	UpsertKnowledgeBaseArticlesRow(ctx context.Context, row []byte) error
+	UpsertNotesRow(ctx context.Context, row []byte) error
+	UpsertNotificationsRow(ctx context.Context, row []byte) error
+	UpsertRefreshTokensRow(ctx context.Context, row []byte) error
+	UpsertTodosRow(ctx context.Context, row []byte) error
 	UpsertUserInvitesRow(ctx context.Context, dollar_1 []byte) error
+	UpsertUsersRow(ctx context.Context, row []byte) error
+	UpsertWorkflowRunsRow(ctx context.Context, row []byte) error
+	UpsertWorkflowStepsRow(ctx context.Context, row []byte) error
+	UpsertWorkflowsRow(ctx context.Context, row []byte) error
 }
 
 var _ Querier = (*Queries)(nil)

@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/backup"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/openlocalcrm/openlocalcrm/internal/server/handlers"
 )
@@ -83,7 +85,7 @@ func TestUserHandler_ListAndProtection(t *testing.T) {
 
 func TestBackupHandler_DrillAndExport(t *testing.T) {
 	querier := demo.NewInMemoryQuerier()
-	h := handlers.NewBackupHandler(querier)
+	h := handlers.NewBackupHandler(backup.NewService(querier, nil, nil, querier))
 
 	adminClaims := &auth.AccessClaims{
 		UserID: uuid.New(),
@@ -105,20 +107,28 @@ func TestBackupHandler_DrillAndExport(t *testing.T) {
 		t.Fatalf("expected 403 for non-admin drill, got %d", rec.Code)
 	}
 
-	// 2. Drill as ADMIN -> 200 OK
+	// 2. Drill as ADMIN in demo mode -> 501 Not Implemented. The demo has no
+	// PostgreSQL pool, so a real scratch-schema round trip is impossible and
+	// the endpoint must say so instead of reporting a healthy check.
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/backup/drill", nil)
 	req = req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, adminClaims))
 	rec = httptest.NewRecorder()
 	h.Drill(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK for admin drill, got %d", rec.Code)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("expected 501 for a demo-mode drill, got %d (body: %s)", rec.Code, rec.Body.String())
 	}
-	var drill handlers.DrillResponse
-	if err := json.NewDecoder(rec.Body).Decode(&drill); err != nil {
-		t.Fatalf("failed decoding drill response: %v", err)
+	if strings.Contains(rec.Body.String(), "passed") || strings.Contains(rec.Body.String(), "healthy") {
+		t.Fatalf("demo drill must not report a successful result: %s", rec.Body.String())
 	}
-	if drill.IntegrityCheck != "passed" || drill.UserCount < 2 {
-		t.Fatalf("unexpected drill stats: %+v", drill)
+
+	// 2b. Restore in demo mode -> 501 as well
+	restoreReq := httptest.NewRequest(http.MethodPost, "/api/v1/backup/restore",
+		bytes.NewReader([]byte(`{"format":"openlocalcrm-backup","version":1,"tables":{}}`)))
+	restoreReq = restoreReq.WithContext(context.WithValue(restoreReq.Context(), auth.UserContextKey, adminClaims))
+	rec = httptest.NewRecorder()
+	h.Restore(rec, restoreReq)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("expected 501 for a demo-mode restore, got %d (body: %s)", rec.Code, rec.Body.String())
 	}
 
 	// 3. Export as ADMIN -> 200 OK with json attachment

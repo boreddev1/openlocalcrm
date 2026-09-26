@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   apiFetch,
+  downloadToFile,
+  uploadBackup,
   getEmailAccounts,
   createEmailAccount,
   updateEmailAccount,
@@ -440,14 +442,20 @@ export const SettingsPage: React.FC = () => {
   // --- Backup & Restore-Drill State (§8.7) ---
   const [restoreDrillStatus, setRestoreDrillStatus] = useState<string | null>(null);
   const [isDrilling, setIsDrilling] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
 
   const handleRunRestoreDrill = async () => {
     setIsDrilling(true);
     setRestoreDrillStatus('Konsistenzprüfung läuft...');
     try {
       const res = await apiFetch<any>('/api/v1/backup/drill', { method: 'POST' });
+      // The drill really cloned the live tables into a scratch schema and
+      // compared every row, so the counts come from real work.
+      const tables = Array.isArray(res.tables) ? res.tables : [];
+      const rows = tables.reduce((sum: number, t: any) => sum + Number(t.target_rows || 0), 0);
       setRestoreDrillStatus(
-        `✅ Restore-Drill erfolgreich (Restore-Drill & Konsistenzprüfung erfolgreich: ${res.user_count} Benutzer, ${res.company_count} Firmen, ${res.contact_count} Kontakte, ${res.deal_count} Deals).`,
+        `✅ Restore-Drill erfolgreich: ${rows} Zeilen in ${tables.length} Tabellen in das Scratch-Schema importiert und byteweise verglichen.`,
       );
     } catch (err: any) {
       setRestoreDrillStatus(`❌ Prüfung fehlgeschlagen: ${err.message}`);
@@ -456,18 +464,67 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  // Streams the response body to disk. No blob is created unless the whole
+  // envelope arrived, so an interrupted download produces no file at all.
   const handleDownloadBackup = async (_type?: 'db' | 'storage') => {
+    setBackupStatus(null);
+    setIsDownloadingBackup(true);
     try {
-      const data = await apiFetch<any>('/api/v1/backup/export');
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `openlocalcrm-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const bytes = await downloadToFile(
+        '/api/v1/backup/export',
+        `openlocalcrm-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      );
+      setBackupStatus(`✅ Backup vollständig heruntergeladen (${bytes} Bytes).`);
     } catch (err: any) {
-      alert(`Export fehlgeschlagen: ${err.message}`);
+      setBackupStatus(`❌ Export fehlgeschlagen, es wurde keine Datei gespeichert: ${err.message}`);
+    } finally {
+      setIsDownloadingBackup(false);
+    }
+  };
+
+  // --- Restore (§8.7) ---
+  const [restoreMode, setRestoreMode] = useState<'merge' | 'replace'>('merge');
+  const [isRestoring, setIsRestoring] = useState(false);
+
+  const handleRestoreBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Reset the input so re-selecting the same file fires again.
+    event.target.value = '';
+    if (!file) return;
+
+    if (restoreMode === 'replace') {
+      const confirmed = window.confirm(
+        'Ersetzungsmodus: ALLE 24 Tabellen werden zuerst geleert und dann aus dieser Datei neu befüllt. Fortfahren?',
+      );
+      if (!confirmed) return;
+    }
+
+    setBackupStatus(null);
+    setIsRestoring(true);
+    try {
+      const res = await uploadBackup(file, restoreMode);
+      setBackupStatus(
+        `✅ Wiederherstellung übernommen (Modus ${res.mode}, ${Object.keys(res.counts || {}).length} Tabellen).`,
+      );
+    } catch (err: any) {
+      // A rolled-back restore and a committed restore with a failed audit
+      // insert are both HTTP 500, and the difference matters: only the second
+      // one may be retried, and only the second one already changed the data.
+      if (err?.data?.committed === true) {
+        setBackupStatus(
+          `⚠️ Die Wiederherstellung wurde ÜBERNOMMEN, aber das Audit-Log konnte nicht geschrieben werden. Bitte prüfen Sie das Audit-Log manuell. (${err.message})`,
+        );
+      } else if (err?.data?.error === 'restore_incomplete_backup') {
+        // Nothing was attempted: no transaction was opened and nothing was
+        // deleted, so "rolled back" would be a lie.
+        setBackupStatus(`❌ Ersetzungsmodus abgebrochen, es wurde nichts gelöscht: ${err.message}`);
+      } else {
+        setBackupStatus(
+          `❌ Wiederherstellung vollständig zurückgerollt, es wurden keine Änderungen übernommen. (${err.message})`,
+        );
+      }
+    } finally {
+      setIsRestoring(false);
     }
   };
 
@@ -1615,20 +1672,33 @@ export const SettingsPage: React.FC = () => {
               </div>
             )}
 
+            {backupStatus && (
+              <div
+                data-testid="backup-status"
+                className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-200"
+              >
+                {backupStatus}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
                 <div className="text-xs font-bold text-slate-200 flex items-center gap-2">
                   <Database className="w-4 h-4 text-emerald-400" /> PostgreSQL Datenbank-Backup
                 </div>
                 <p className="text-xs text-slate-400">
-                  Erstellt einen vollständigen SQL-Dump aller Kontakte, Deals, Notizen und
-                  Audit-Logs.
+                  Streamt alle 24 Tabellen (inkl. E-Mails, Notizen, Audit-Logs und Wissensdatenbank)
+                  als versioniertes JSON. Der Download startet erst, wenn die Datei vollständig
+                  angekommen ist.
                 </p>
                 <button
                   onClick={() => handleDownloadBackup('db')}
-                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors"
+                  disabled={isDownloadingBackup}
+                  data-testid="download-backup"
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
                 >
-                  <Download className="w-3.5 h-3.5" /> SQL Dump herunterladen
+                  <Download className="w-3.5 h-3.5" />
+                  {isDownloadingBackup ? 'Lädt herunter...' : 'JSON-Backup herunterladen'}
                 </button>
               </div>
 
@@ -1637,13 +1707,17 @@ export const SettingsPage: React.FC = () => {
                   <Archive className="w-4 h-4 text-blue-400" /> Dateispeicher-Backup
                 </div>
                 <p className="text-xs text-slate-400">
-                  Sichert alle hochgeladenen E-Mail-Anhänge, Angebote und Dokumente als Archiv.
+                  Derselbe JSON-Backupstrom enthält die Speicherpfade aller hochgeladenen
+                  E-Mail-Anhänge, Angebote und Dokumente. Anhänge selbst liegen in der
+                  konfigurierten Speicherung und gehören zum Dateisystem-Backup des Hosts.
                 </p>
                 <button
                   onClick={() => handleDownloadBackup('storage')}
-                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors"
+                  disabled={isDownloadingBackup}
+                  data-testid="download-backup-storage"
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
                 >
-                  <Download className="w-3.5 h-3.5" /> Archiv herunterladen
+                  <Download className="w-3.5 h-3.5" /> Archiv-Metadaten herunterladen
                 </button>
               </div>
 
@@ -1663,6 +1737,63 @@ export const SettingsPage: React.FC = () => {
                   <ShieldCheck className="w-3.5 h-3.5" />{' '}
                   {isDrilling ? 'Prüfung läuft...' : 'Restore-Drill ausführen'}
                 </button>
+              </div>
+            </div>
+
+            {/* Restore: uploads the real envelope, no simulated success (§8.7) */}
+            <div className="border-t border-slate-800 pt-6">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                    <RotateCcw className="w-4 h-4 text-amber-400" /> Backup wiederherstellen
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Standard ist Zusammenführen (Merge, wiederholbar). Ersetzen leert vorher alle 24
+                    Tabellen in einer Transaktion und ist nicht wiederholbar.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col md:flex-row md:items-center gap-3">
+                <label className="flex items-center gap-2 text-xs text-slate-300">
+                  <input
+                    type="radio"
+                    name="backup-restore-mode"
+                    value="merge"
+                    checked={restoreMode === 'merge'}
+                    onChange={() => setRestoreMode('merge')}
+                    data-testid="restore-mode-merge"
+                  />
+                  Zusammenführen (Merge)
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-300">
+                  <input
+                    type="radio"
+                    name="backup-restore-mode"
+                    value="replace"
+                    checked={restoreMode === 'replace'}
+                    onChange={() => setRestoreMode('replace')}
+                    data-testid="restore-mode-replace"
+                  />
+                  Ersetzen (Replace)
+                </label>
+                <label
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    isRestoring
+                      ? 'bg-slate-800 text-slate-500'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                  }`}
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    className="hidden"
+                    onChange={handleRestoreBackup}
+                    disabled={isRestoring}
+                    data-testid="restore-file-input"
+                  />
+                  {isRestoring ? 'Wiederherstellung läuft...' : 'Backup-Datei auswählen'}
+                </label>
               </div>
             </div>
 

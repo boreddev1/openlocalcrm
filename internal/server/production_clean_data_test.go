@@ -210,18 +210,25 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 		t.Fatalf("expected 0 automation runs in clean production, got %d", len(runs))
 	}
 
-	// 13. Backup Drill: confirms 0 companies, 0 contacts, 0 deals
+	// 13. Backup drill: this test runs the production wiring against an
+	// in-memory querier, which has no PostgreSQL pool and therefore cannot
+	// perform a real scratch-schema round trip. The honest answer is 501, not a
+	// reassuring count-based "passed". The real drill is covered against a live
+	// pgvector database by scripts/test-backup-integration.sh.
 	res, err = client.Do(reqWithAuth(http.MethodPost, "/api/v1/backup/drill"))
-	if err != nil || res.StatusCode != http.StatusOK {
-		t.Fatalf("backup drill failed: %v, status: %d", err, res.StatusCode)
+	if err != nil {
+		t.Fatalf("backup drill request failed: %v", err)
+	}
+	if res.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected 501 without a PostgreSQL pool, got %d", res.StatusCode)
 	}
 	var drill struct {
-		CompanyCount int `json:"company_count"`
-		ContactCount int `json:"contact_count"`
-		DealCount    int `json:"deal_count"`
+		Error   string `json:"error"`
+		Passed  bool   `json:"passed"`
+		Message string `json:"message"`
 	}
 	_ = json.NewDecoder(res.Body).Decode(&drill)
-	if drill.CompanyCount != 0 || drill.ContactCount != 0 || drill.DealCount != 0 {
-		t.Fatalf("expected 0 counts in backup drill, got %+v", drill)
+	if drill.Error != "backup_unavailable" || drill.Passed {
+		t.Fatalf("unexpected drill response: %+v", drill)
 	}
 }
