@@ -70,6 +70,17 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
     }
   }
 
+  /**
+   * Endpoints where HTTP 401 is an application-level answer rather than an expired
+   * session. Logging in with wrong credentials and confirming a password before
+   * disabling 2FA both answer 401 while the session is perfectly valid; treating
+   * those as session expiry would log the user out for a typo.
+   */
+  const UNAUTHORIZED_IS_NOT_SESSION_EXPIRY = new Set([
+    '/api/v1/auth/login',
+    '/api/v1/auth/totp/disable',
+  ]);
+
   // Server responded with an HTTP error status (4xx / 5xx)
   let errorMessage = `HTTP ${res.status}: ${res.statusText}`;
   let errJson: any = null;
@@ -88,7 +99,7 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
   }
 
   // Notify session expiry on 401 Unauthorized
-  if (res.status === 401 && endpoint !== '/api/v1/auth/login') {
+  if (res.status === 401 && !UNAUTHORIZED_IS_NOT_SESSION_EXPIRY.has(endpoint)) {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('auth:logout'));
     }

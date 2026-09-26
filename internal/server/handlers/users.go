@@ -1,9 +1,8 @@
 package handlers
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -11,16 +10,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/invite"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 type UserHandler struct {
 	queries db.Querier
+	invites *invite.Service
 }
 
-func NewUserHandler(queries db.Querier) *UserHandler {
+// NewUserHandler builds the handler. invites may be nil, in which case
+// /users/invite reports that the invite flow is unavailable instead of creating
+// an INVITED user that could never be activated.
+func NewUserHandler(queries db.Querier, invites *invite.Service) *UserHandler {
 	return &UserHandler{
 		queries: queries,
+		invites: invites,
 	}
 }
 
@@ -76,10 +81,29 @@ type InviteUserRequest struct {
 	Role      string `json:"role"`
 }
 
+// InviteUserResponse is the one-time result of issuance. The link is shown once
+// and is not recoverable afterwards, because only its SHA-256 hash is stored.
+//
+// There is deliberately no "email_sent" field: nothing in this codebase can
+// deliver mail for an invite, so such a claim would be a lie the operator would
+// act on.
+type InviteUserResponse struct {
+	User      UserResponse `json:"user"`
+	InviteURL string       `json:"invite_url"`
+	ExpiresAt string       `json:"expires_at"`
+	// Delivery states plainly that the admin must hand the link over.
+	Delivery string `json:"delivery"`
+}
+
 func (h *UserHandler) Invite(w http.ResponseWriter, r *http.Request) {
 	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 	if claims == nil || claims.Role != "ADMIN" {
 		http.Error(w, `{"error":"forbidden","message":"Nur Administratoren können Benutzer einladen"}`, http.StatusForbidden)
+		return
+	}
+	if h.invites == nil {
+		writeJSONError(w, http.StatusNotImplemented, "invite_unavailable",
+			"Die Einladungsfunktion benötigt einen Datenbankzugriff, der hier nicht verfügbar ist.")
 		return
 	}
 
@@ -89,43 +113,65 @@ func (h *UserHandler) Invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
-	if req.Email == "" || req.FirstName == "" || req.LastName == "" {
-		http.Error(w, `{"error":"validation_error","message":"email, first_name and last_name are required"}`, http.StatusBadRequest)
-		return
-	}
-
-	role := strings.ToUpper(req.Role)
-	if role != "ADMIN" && role != "BENUTZER" && role != "VERTRIEB" && role != "BACKOFFICE" {
+	// The role is validated, not silently corrected: defaulting an unknown role
+	// to BENUTZER would hand out an access level the admin never asked for
+	// while reporting success.
+	role := strings.ToUpper(strings.TrimSpace(req.Role))
+	if role == "" {
 		role = "BENUTZER"
 	}
-
-	// Generate random initial password
-	rnd := make([]byte, 12)
-	_, _ = rand.Read(rnd)
-	initPass := hex.EncodeToString(rnd)
-	hash, err := auth.HashPassword(initPass)
-	if err != nil {
-		http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
+	if role != "ADMIN" && role != "BENUTZER" && role != "VERTRIEB" && role != "BACKOFFICE" {
+		writeJSONError(w, http.StatusBadRequest, "invalid_role",
+			"Rolle muss ADMIN, BENUTZER, VERTRIEB oder BACKOFFICE sein")
 		return
 	}
 
-	u, err := h.queries.CreateUser(r.Context(), db.CreateUserParams{
-		Email:        req.Email,
-		PasswordHash: hash,
-		FirstName:    req.FirstName,
-		LastName:     req.LastName,
-		Role:         role,
-		Status:       "INVITED",
-	})
+	var actorID pgtype.UUID
+	_ = actorID.Scan(claims.UserID.String())
+
+	ctx := invite.WithRequestMeta(r.Context(), auth.ClientIP(r), r.UserAgent())
+	issued, err := h.invites.Issue(ctx, actorID, invite.CreateUserInput{
+		Email:     req.Email,
+		FirstName: req.FirstName,
+		LastName:  req.LastName,
+		Role:      role,
+	}, inviteBaseURL(r))
 	if err != nil {
-		http.Error(w, `{"error":"user_creation_failed","message":"`+err.Error()+`"}`, http.StatusBadRequest)
+		switch {
+		case errors.Is(err, invite.ErrInvalidRequest):
+			writeJSONError(w, http.StatusBadRequest, "validation_error",
+				"email, first_name, last_name und eine gültige role sind erforderlich")
+		case db.IsUniqueViolation(err):
+			// Only reachable when the database actually raised SQLSTATE 23505, so
+			// the conflict claim is backed by the store. The in-memory demo cannot
+			// report one, so it falls through to the honest generic failure.
+			writeJSONError(w, http.StatusConflict, "user_exists",
+				"Für diese E-Mail-Adresse existiert bereits ein Benutzer.")
+		default:
+			writeJSONError(w, http.StatusInternalServerError, "invite_failed",
+				"Die Einladung konnte nicht erstellt werden: "+err.Error())
+		}
+		return
+	}
+
+	invited, err := h.queries.GetUserByID(r.Context(), issued.Invite.UserID)
+	if err != nil {
+		// The invite really exists, so this is an internal inconsistency, not a
+		// client error. Reporting it as a failure would be more honest than
+		// returning a half-populated body.
+		writeJSONError(w, http.StatusInternalServerError, "invite_user_unreadable",
+			"Die Einladung wurde gespeichert, das Benutzerkonto konnte aber nicht geladen werden.")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(toUserResponse(u))
+	_ = json.NewEncoder(w).Encode(InviteUserResponse{
+		User:      toUserResponse(invited),
+		InviteURL: issued.URL,
+		ExpiresAt: issued.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
+		Delivery:  "link",
+	})
 }
 
 type UpdateRoleRequest struct {

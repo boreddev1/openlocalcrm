@@ -11,6 +11,11 @@ import (
 )
 
 type Querier interface {
+	// One statement locks the active invite, consumes it and activates the
+	// referenced user. The FOR UPDATE lock plus the active predicates make a
+	// concurrent second acceptance match zero rows instead of reactivating the
+	// account. No raw token is stored or returned: the caller supplies the hash.
+	AcceptUserInvite(ctx context.Context, arg AcceptUserInviteParams) (User, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// internal/db/queries/ai_research_jobs.sql
 	CreateAIResearchJob(ctx context.Context, arg CreateAIResearchJobParams) (AiResearchJob, error)
@@ -33,6 +38,11 @@ type Querier interface {
 	CreateEmailMessage(ctx context.Context, arg CreateEmailMessageParams) (EmailMessage, error)
 	// internal/db/queries/email_templates.sql
 	CreateEmailTemplate(ctx context.Context, arg CreateEmailTemplateParams) (EmailTemplate, error)
+	// One statement creates the INVITED user and its invite so a half-created
+	// account can never exist. The user gets a real but discarded Argon2id hash:
+	// the account cannot log in until AcceptUserInvite replaces it.
+	// Positional parameters keep role a plain string, like db.CreateUserParams.
+	CreateInvitedUserWithInvite(ctx context.Context, arg CreateInvitedUserWithInviteParams) (UserInvite, error)
 	// internal/db/queries/knowledge_base.sql
 	CreateKBArticle(ctx context.Context, arg CreateKBArticleParams) (CreateKBArticleRow, error)
 	// internal/db/queries/notes.sql

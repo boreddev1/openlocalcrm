@@ -13,13 +13,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/backup"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/invite"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/openlocalcrm/openlocalcrm/internal/server/handlers"
 )
 
 func TestUserHandler_ListAndProtection(t *testing.T) {
 	querier := demo.NewInMemoryQuerier()
-	h := handlers.NewUserHandler(querier)
+	h := handlers.NewUserHandler(querier, invite.NewService(querier, nil))
 
 	// 1. List Users
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
@@ -67,6 +68,19 @@ func TestUserHandler_ListAndProtection(t *testing.T) {
 	h.Invite(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201 Created for admin invite, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	var issued struct {
+		InviteURL string `json:"invite_url"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("decode invite response: %v (body: %s)", err, rec.Body.String())
+	}
+	if !strings.Contains(issued.InviteURL, "/accept-invite?token=") {
+		t.Fatalf("expected a copyable /accept-invite link, got %q", issued.InviteURL)
+	}
+	if issued.ExpiresAt == "" {
+		t.Fatalf("expected expires_at in the invite response, got %s", rec.Body.String())
 	}
 
 	// 4. Last Admin Protection: Try to demote the only admin

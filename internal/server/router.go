@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
@@ -23,7 +24,9 @@ import (
 	"github.com/openlocalcrm/openlocalcrm/internal/core/contact"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/deal"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/email"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/emailtemplate"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/export"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/invite"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/note"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/notification"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/reports"
@@ -166,6 +169,8 @@ func NewRouter(cfg Config) http.Handler {
 	var exportH *handlers.ExportHandler
 	var noteH *handlers.NoteHandler
 	var userH *handlers.UserHandler
+	var inviteH *handlers.InviteHandler
+	var emailTemplateH *handlers.EmailTemplateHandler
 	var backupH *handlers.BackupHandler
 	var settingsH *handlers.SettingsHandler
 	var automationH *handlers.AutomationHandler
@@ -210,6 +215,9 @@ func NewRouter(cfg Config) http.Handler {
 		}
 		connectorEngine := connectors.NewEngine(contactSvc, dealSvc, connectorToken, automationSvc)
 
+		inviteSvc := invite.NewService(cfg.DB, auditSvc)
+		emailTemplateSvc := emailtemplate.NewService(cfg.DB, aiGateway)
+
 		authLimiter = auth.NewRateLimiter(20, time.Minute, 5*time.Minute)
 		aiLimiter = auth.NewRateLimiter(30, time.Minute, 2*time.Minute)
 
@@ -233,7 +241,9 @@ func NewRouter(cfg Config) http.Handler {
 		connectorH = handlers.NewConnectorHandler(connectorEngine)
 		notificationH = handlers.NewNotificationHandler(notificationSvc)
 		exportH = handlers.NewExportHandler(exportSvc)
-		userH = handlers.NewUserHandler(cfg.DB)
+		inviteH = handlers.NewInviteHandler(inviteSvc)
+		userH = handlers.NewUserHandler(cfg.DB, inviteSvc)
+		emailTemplateH = handlers.NewEmailTemplateHandler(emailTemplateSvc)
 		// Both *db.Queries and the demo querier implement the streaming row
 		// source, so the router never has to know which one it holds. A
 		// Querier that does not gets a service without a row source, and
@@ -284,6 +294,16 @@ func NewRouter(cfg Config) http.Handler {
 			api.With(CSRFProtectionMiddleware).Post("/auth/logout", authH.Logout)
 		}
 
+		// Public invite acceptance, registered next to login and before the
+		// CSRF-protected group. The invitee has no session and therefore no CSRF
+		// cookie, so CSRF protection here would reject the only request they can
+		// make. The login rate limiter still applies, because both endpoints take
+		// a guessable secret and are unauthenticated.
+		if inviteH != nil {
+			api.With(auth.RateLimitMiddleware(loginLimiter)).Get("/auth/accept-invite", inviteH.Validate)
+			api.With(auth.RateLimitMiddleware(loginLimiter)).Post("/auth/accept-invite", inviteH.Accept)
+		}
+
 		// Public Webhook intake (secured via Connector Bearer Token, outside CSRF group)
 		if connectorH != nil {
 			api.Post("/connectors/lead-intake", connectorH.LeadIntake)
@@ -294,14 +314,40 @@ func NewRouter(cfg Config) http.Handler {
 			protected.Use(auth.AuthMiddleware(cfg.PubKey))
 			protected.Use(CSRFProtectionMiddleware)
 
+			// /me returns the JWT claims plus the real 2FA state read from the
+			// users table, so the settings UI never has to guess whether TOTP is
+			// active. totp_enabled is null only when the user row cannot be read,
+			// because "unknown" must not be reported as "disabled".
 			protected.Get("/me", func(w http.ResponseWriter, r *http.Request) {
 				claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 				if !ok || claims == nil {
 					http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 					return
 				}
+				body := map[string]any{
+					"user_id":      claims.UserID,
+					"email":        claims.Email,
+					"role":         claims.Role,
+					"sub":          claims.Subject,
+					"iss":          claims.Issuer,
+					"aud":          claims.Audience,
+					"iat":          claims.IssuedAt,
+					"exp":          claims.ExpiresAt,
+					"totp_enabled": nil,
+				}
+				var userID pgtype.UUID
+				if cfg.DB != nil {
+					if err := userID.Scan(claims.UserID.String()); err == nil {
+						if user, dbErr := cfg.DB.GetUserByID(r.Context(), userID); dbErr == nil {
+							enabled := user.TotpEnabled
+							body["totp_enabled"] = enabled
+							body["first_name"] = user.FirstName
+							body["last_name"] = user.LastName
+						}
+					}
+				}
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(claims)
+				_ = json.NewEncoder(w).Encode(body)
 			})
 
 			// Protected user account & security endpoints (with rate limiting)
@@ -342,6 +388,20 @@ func NewRouter(cfg Config) http.Handler {
 					sr.Use(auth.RequireRole("ADMIN"))
 					sr.Get("/export", settingsH.ExportSettings)
 					sr.Post("/import", settingsH.ImportSettings)
+				})
+			}
+
+			// Protected E-Mail template CRUD (admin only). The path segment is the
+			// template key, not its UUID: every CRUD query is keyed by `key`, so a
+			// second lookup query would exist only to rename a parameter.
+			if emailTemplateH != nil {
+				protected.Route("/email-templates", func(etr chi.Router) {
+					etr.Use(auth.RequireRole("ADMIN"))
+					etr.Get("/", emailTemplateH.List)
+					etr.Post("/", emailTemplateH.Create)
+					etr.Post("/generate", emailTemplateH.Generate)
+					etr.Put("/{key}", emailTemplateH.Update)
+					etr.Delete("/{key}", emailTemplateH.Delete)
 				})
 			}
 

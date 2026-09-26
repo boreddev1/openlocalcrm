@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# OpenLocalCRM — Disposable PostgreSQL/pgvector gate for the backup round trip
+# OpenLocalCRM — Disposable PostgreSQL/pgvector gate for backup and invite SQL
 # ==============================================================================
 #
 # The unit tests can prove that the restore and the scratch drill call the right
 # statements, but only a real database can prove the parts that actually break in
 # practice: the vector(1024) cast, the TEXT[] reconstruction, the enum casts, the
-# foreign-key rewrite and the search_path isolation.
+# foreign-key rewrite and the search_path isolation. The same is true for the
+# invite statements, where the one-time-token guarantee rests on a row lock that
+# an in-memory store can only imitate.
 #
 # This script owns that evidence:
 #
-#   * It uses TEST_DATABASE_URL when one is exported.
-#   * Otherwise it starts a disposable pgvector/pgvector:pg16 container, applies
+#   * By default it starts a disposable pgvector/pgvector:pg16 container, applies
 #     migrations 00001-00009, records 00010_foreign_key_indexes.sql in
-#     schema_migrations as already applied, applies 00011 onward, runs the test
+#     schema_migrations as already applied, applies 00011 onward, runs the tests
 #     and removes the container.
+#   * It honours an exported TEST_DATABASE_URL, but only with
+#     TEST_DATABASE_URL_ALLOW_EXISTING=1. The live tests write to their target
+#     (they create users and invites, accept invites, and delete the rows they
+#     seeded), so an existing database is opt-in: the script refuses to point at
+#     one it did not provision unless the operator says so explicitly.
+#
+# Two groups of tests run against it: the backup scratch-drill round trip and the
+# invite statements (issuance CTE plus the FOR UPDATE acceptance).
 #
 # 00010 is NOT executed and NOT edited. It indexes notes(contact_id), a column
 # that no migration ever creates, so replaying the historical migration set from
@@ -123,8 +132,34 @@ start_disposable_database() {
 }
 
 if [[ -n "${TEST_DATABASE_URL:-}" ]]; then
+    # The live tests write to whatever they are pointed at: they insert users and
+    # invites, accept invites, and (since this round) remove what they seeded.
+    # An operator who exports TEST_DATABASE_URL by accident — or who keeps a
+    # development install running — must not have rows appear in it, so an
+    # existing database is opt-in only.
+    if [[ "${TEST_DATABASE_URL_ALLOW_EXISTING:-0}" != "1" ]]; then
+        fail "TEST_DATABASE_URL is set, so the live tests would write to a database this script did not provision.
+
+  The backup scratch-drill tests and the invite statement tests insert rows into
+  the target and remove the rows they seeded. They do not provision it and they
+  do not migrate it.
+
+  Either:
+    * unset TEST_DATABASE_URL and let this script start a disposable
+      pgvector/pgvector:pg16 container (the default, and what make check does), or
+    * set TEST_DATABASE_URL_ALLOW_EXISTING=1 to confirm the target is a
+      throwaway database, for example:
+
+        TEST_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/throwaway \\
+        TEST_DATABASE_URL_ALLOW_EXISTING=1 ./scripts/test-backup-integration.sh
+
+  The target database is expected to be migrated already."
+    fi
     log "🔗 Using TEST_DATABASE_URL=${TEST_DATABASE_URL}"
     log "   (the target database is expected to be migrated already)"
+    log "⚠️  WARNING: TEST_DATABASE_URL_ALLOW_EXISTING=1 — this database was NOT provisioned by this script."
+    log "⚠️  WARNING: the live tests WILL WRITE TO IT: they create users and invites, accept invites, and"
+    log "⚠️  WARNING: delete the rows they seeded. Point this only at a throwaway database."
 else
     start_disposable_database
     log "🧱 Applying the migration set to the disposable database"
@@ -136,4 +171,13 @@ log "🧪 Running the scratch-drill round-trip test against a real pgvector data
 TEST_DATABASE_URL="${TEST_DATABASE_URL}" go test ./internal/core/backup \
     -run 'TestScratchDrill' -count=1 -v
 
-log "✅ Real PostgreSQL backup round trip verified"
+# The invite statements carry their own security property: a one-time token must
+# activate an account exactly once, and a concurrent second acceptance must be
+# serialised by the FOR UPDATE lock rather than allowed to overwrite the
+# password. No unit test can prove that, and the demo querier can only
+# approximate it, so the statements run against the same disposable database.
+log "🧪 Running the invite statement test against a real pgvector database"
+TEST_DATABASE_URL="${TEST_DATABASE_URL}" go test ./internal/core/invite \
+    -run 'TestInvite.*Postgres' -count=1 -v
+
+log "✅ Real PostgreSQL backup and invite statements verified"

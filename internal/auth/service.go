@@ -56,6 +56,18 @@ func releaseArgonSem() {
 	<-argon2Sem
 }
 
+// HashPasswordLimited hashes a password while holding one of the four Argon2
+// slots. Every unauthenticated caller that derives a hash must use it: Argon2id
+// with m=64MiB means a handful of concurrent derivations can exceed the
+// project's < 420 MB resident-memory budget on their own.
+func HashPasswordLimited(ctx context.Context, password string) (string, error) {
+	if err := acquireArgonSem(ctx); err != nil {
+		return "", err
+	}
+	defer releaseArgonSem()
+	return HashPassword(password)
+}
+
 type rotatedTokenEntry struct {
 	accessToken  string
 	refreshToken string

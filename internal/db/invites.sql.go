@@ -11,6 +11,113 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acceptUserInvite = `-- name: AcceptUserInvite :one
+WITH locked AS (
+    SELECT id, user_id
+    FROM user_invites
+    WHERE user_invites.token_hash = $2
+      AND user_invites.consumed_at IS NULL
+      AND user_invites.revoked_at IS NULL
+      AND user_invites.expires_at > NOW()
+    FOR UPDATE
+), consumed AS (
+    UPDATE user_invites i
+    SET consumed_at = NOW()
+    FROM locked l
+    WHERE i.id = l.id
+    RETURNING l.user_id
+)
+UPDATE users u
+SET password_hash = $1,
+    status = 'ACTIVE',
+    updated_at = NOW()
+FROM consumed c
+WHERE u.id = c.user_id
+RETURNING u.id, u.email, u.password_hash, u.first_name, u.last_name, u.role, u.status, u.totp_secret_encrypted, u.totp_enabled, u.last_login_at, u.created_at, u.updated_at, u.totp_last_used_step
+`
+
+type AcceptUserInviteParams struct {
+	PasswordHash string `json:"password_hash"`
+	TokenHash    string `json:"token_hash"`
+}
+
+// One statement locks the active invite, consumes it and activates the
+// referenced user. The FOR UPDATE lock plus the active predicates make a
+// concurrent second acceptance match zero rows instead of reactivating the
+// account. No raw token is stored or returned: the caller supplies the hash.
+func (q *Queries) AcceptUserInvite(ctx context.Context, arg AcceptUserInviteParams) (User, error) {
+	row := q.db.QueryRow(ctx, acceptUserInvite, arg.PasswordHash, arg.TokenHash)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.FirstName,
+		&i.LastName,
+		&i.Role,
+		&i.Status,
+		&i.TotpSecretEncrypted,
+		&i.TotpEnabled,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TotpLastUsedStep,
+	)
+	return i, err
+}
+
+const createInvitedUserWithInvite = `-- name: CreateInvitedUserWithInvite :one
+WITH new_user AS (
+    INSERT INTO users (email, password_hash, first_name, last_name, role, status)
+    VALUES ($1, $2, $3, $4, $5, 'INVITED')
+    RETURNING id
+)
+INSERT INTO user_invites (user_id, token_hash, created_by, expires_at)
+SELECT new_user.id, $6, $7, $8
+FROM new_user
+RETURNING id, user_id, token_hash, created_by, expires_at, consumed_at, revoked_at, created_at
+`
+
+type CreateInvitedUserWithInviteParams struct {
+	Email        string             `json:"email"`
+	PasswordHash string             `json:"password_hash"`
+	FirstName    string             `json:"first_name"`
+	LastName     string             `json:"last_name"`
+	Role         string             `json:"role"`
+	TokenHash    string             `json:"token_hash"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+}
+
+// One statement creates the INVITED user and its invite so a half-created
+// account can never exist. The user gets a real but discarded Argon2id hash:
+// the account cannot log in until AcceptUserInvite replaces it.
+// Positional parameters keep role a plain string, like db.CreateUserParams.
+func (q *Queries) CreateInvitedUserWithInvite(ctx context.Context, arg CreateInvitedUserWithInviteParams) (UserInvite, error) {
+	row := q.db.QueryRow(ctx, createInvitedUserWithInvite,
+		arg.Email,
+		arg.PasswordHash,
+		arg.FirstName,
+		arg.LastName,
+		arg.Role,
+		arg.TokenHash,
+		arg.CreatedBy,
+		arg.ExpiresAt,
+	)
+	var i UserInvite
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.CreatedBy,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.RevokedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createUserInvite = `-- name: CreateUserInvite :one
 
 INSERT INTO user_invites (user_id, token_hash, created_by, expires_at)

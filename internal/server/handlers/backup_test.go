@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -480,17 +486,8 @@ func TestBackupRestoreRejectsAnIncompleteReplaceEnvelope(t *testing.T) {
 	fake := &handlerDBTX{failAfter: -1}
 	h := restoreBackupHandler(fake, &handlerAudit{})
 
-	// Every table except todos, so the completeness rule is the only failure.
-	var names []string
-	for _, name := range backup.TableNames() {
-		if name != "todos" {
-			names = append(names, `"`+name+`":[{"id":"00000000-0000-0000-0000-0000000000aa"}]`)
-		}
-	}
-	partial := `{"format":"openlocalcrm-backup","version":1,"tables":{` + strings.Join(names, ",") + `}}`
-
 	rec := httptest.NewRecorder()
-	h.Restore(rec, adminRequest(http.MethodPost, "/api/v1/backup/restore?mode=replace", partial))
+	h.Restore(rec, adminRequest(http.MethodPost, "/api/v1/backup/restore?mode=replace", incompleteEnvelope(t, "todos")))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 
 	var body map[string]any
@@ -500,4 +497,86 @@ func TestBackupRestoreRejectsAnIncompleteReplaceEnvelope(t *testing.T) {
 	require.Equal(t, []any{"todos"}, body["missing_tables"],
 		"the response must name the table whose live data would have been deleted")
 	require.Zero(t, fake.execCount, "no truncate may run for an incomplete replace")
+}
+
+// incompleteEnvelope builds a replace envelope that carries every registry table
+// except the named one, so the completeness rule is the only failure.
+func incompleteEnvelope(t *testing.T, omit string) string {
+	t.Helper()
+	var names []string
+	for _, name := range backup.TableNames() {
+		if name != omit {
+			names = append(names, `"`+name+`":[{"id":"00000000-0000-0000-0000-0000000000aa"}]`)
+		}
+	}
+	return `{"format":"openlocalcrm-backup","version":1,"tables":{` + strings.Join(names, ",") + `}}`
+}
+
+// ---------------------------------------------------------------------------
+// The operator-facing inventory size must come from the registry
+// ---------------------------------------------------------------------------
+
+// TestRestoreIncompleteBackupMessageDerivesItsTableCount guards against a
+// snapshot of the table count. The number in the message, the count in
+// TruncateBackupTables and the exporter's registry all have to move together;
+// a literal only moves when somebody remembers it.
+//
+// A runtime assertion alone cannot catch this, because the rendered number is
+// correct today. So the source is checked directly: no string literal in the
+// failure writer may contain a multi-digit number (every table count is at
+// least two digits), and the count must be read from the registry.
+func TestRestoreIncompleteBackupMessageDerivesItsTableCount(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "backup.go", nil, 0)
+	require.NoError(t, err)
+
+	var writer *ast.FuncDecl
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == "writeRestoreFailure" {
+			writer = fn
+			break
+		}
+	}
+	require.NotNil(t, writer, "writeRestoreFailure must exist")
+
+	twoOrMoreDigits := regexp.MustCompile(`\d{2,}`)
+	usesRegistry := false
+	ast.Inspect(writer.Body, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.BasicLit:
+			if node.Kind != token.STRING {
+				return true
+			}
+			value, unquoteErr := strconv.Unquote(node.Value)
+			if unquoteErr != nil {
+				return true
+			}
+			if twoOrMoreDigits.MatchString(value) {
+				t.Errorf("writeRestoreFailure hardcodes a number in %q; "+
+					"an operator-facing table count must be derived from backup.InventorySize()", value)
+			}
+		case *ast.SelectorExpr:
+			if pkg, ok := node.X.(*ast.Ident); ok && pkg.Name == "backup" && node.Sel.Name == "InventorySize" {
+				usesRegistry = true
+			}
+		}
+		return true
+	})
+	require.True(t, usesRegistry,
+		"writeRestoreFailure must read the inventory size from backup.InventorySize(), not from a literal")
+
+	// The rendered text still has to quote the real registry size, which is a
+	// different failure mode: deriving the count from len(missing) instead of
+	// len(registry) would print a plausible but wrong number.
+	fake := &handlerDBTX{failAfter: -1}
+	h := restoreBackupHandler(fake, &handlerAudit{})
+	rec := httptest.NewRecorder()
+	h.Restore(rec, adminRequest(http.MethodPost, "/api/v1/backup/restore?mode=replace", incompleteEnvelope(t, "todos")))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Contains(t, body["message"],
+		fmt.Sprintf("allen %d Tabellen", len(backup.TableNames())),
+		"the message must quote the live registry size")
 }

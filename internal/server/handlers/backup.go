@@ -172,11 +172,14 @@ func (h *BackupHandler) writeRestoreFailure(w http.ResponseWriter, err error) {
 	case errors.As(err, &missingTables):
 		// Nothing was committed and no transaction was opened. The response
 		// names the tables so the operator can see which live data an
-		// uncompleted replace would have deleted.
+		// uncompleted replace would have deleted. The inventory size is read
+		// from the registry, so a future migration that adds a table cannot
+		// leave a stale number in front of an operator.
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error":          "restore_incomplete_backup",
-			"message":        "Der Ersetzungsmodus verlangt eine Sicherung mit allen 24 Tabellen. Es fehlen: " + strings.Join(missingTables.Tables, ", "),
+			"error": "restore_incomplete_backup",
+			"message": fmt.Sprintf("Der Ersetzungsmodus verlangt eine Sicherung mit allen %d Tabellen. Es fehlen: %s",
+				backup.InventorySize(), strings.Join(missingTables.Tables, ", ")),
 			"missing_tables": missingTables.Tables,
 			"missing_count":  len(missingTables.Tables),
 			"committed":      false,

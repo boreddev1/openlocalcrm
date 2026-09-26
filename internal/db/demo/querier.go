@@ -2272,6 +2272,100 @@ func (q *InMemoryQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg db.Up
 }
 
 // --- User Invites ---
+// CreateInvitedUserWithInvite mirrors the single SQL statement: under one write
+// lock it enforces users.email UNIQUE, creates the INVITED user and stores the
+// invite. A duplicate on either constraint aborts before anything is written,
+// so a half-created account can never exist.
+func (q *InMemoryQuerier) CreateInvitedUserWithInvite(ctx context.Context, arg db.CreateInvitedUserWithInviteParams) (db.UserInvite, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	for _, u := range q.users {
+		if strings.EqualFold(u.Email, arg.Email) {
+			return db.UserInvite{}, errors.New("user with this email already exists")
+		}
+	}
+	for _, invite := range q.userInvites {
+		if invite.TokenHash == arg.TokenHash {
+			return db.UserInvite{}, errors.New("user invite with this token hash already exists")
+		}
+	}
+
+	user := db.User{
+		ID:           newUUID(),
+		Email:        arg.Email,
+		PasswordHash: arg.PasswordHash,
+		FirstName:    arg.FirstName,
+		LastName:     arg.LastName,
+		Role:         arg.Role,
+		Status:       "INVITED",
+		CreatedAt:    nowTimestamptz(),
+		UpdatedAt:    nowTimestamptz(),
+	}
+	q.users[uuidToStr(user.ID)] = user
+
+	id := newUUID()
+	invite := db.UserInvite{
+		ID:        id,
+		UserID:    user.ID,
+		TokenHash: arg.TokenHash,
+		CreatedBy: arg.CreatedBy,
+		ExpiresAt: arg.ExpiresAt,
+		CreatedAt: nowTimestamptz(),
+	}
+	q.userInvites[uuidToStr(id)] = invite
+	return invite, nil
+}
+
+// AcceptUserInvite mirrors the single SQL statement: it looks the invite up by
+// hash, applies the same active predicates the locked CTE uses, then consumes
+// the invite and activates the user under one write lock. A consumed, revoked,
+// expired or unknown token matches nothing and returns ErrNotFound, which is
+// what pgx reports for the statement's zero-row result.
+func (q *InMemoryQuerier) AcceptUserInvite(ctx context.Context, arg db.AcceptUserInviteParams) (db.User, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	now := time.Now().UTC()
+	var locked db.UserInvite
+	found := false
+	for _, invite := range q.userInvites {
+		if invite.TokenHash != arg.TokenHash {
+			continue
+		}
+		if invite.ConsumedAt.Valid || invite.RevokedAt.Valid {
+			continue
+		}
+		if !invite.ExpiresAt.Valid || !invite.ExpiresAt.Time.After(now) {
+			continue
+		}
+		locked = invite
+		found = true
+		break
+	}
+	if !found {
+		return db.User{}, ErrNotFound
+	}
+
+	// The SQL consumes exactly the row the locked CTE selected (WHERE i.id =
+	// l.id). Consuming "an invite of this user" instead would, in map order,
+	// burn an unrelated invite and leave the presented token usable.
+	consumed := locked
+	consumed.ConsumedAt = pgtype.Timestamptz{Time: now, Valid: true}
+	q.userInvites[uuidToStr(locked.ID)] = consumed
+
+	userID := uuidToStr(locked.UserID)
+	user, ok := q.users[userID]
+	if !ok {
+		return db.User{}, ErrNotFound
+	}
+	user.PasswordHash = arg.PasswordHash
+	user.Status = "ACTIVE"
+	user.UpdatedAt = pgtype.Timestamptz{Time: now, Valid: true}
+	q.users[userID] = user
+	return user, nil
+}
+
 func (q *InMemoryQuerier) CreateUserInvite(ctx context.Context, arg db.CreateUserInviteParams) (db.UserInvite, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()

@@ -113,7 +113,7 @@ type MissingTablesError struct {
 func (e *MissingTablesError) Error() string {
 	return fmt.Sprintf(
 		"backup restore cannot replace: the envelope is missing %d of %d tables: %s",
-		len(e.Tables), len(tableSpecs), strings.Join(e.Tables, ", "))
+		len(e.Tables), InventorySize(), strings.Join(e.Tables, ", "))
 }
 
 // Is makes errors.Is(err, ErrIncompleteBackup) true without folding the
@@ -185,6 +185,16 @@ func NewService(source RowSource, audit AuditLogger, pool *pgxpool.Pool, queries
 // TableNames returns the backup inventory in foreign-key-safe insertion order.
 func TableNames() []string {
 	return tableNames()
+}
+
+// InventorySize is the number of tables a complete backup carries.
+//
+// Every operator-facing message that quotes the inventory size must read it
+// from here. A literal is a snapshot of a registry that a future migration can
+// grow, and a stale number in an error message is worse than no number at all:
+// the operator is being told how much data the operation would delete.
+func InventorySize() int {
+	return len(tableSpecs)
 }
 
 // CanExport reports whether a streaming export is possible. It is false when
