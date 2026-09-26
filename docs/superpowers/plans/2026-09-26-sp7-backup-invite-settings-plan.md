@@ -197,10 +197,10 @@ SELECT row_to_json(t) FROM user_invites t ORDER BY t.id;
 
 -- name: UpsertUserInvitesRow :exec
 INSERT INTO user_invites (id, user_id, token_hash, created_by, expires_at, consumed_at, revoked_at, created_at)
-SELECT (r->>'id')::uuid, (r->>'user_id')::uuid, r->>'token_hash',
-       (r->>'created_by')::uuid, (r->>'expires_at')::timestamptz,
-       (r->>'consumed_at')::timestamptz, (r->>'revoked_at')::timestamptz,
-       (r->>'created_at')::timestamptz
+SELECT r.id::uuid, r.user_id::uuid, r.token_hash,
+       r.created_by::uuid, r.expires_at::timestamptz,
+       r.consumed_at::timestamptz, r.revoked_at::timestamptz,
+       r.created_at::timestamptz
 FROM jsonb_to_record($1::jsonb) AS r(
     id text, user_id text, token_hash text, created_by text,
     expires_at text, consumed_at text, revoked_at text, created_at text)
