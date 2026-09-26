@@ -31,6 +31,8 @@ type Querier interface {
 	CreateEmailAccount(ctx context.Context, arg CreateEmailAccountParams) (EmailAccount, error)
 	CreateEmailAttachment(ctx context.Context, arg CreateEmailAttachmentParams) (EmailAttachment, error)
 	CreateEmailMessage(ctx context.Context, arg CreateEmailMessageParams) (EmailMessage, error)
+	// internal/db/queries/email_templates.sql
+	CreateEmailTemplate(ctx context.Context, arg CreateEmailTemplateParams) (EmailTemplate, error)
 	// internal/db/queries/knowledge_base.sql
 	CreateKBArticle(ctx context.Context, arg CreateKBArticleParams) (CreateKBArticleRow, error)
 	// internal/db/queries/notes.sql
@@ -43,6 +45,8 @@ type Querier interface {
 	CreateTodo(ctx context.Context, arg CreateTodoParams) (Todo, error)
 	// internal/db/queries/users.sql
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// internal/db/queries/invites.sql
+	CreateUserInvite(ctx context.Context, arg CreateUserInviteParams) (UserInvite, error)
 	// internal/db/queries/workflows.sql
 	CreateWorkflow(ctx context.Context, arg CreateWorkflowParams) (Workflow, error)
 	CreateWorkflowRun(ctx context.Context, arg CreateWorkflowRunParams) (WorkflowRun, error)
@@ -51,11 +55,14 @@ type Querier interface {
 	DeleteContact(ctx context.Context, id pgtype.UUID) error
 	DeleteDeal(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	DeleteEmailAccount(ctx context.Context, id pgtype.UUID) error
+	DeleteEmailTemplate(ctx context.Context, key string) error
 	DeleteKBArticle(ctx context.Context, id pgtype.UUID) error
 	DeleteNote(ctx context.Context, id pgtype.UUID) error
 	DeleteRefreshToken(ctx context.Context, tokenHash string) error
 	DeleteTodo(ctx context.Context, id pgtype.UUID) error
 	DeleteUserRefreshTokens(ctx context.Context, userID pgtype.UUID) error
+	ExportEmailTemplatesRows(ctx context.Context) ([][]byte, error)
+	ExportUserInvitesRows(ctx context.Context) ([][]byte, error)
 	GetAIResearchJobByID(ctx context.Context, id pgtype.UUID) (AiResearchJob, error)
 	GetAppointmentByID(ctx context.Context, id pgtype.UUID) (Appointment, error)
 	GetCompanyByID(ctx context.Context, id pgtype.UUID) (Company, error)
@@ -63,12 +70,14 @@ type Querier interface {
 	GetDealByID(ctx context.Context, id pgtype.UUID) (Deal, error)
 	GetEmailAccountByID(ctx context.Context, id pgtype.UUID) (EmailAccount, error)
 	GetEmailMessageByID(ctx context.Context, id pgtype.UUID) (EmailMessage, error)
+	GetEmailTemplateByKey(ctx context.Context, key string) (EmailTemplate, error)
 	GetKBArticleByID(ctx context.Context, id pgtype.UUID) (GetKBArticleByIDRow, error)
 	GetNoteByID(ctx context.Context, id pgtype.UUID) (Note, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetTodoByID(ctx context.Context, id pgtype.UUID) (Todo, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	GetUserInviteByTokenHash(ctx context.Context, tokenHash string) (UserInvite, error)
 	GetWorkflowByID(ctx context.Context, id string) (Workflow, error)
 	GetWorkflowRunByID(ctx context.Context, id string) (WorkflowRun, error)
 	ListAIResearchJobs(ctx context.Context) ([]AiResearchJob, error)
@@ -85,6 +94,7 @@ type Querier interface {
 	ListEmailAttachmentsByMessage(ctx context.Context, messageID pgtype.UUID) ([]EmailAttachment, error)
 	ListEmailMessages(ctx context.Context, arg ListEmailMessagesParams) ([]EmailMessage, error)
 	ListEmailMessagesByThread(ctx context.Context, threadID string) ([]EmailMessage, error)
+	ListEmailTemplates(ctx context.Context) ([]EmailTemplate, error)
 	ListInactiveContacts(ctx context.Context, arg ListInactiveContactsParams) ([]Contact, error)
 	ListKBArticles(ctx context.Context) ([]ListKBArticlesRow, error)
 	ListNotes(ctx context.Context) ([]Note, error)
@@ -94,6 +104,7 @@ type Querier interface {
 	ListTodos(ctx context.Context, arg ListTodosParams) ([]Todo, error)
 	ListTodosByAssignee(ctx context.Context, assignedTo pgtype.UUID) ([]Todo, error)
 	ListUnreadNotifications(ctx context.Context, arg ListUnreadNotificationsParams) ([]Notification, error)
+	ListUserInvites(ctx context.Context) ([]UserInvite, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ListWorkflowRuns(ctx context.Context) ([]WorkflowRun, error)
 	ListWorkflows(ctx context.Context) ([]Workflow, error)
@@ -101,6 +112,7 @@ type Querier interface {
 	MarkEmailMessageRead(ctx context.Context, id pgtype.UUID) error
 	MarkNotificationAsRead(ctx context.Context, id pgtype.UUID) error
 	RevokeDeal(ctx context.Context, arg RevokeDealParams) (Deal, error)
+	RevokeUserInvite(ctx context.Context, id pgtype.UUID) error
 	SearchCompanies(ctx context.Context, arg SearchCompaniesParams) ([]Company, error)
 	SearchContacts(ctx context.Context, arg SearchContactsParams) ([]Contact, error)
 	SearchKBArticlesByEmbedding(ctx context.Context, arg SearchKBArticlesByEmbeddingParams) ([]SearchKBArticlesByEmbeddingRow, error)
@@ -117,6 +129,7 @@ type Querier interface {
 	UpdateEmailAccountLastSynced(ctx context.Context, arg UpdateEmailAccountLastSyncedParams) error
 	UpdateEmailAccountSyncState(ctx context.Context, arg UpdateEmailAccountSyncStateParams) error
 	UpdateEmailMessageTags(ctx context.Context, arg UpdateEmailMessageTagsParams) (EmailMessage, error)
+	UpdateEmailTemplate(ctx context.Context, arg UpdateEmailTemplateParams) (EmailTemplate, error)
 	UpdateKBArticleEmbedding(ctx context.Context, arg UpdateKBArticleEmbeddingParams) error
 	UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, error)
 	UpdateTodo(ctx context.Context, arg UpdateTodoParams) (Todo, error)
@@ -128,6 +141,8 @@ type Querier interface {
 	UpdateUserTOTP(ctx context.Context, arg UpdateUserTOTPParams) error
 	UpdateUserTOTPLastUsedStep(ctx context.Context, arg UpdateUserTOTPLastUsedStepParams) error
 	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) (WorkflowRun, error)
+	UpsertEmailTemplatesRow(ctx context.Context, dollar_1 []byte) error
+	UpsertUserInvitesRow(ctx context.Context, dollar_1 []byte) error
 }
 
 var _ Querier = (*Queries)(nil)

@@ -43,6 +43,8 @@ type InMemoryQuerier struct {
 	aiResearchJobs map[string]db.AiResearchJob
 	workflows      map[string]db.Workflow
 	workflowRuns   map[string]db.WorkflowRun
+	userInvites    map[string]db.UserInvite
+	emailTemplates map[string]db.EmailTemplate
 }
 
 func parseUUID(s string) pgtype.UUID {
@@ -92,6 +94,8 @@ func NewEmptyInMemoryQuerier() *InMemoryQuerier {
 		aiResearchJobs: make(map[string]db.AiResearchJob),
 		workflows:      make(map[string]db.Workflow),
 		workflowRuns:   make(map[string]db.WorkflowRun),
+		userInvites:    make(map[string]db.UserInvite),
+		emailTemplates: make(map[string]db.EmailTemplate),
 	}
 }
 
@@ -2265,6 +2269,246 @@ func (q *InMemoryQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg db.Up
 	}
 	q.workflowRuns[arg.ID] = run
 	return run, nil
+}
+
+// --- User Invites ---
+func (q *InMemoryQuerier) CreateUserInvite(ctx context.Context, arg db.CreateUserInviteParams) (db.UserInvite, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	for _, invite := range q.userInvites {
+		if invite.TokenHash == arg.TokenHash {
+			return db.UserInvite{}, errors.New("user invite with this token hash already exists")
+		}
+	}
+
+	id := newUUID()
+	invite := db.UserInvite{
+		ID:        id,
+		UserID:    arg.UserID,
+		TokenHash: arg.TokenHash,
+		CreatedBy: arg.CreatedBy,
+		ExpiresAt: arg.ExpiresAt,
+		CreatedAt: nowTimestamptz(),
+	}
+	q.userInvites[uuidToStr(id)] = invite
+	return invite, nil
+}
+
+func (q *InMemoryQuerier) GetUserInviteByTokenHash(ctx context.Context, tokenHash string) (db.UserInvite, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	for _, invite := range q.userInvites {
+		if invite.TokenHash == tokenHash {
+			return invite, nil
+		}
+	}
+	return db.UserInvite{}, ErrNotFound
+}
+
+func (q *InMemoryQuerier) RevokeUserInvite(ctx context.Context, id pgtype.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(id)
+	invite, ok := q.userInvites[idStr]
+	if !ok {
+		return nil
+	}
+	// Consumed invites are immutable: the SQL predicate is WHERE id = $1 AND consumed_at IS NULL.
+	if invite.ConsumedAt.Valid {
+		return nil
+	}
+	invite.RevokedAt = nowTimestamptz()
+	q.userInvites[idStr] = invite
+	return nil
+}
+
+func (q *InMemoryQuerier) ListUserInvites(ctx context.Context) ([]db.UserInvite, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	list := make([]db.UserInvite, 0, len(q.userInvites))
+	for _, invite := range q.userInvites {
+		list = append(list, invite)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) ExportUserInvitesRows(ctx context.Context) ([][]byte, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	type keyedRow struct {
+		key string
+		row []byte
+	}
+	keyed := make([]keyedRow, 0, len(q.userInvites))
+	for id, invite := range q.userInvites {
+		row, err := json.Marshal(invite)
+		if err != nil {
+			return nil, err
+		}
+		keyed = append(keyed, keyedRow{key: id, row: row})
+	}
+	sort.Slice(keyed, func(i, j int) bool {
+		return keyed[i].key < keyed[j].key
+	})
+
+	rows := make([][]byte, 0, len(keyed))
+	for _, k := range keyed {
+		rows = append(rows, k.row)
+	}
+	return rows, nil
+}
+
+func (q *InMemoryQuerier) UpsertUserInvitesRow(ctx context.Context, row []byte) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	var invite db.UserInvite
+	if err := json.Unmarshal(row, &invite); err != nil {
+		return err
+	}
+	if !invite.ID.Valid {
+		return errors.New("user_invites row is missing an id")
+	}
+	idStr := uuidToStr(invite.ID)
+	// ON CONFLICT (id) DO UPDATE leaves created_at untouched.
+	if existing, ok := q.userInvites[idStr]; ok {
+		invite.CreatedAt = existing.CreatedAt
+	}
+	q.userInvites[idStr] = invite
+	return nil
+}
+
+// --- Email Templates ---
+func (q *InMemoryQuerier) CreateEmailTemplate(ctx context.Context, arg db.CreateEmailTemplateParams) (db.EmailTemplate, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if _, exists := q.emailTemplates[arg.Key]; exists {
+		return db.EmailTemplate{}, errors.New("email template key already exists: " + arg.Key)
+	}
+
+	id := newUUID()
+	tpl := db.EmailTemplate{
+		ID:        id,
+		Key:       arg.Key,
+		Name:      arg.Name,
+		Subject:   arg.Subject,
+		Body:      arg.Body,
+		Category:  arg.Category,
+		Locale:    arg.Locale,
+		CreatedAt: nowTimestamptz(),
+		UpdatedAt: nowTimestamptz(),
+	}
+	q.emailTemplates[arg.Key] = tpl
+	return tpl, nil
+}
+
+func (q *InMemoryQuerier) GetEmailTemplateByKey(ctx context.Context, key string) (db.EmailTemplate, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	tpl, ok := q.emailTemplates[key]
+	if !ok {
+		return db.EmailTemplate{}, ErrNotFound
+	}
+	return tpl, nil
+}
+
+func (q *InMemoryQuerier) ListEmailTemplates(ctx context.Context) ([]db.EmailTemplate, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	list := make([]db.EmailTemplate, 0, len(q.emailTemplates))
+	for _, tpl := range q.emailTemplates {
+		list = append(list, tpl)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Category != list[j].Category {
+			return list[i].Category < list[j].Category
+		}
+		return list[i].Key < list[j].Key
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) UpdateEmailTemplate(ctx context.Context, arg db.UpdateEmailTemplateParams) (db.EmailTemplate, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	tpl, ok := q.emailTemplates[arg.Key]
+	if !ok {
+		return db.EmailTemplate{}, ErrNotFound
+	}
+	tpl.Name = arg.Name
+	tpl.Subject = arg.Subject
+	tpl.Body = arg.Body
+	tpl.Category = arg.Category
+	tpl.Locale = arg.Locale
+	tpl.UpdatedAt = nowTimestamptz()
+	q.emailTemplates[arg.Key] = tpl
+	return tpl, nil
+}
+
+func (q *InMemoryQuerier) DeleteEmailTemplate(ctx context.Context, key string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	delete(q.emailTemplates, key)
+	return nil
+}
+
+func (q *InMemoryQuerier) ExportEmailTemplatesRows(ctx context.Context) ([][]byte, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	type keyedRow struct {
+		key string
+		row []byte
+	}
+	keyed := make([]keyedRow, 0, len(q.emailTemplates))
+	for _, tpl := range q.emailTemplates {
+		row, err := json.Marshal(tpl)
+		if err != nil {
+			return nil, err
+		}
+		keyed = append(keyed, keyedRow{key: uuidToStr(tpl.ID), row: row})
+	}
+	sort.Slice(keyed, func(i, j int) bool {
+		return keyed[i].key < keyed[j].key
+	})
+
+	rows := make([][]byte, 0, len(keyed))
+	for _, k := range keyed {
+		rows = append(rows, k.row)
+	}
+	return rows, nil
+}
+
+func (q *InMemoryQuerier) UpsertEmailTemplatesRow(ctx context.Context, row []byte) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	var tpl db.EmailTemplate
+	if err := json.Unmarshal(row, &tpl); err != nil {
+		return err
+	}
+	if !tpl.ID.Valid {
+		return errors.New("email_templates row is missing an id")
+	}
+	// ON CONFLICT (key) DO UPDATE keeps the stored id and refreshes the content.
+	if existing, ok := q.emailTemplates[tpl.Key]; ok {
+		tpl.ID = existing.ID
+	}
+	q.emailTemplates[tpl.Key] = tpl
+	return nil
 }
 
 // Compile-time check that InMemoryQuerier implements db.Querier

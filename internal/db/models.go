@@ -294,6 +294,18 @@ type EmailMessage struct {
 	IsDraft         bool               `json:"is_draft"`
 }
 
+type EmailTemplate struct {
+	ID        pgtype.UUID        `json:"id"`
+	Key       string             `json:"key"`
+	Name      string             `json:"name"`
+	Subject   string             `json:"subject"`
+	Body      string             `json:"body"`
+	Category  string             `json:"category"`
+	Locale    string             `json:"locale"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IntakeForm struct {
 	ID         pgtype.UUID        `json:"id"`
 	Name       string             `json:"name"`
@@ -376,6 +388,17 @@ type User struct {
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	TotpLastUsedStep    int64              `json:"totp_last_used_step"`
+}
+
+type UserInvite struct {
+	ID         pgtype.UUID        `json:"id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	TokenHash  string             `json:"token_hash"`
+	CreatedBy  pgtype.UUID        `json:"created_by"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type Workflow struct {
