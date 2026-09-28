@@ -824,23 +824,79 @@ func TestDemoRefreshRollsBackLikeProduction(t *testing.T) {
 	require.Equal(t, before+1, countRefreshTokens(t, q), "a committed RunTx must keep its writes")
 }
 
-// TestEveryDemoMapIsSnapshotCovered guards the transaction itself: a new map
-// field that is not snapshotted would silently escape rollback.
-func TestEveryDemoMapIsSnapshotCovered(t *testing.T) {
+// TestDemoRunTxDoesNotDeadlock is the guard on the mutex. InMemoryQuerier.mu is
+// a sync.RWMutex, which is not reentrant: a RunTx that holds it and then calls
+// the callback with the original querier blocks forever on the first method the
+// callback uses. The timeout turns that hang into a failure instead of a stuck
+// suite.
+func TestDemoRunTxDoesNotDeadlock(t *testing.T) {
 	q := demo.NewEmptyInMemoryQuerier()
-	taken := len(q.TakeSnapshotForTest())
+	seedTestUser(t, q, testUserID, "a@example.de", "Str0ng!Pass", "ACTIVE", "VERTRIEB")
+
+	done := make(chan error, 1)
+	go func() {
+		done <- q.RunTx(context.Background(), func(txq db.Querier) error {
+			// Both a read and a write, because the reads take RLock and the
+			// writes take Lock.
+			if _, err := txq.GetUserByID(context.Background(), pgtype.UUID{Bytes: testUserID, Valid: true}); err != nil {
+				return err
+			}
+			_, err := txq.CreateRefreshToken(context.Background(), refreshParams(testUserID, "hash-deadlock"))
+			return err
+		})
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunTx deadlocked: the callback must not re-enter the querier's own mutex")
+	}
+}
+
+// TestDemoRunTxRollsBackTheAuditLogSlice pins the slice case. auditLogs is the
+// one non-map collection, and it is the field a map-only snapshot would miss.
+func TestDemoRunTxRollsBackTheAuditLogSlice(t *testing.T) {
+	q := demo.NewEmptyInMemoryQuerier()
+	before := len(q.AuditLogsForTest())
+
+	err := q.RunTx(context.Background(), func(txq db.Querier) error {
+		if _, err := txq.CreateAuditLog(context.Background(), auditLogParams("written inside a failed transaction")); err != nil {
+			return err
+		}
+		return errors.New("abort")
+	})
+	require.Error(t, err)
+	require.Equal(t, before, len(q.AuditLogsForTest()), "a rolled-back transaction must not leave an audit row behind")
+
+	require.NoError(t, q.RunTx(context.Background(), func(txq db.Querier) error {
+		_, err := txq.CreateAuditLog(context.Background(), auditLogParams("committed"))
+		return err
+	}))
+	require.Equal(t, before+1, len(q.AuditLogsForTest()), "a committed transaction keeps its audit row")
+}
+
+// TestEveryDemoCollectionIsCloned guards the shadow clone. A new map or slice
+// field that is missing from cloneForTransaction and adoptFrom would be shared
+// between the shadow and the original, so it would escape rollback silently.
+// Both map and slice kinds are counted, not just maps.
+func TestEveryDemoCollectionIsCloned(t *testing.T) {
+	typ := reflect.TypeOf(demo.InMemoryQuerier{})
 	want := 0
-	typ := reflect.TypeOf(*q)
 	for i := 0; i < typ.NumField(); i++ {
-		if typ.Field(i).Type.Kind() == reflect.Map {
+		switch typ.Field(i).Type.Kind() {
+		case reflect.Map, reflect.Slice, reflect.Ptr, reflect.Interface, reflect.Array:
 			want++
 		}
 	}
-	require.Equal(t, want, taken, "every map field on InMemoryQuerier needs a snapshot entry")
+	covered := demo.TransactionCollectionFields()
+	require.Equal(t, want, len(covered),
+		"every map or slice field on InMemoryQuerier needs a clone and adopt entry")
+	require.Len(t, covered, len(uniqueStrings(covered)), "TransactionCollectionFields must not list a field twice")
 }
 ```
 
-Helper constructors `failingQuerier`, `setUserStatus`, `countRefreshTokens`, `refreshParams`, `serveWithMiddleware` and `seedTestUser` go in the same file when the task runs; `seedTestUser` writes a user row with an Argon2id hash of the given password.
+Helper constructors and accessors used above go in the same file when the task runs, and each is stated there: `failingQuerier` (Step 5, which must implement `RunTx` itself), `setUserStatus`, `countRefreshTokens`, `refreshParams`, `auditLogParams`, `uniqueStrings`, `serveWithMiddleware`, `seedTestUser` (writes a user row with an Argon2id hash), and `demo.AuditLogsForTest()` (an accessor in `internal/db/demo/tx.go` returning `len(q.auditLogs)` under the read lock, alongside `TransactionCollectionFields`).
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -881,9 +937,13 @@ func (q *Queries) RunTx(ctx context.Context, fn func(Querier) error) error {
 }
 ```
 
-- [ ] **Step 4: Implement `RunTx` for the demo querier**
+- [ ] **Step 4: Implement `RunTx` for the demo querier without deadlocking**
 
-Create `internal/db/demo/tx.go`. The demo stores flat value types, so a shallow copy of each map is a correct snapshot. Keep the list in one place and let `TestEveryDemoMapIsSnapshotCovered` fail if a new map is added without an entry:
+`InMemoryQuerier.mu` is a `sync.RWMutex` and every method takes it. `sync.RWMutex` is **not reentrant**, so `RunTx` must not hold `q.mu` and then call `fn(q)`: the callback's `CreateRefreshToken` or `GetUserByID` would block on the same mutex forever and every demo refresh would hang. The lock guards the snapshot; the callback runs against a **shadow clone** that owns its own mutex and its own copies of the data.
+
+`InMemoryQuerier` has 18 map fields and one slice field (`auditLogs`), so a `maps.Clone`-only snapshot would silently fail to roll back the audit log — the append-only slice is the field most likely to be written inside a transaction.
+
+Create `internal/db/demo/tx.go`:
 
 ```go
 package demo
@@ -891,49 +951,153 @@ package demo
 import (
 	"context"
 	"maps"
+	"slices"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
-// RunTx gives the in-memory querier all-or-nothing semantics without a pool. It
-// holds the write lock for the whole callback, snapshots every map first, and
-// restores the snapshot when fn returns an error. Without this, the refresh
-// rotation would have different semantics in demo mode than in production.
+// TxRunner is the transactional capability a service can depend on. It is
+// declared in both packages so either can be satisfied and asserted at compile
+// time, and so internal/auth depends on neither pgx nor the demo package.
+type TxRunner interface {
+	RunTx(ctx context.Context, fn func(db.Querier) error) error
+}
+
+// RunTx gives the in-memory querier all-or-nothing semantics without a pool.
+//
+// It deliberately does not call fn(q). q.mu is a sync.RWMutex and every method
+// takes it, so re-entering it from inside the callback would deadlock. Instead
+// the callback runs against a shadow clone with its own mutex and its own copy
+// of every map and slice. The original is untouched until the callback
+// succeeds, so rollback is exact and needs no restore step, and no concurrent
+// reader can observe a half-applied transaction.
 func (q *InMemoryQuerier) RunTx(ctx context.Context, fn func(db.Querier) error) error {
+	// Held for the whole callback so the transaction is serialised against
+	// other writers and against itself; never re-entered, because fn works on
+	// the shadow.
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	undo := q.TakeSnapshotForTest()
-	if err := fn(q); err != nil {
-		undo()
+	shadow := q.cloneForTransaction()
+	if err := fn(shadow); err != nil {
+		// q was never written, so there is nothing to restore.
 		return err
 	}
+	q.adoptFrom(shadow)
 	return nil
 }
 
-// TakeSnapshotForTest returns a single undo closure that restores every map.
-// It is exported for the coverage test and unexported in spirit: adding a map
-// field to InMemoryQuerier without adding it here is caught by that test.
-func (q *InMemoryQuerier) TakeSnapshotForTest() func() {
-	users := maps.Clone(q.users)
-	refreshTokens := maps.Clone(q.refreshTokens)
-	userInvites := maps.Clone(q.userInvites)
-	emailTemplates := maps.Clone(q.emailTemplates)
-	// ... one entry per remaining map field on InMemoryQuerier ...
+// cloneForTransaction builds the shadow. It constructs a new value rather than
+// copying *q, because copying the struct would copy the mutex and trip
+// go vet's copylocks check.
+func (q *InMemoryQuerier) cloneForTransaction() *InMemoryQuerier {
+	return &InMemoryQuerier{
+		users:          maps.Clone(q.users),
+		companies:      maps.Clone(q.companies),
+		contacts:       maps.Clone(q.contacts),
+		deals:          maps.Clone(q.deals),
+		todos:          maps.Clone(q.todos),
+		notifications:  maps.Clone(q.notifications),
+		emailAccounts:  maps.Clone(q.emailAccounts),
+		emailMessages:  maps.Clone(q.emailMessages),
+		emailAttachs:   maps.Clone(q.emailAttachs),
+		refreshTokens:  maps.Clone(q.refreshTokens),
+		appointments:   maps.Clone(q.appointments),
+		notes:          maps.Clone(q.notes),
+		callActivities: maps.Clone(q.callActivities),
+		kbArticles:     maps.Clone(q.kbArticles),
+		aiResearchJobs: maps.Clone(q.aiResearchJobs),
+		workflows:      maps.Clone(q.workflows),
+		workflowRuns:   maps.Clone(q.workflowRuns),
+		userInvites:    maps.Clone(q.userInvites),
+		emailTemplates: maps.Clone(q.emailTemplates),
+		// auditLogs is a slice, not a map: a map-only snapshot would leave every
+		// audit row written inside an aborted transaction in place.
+		auditLogs: slices.Clone(q.auditLogs),
+	}
+}
 
-	return func() {
-		q.users = users
-		q.refreshTokens = refreshTokens
-		q.userInvites = userInvites
-		q.emailTemplates = emailTemplates
-		// ... and the matching assignment for every entry above ...
+// adoptFrom copies the shadow's contents into q. The caller holds q.mu.
+func (q *InMemoryQuerier) adoptFrom(s *InMemoryQuerier) {
+	q.users = s.users
+	q.companies = s.companies
+	q.contacts = s.contacts
+	q.deals = s.deals
+	q.todos = s.todos
+	q.notifications = s.notifications
+	q.emailAccounts = s.emailAccounts
+	q.emailMessages = s.emailMessages
+	q.emailAttachs = s.emailAttachs
+	q.refreshTokens = s.refreshTokens
+	q.appointments = s.appointments
+	q.notes = s.notes
+	q.callActivities = s.callActivities
+	q.kbArticles = s.kbArticles
+	q.aiResearchJobs = s.aiResearchJobs
+	q.workflows = s.workflows
+	q.workflowRuns = s.workflowRuns
+	q.userInvites = s.userInvites
+	q.emailTemplates = s.emailTemplates
+	q.auditLogs = s.auditLogs
+}
+
+// TransactionCollectionFields returns the names of the reference-typed fields
+// that cloneForTransaction and adoptFrom must both cover. It exists for the
+// coverage test; keep it in step with the two functions above.
+func TransactionCollectionFields() []string {
+	return []string{
+		"users", "companies", "contacts", "deals", "todos", "notifications",
+		"emailAccounts", "emailMessages", "emailAttachs", "refreshTokens",
+		"appointments", "notes", "callActivities", "kbArticles",
+		"aiResearchJobs", "workflows", "workflowRuns", "userInvites",
+		"emailTemplates", "auditLogs",
 	}
 }
 ```
 
+`maps.Clone` of a nil map returns nil, and the demo constructors initialise every field, so a shadow is always fully usable. Add the compile-time assertion next to the existing `var _ db.Querier = (*InMemoryQuerier)(nil)`: `var _ TxRunner = (*InMemoryQuerier)(nil)`.
+
 Also make the demo's `CreateRefreshToken` copy `FamilyID` from the params; it currently drops it, which would leave every demo rotation in an empty family.
 
-- [ ] **Step 5: Implement the rotation with the correct ordering**
+- [ ] **Step 5: Write the failure-injecting querier correctly**
+
+An embedded `db.Querier` promotes the inner querier's `RunTx`, which hands the callback the **real** querier. The injection would then be dead code and the rollback test would pass for the wrong reason, so the wrapper implements `RunTx` itself and passes `f` to `fn`:
+
+```go
+// failingQuerier injects a failure into one method. It implements RunTx itself
+// and passes *itself* to the callback: embedding db.Querier would promote the
+// inner querier's RunTx, the callback would receive the real querier, and the
+// injected failure would never fire.
+type failingQuerier struct {
+	db.Querier
+	failCreateRefreshToken bool
+}
+
+func (f *failingQuerier) RunTx(ctx context.Context, fn func(db.Querier) error) error {
+	runner, ok := f.Querier.(demo.TxRunner)
+	if !ok {
+		return db.ErrTransactionsUnsupported
+	}
+	return runner.RunTx(ctx, fn)
+}
+
+func (f *failingQuerier) CreateRefreshToken(ctx context.Context, arg db.CreateRefreshTokenParams) (db.RefreshToken, error) {
+	if f.failCreateRefreshToken {
+		return db.RefreshToken{}, errors.New("injected CreateRefreshToken failure")
+	}
+	return f.Querier.CreateRefreshToken(ctx, arg)
+}
+```
+
+`TestRotationFailureDoesNotConsumeTheToken` additionally asserts that the injection actually fired, by checking that the healthy path through the same wrapper does **not** error — otherwise a wrapper that silently never injects would make the test pass vacuously:
+
+```go
+	svc.querier = &failingQuerier{Querier: q, failCreateRefreshToken: false}
+	_, _, err = svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
+	require.NoError(t, err, "the injection itself must be the only difference")
+```
+
+- [ ] **Step 6: Implement the rotation with the correct ordering**
 
 Replace `RefreshToken` in `internal/auth/service.go`. Everything that can fail runs **inside** the transaction, so a failure consumes nothing:
 
@@ -1003,7 +1167,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ip, use
 
 `issueAccessToken(user db.User)` reads `user.TokenVersion` and calls `GenerateAccessToken` from Task 2.
 
-- [ ] **Step 6: Implement the replay path with the correct ordering**
+- [ ] **Step 7: Implement the replay path with the correct ordering**
 
 ```go
 // SessionRevoker terminates the live streams of a user whose session state was
@@ -1073,11 +1237,11 @@ func (s *AuthService) WithSessionRevoker(r SessionRevoker) *AuthService {
 }
 ```
 
-- [ ] **Step 7: Wire the revoker in the router**
+- [ ] **Step 8: Wire the revoker in the router**
 
 In `internal/server/router.go`, right after the auth service is constructed: `authSvc = authSvc.WithSessionRevoker(cfg.SSEHub)` — only when `cfg.SSEHub != nil`, since a nil hub must not be stored.
 
-- [ ] **Step 8: Run the tests to verify they pass**
+- [ ] **Step 9: Run the tests to verify they pass**
 
 ```bash
 gofmt -s -w internal/auth internal/db
@@ -1088,9 +1252,9 @@ go test ./internal/auth/... ./internal/db/... -count=1
 
 Expected: PASS, including the demo rollback tests.
 
-- [ ] **Step 9: Mutation-verify the two guarantees**
+- [ ] **Step 10: Mutation-verify the three guarantees**
 
-Remove the `used_at IS NULL` predicate from `ConsumeRefreshToken` and confirm `TestRefreshTokenIsSingleUse` fails. Then remove the `IncrementUserTokenVersion` call from `handleReplay` and confirm `TestReplayRejectsTheAccessTokenIssuedBeforeIt` fails — the access token issued before the replay is still accepted, and that survival is what fails the test. Then move the `Status` check after the commit and confirm `TestDeactivatedUserRotationDoesNotConsumeTheToken` fails. Restore all three.
+Remove the `used_at IS NULL` predicate from `ConsumeRefreshToken` and confirm `TestRefreshTokenIsSingleUse` fails. Then remove the `IncrementUserTokenVersion` call from `handleReplay` and confirm `TestReplayRejectsTheAccessTokenIssuedBeforeIt` fails — the access token issued before the replay is still accepted, and that survival is what fails the test. Then move the `Status` check after the commit and confirm `TestDeactivatedUserRotationDoesNotConsumeTheToken` fails. Then replace the shadow clone with `fn(q)` in the demo `RunTx` and confirm `TestDemoRunTxDoesNotDeadlock` fails on its timeout rather than hanging the suite. Restore all four.
 
 ### Task 5: Logout-everywhere and SSE stream revocation
 
@@ -2243,4 +2407,4 @@ Expected: exactly three SP8a commits, working tree clean, nothing pushed.
 
 **Placeholder scan.** No TBD, no "similar to Task N", no unspecified error handling. Every code step shows the code. Test helpers referenced across tasks — `newTestAuthService`, `seedTestUser`, `failingQuerier`, `setUserStatus`, `countRefreshTokens`, `refreshParams`, `serveWithMiddleware`, `newOwnershipHandler`, `doAs`, `performJSON`, `decodeContact`, `decodeContacts` — are written as helpers in the test file of the task that first uses them, and that step says so.
 
-**Type consistency.** `TokenVersion *int32` is used identically in `jwt.go`, `middleware.go`, Task 4's `issueAccessToken`, and the Task 4 middleware test. `ConsumeRefreshToken` returns `family_id` as `pgtype.UUID` in Task 1 and is read as `consumed.FamilyID` in Task 4. `db.CreateRefreshTokenParams` uses `UserAgent`/`IpAddress` of type `pgtype.Text` and gains `FamilyID` in Task 1; Task 4 constructs it with exactly those fields. `canModify(claims, pgtype.UUID)` has one signature across Tasks 10, 11 and the frontend contract in Task 18. `RequirePermission` is introduced in Task 9 and used only from Task 9 onward. `auth.SessionRevoker` is declared in Task 4 and implemented by `*sse.Hub` in Task 5, with `TestHubSatisfiesTheAuthRevokerSeam` pinning the two together. `TxRunner`/`RunTx` is declared in Task 4 and implemented once in `internal/db/tx.go` and once in `internal/db/demo/tx.go`; the refresh path and the replay path both go through `(*AuthService).runTx`, never through `(*db.Queries).Begin`, so demo mode exercises the same semantics.
+**Type consistency.** `TokenVersion *int32` is used identically in `jwt.go`, `middleware.go`, Task 4's `issueAccessToken`, and the Task 4 middleware test. `ConsumeRefreshToken` returns `family_id` as `pgtype.UUID` in Task 1 and is read as `consumed.FamilyID` in Task 4. `db.CreateRefreshTokenParams` uses `UserAgent`/`IpAddress` of type `pgtype.Text` and gains `FamilyID` in Task 1; Task 4 constructs it with exactly those fields. `canModify(claims, pgtype.UUID)` has one signature across Tasks 10, 11 and the frontend contract in Task 18. `RequirePermission` is introduced in Task 9 and used only from Task 9 onward. `auth.SessionRevoker` is declared in Task 4 and implemented by `*sse.Hub` in Task 5, with `TestHubSatisfiesTheAuthRevokerSeam` pinning the two together. `TxRunner` is declared in both `internal/db` and `internal/db/demo` with the identical method set `RunTx(ctx, func(db.Querier) error) error`; `*db.Queries` implements it with a real PostgreSQL transaction, `demo.InMemoryQuerier` with a shadow clone that never re-enters its own `sync.RWMutex`. The refresh path and the replay path both go through `(*AuthService).runTx`, never through `(*db.Queries).Begin`, so demo mode exercises the same all-or-nothing semantics as production.
