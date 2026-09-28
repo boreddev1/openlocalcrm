@@ -31,11 +31,11 @@
 
 | # | Message | Tasks |
 |---|---|---|
-| 1 | `fix(auth): enforce durable session revocation and refresh token family reuse detection (SP8a)` | 1–8 |
+| 1 | `fix(auth): harden sessions, TOTP setup and password policy (SP8a)` | 1–8 |
 | 2 | `fix(auth): enforce the RBAC role matrix and stable resource ownership (SP8a)` | 9–16 |
 | 3 | `feat(ui): wire ownership, password nag and route guards with the live session test (SP8a)` | 17–23 |
 
-**Open item for plan review:** commit 1 also carries F-03 (TOTP setup race) and F-08 (creation password policy) because both live in `internal/auth` and neither fits the commit 2 or 3 messages. If you prefer, commit 1's message can become `fix(auth): harden sessions, TOTP setup and password policy (SP8a)`. The plan below uses the message the spec already approved; say the word and I will change it.
+Commit 1 carries the session work together with F-03 and F-08, because all three live in `internal/auth` and neither F-03 nor F-08 fits the message of commit 2 or 3. The message names all three rather than hiding two findings behind one headline.
 
 **Execution order:** run the three groups sequentially. Each group ends with its own commit, its own `make check`, and its own review before the next group starts.
 
@@ -205,6 +205,25 @@ ALTER TABLE users DROP COLUMN IF EXISTS token_version;
 - [ ] **Step 4: Add the queries**
 
 Append to `internal/db/queries/sessions.sql`. `ConsumeRefreshToken` is the rotation primitive: it marks the token used and returns the family in one statement, and it returns **no row** for an already-used or expired token, which is what makes replay detectable.
+
+First, extend the existing `CreateRefreshToken` so a rotation chain has a family. `db.CreateRefreshTokenParams` then carries a `FamilyID pgtype.UUID`, and `UserAgent`/`IpAddress` are `pgtype.Text` — not `sql.NullString`:
+
+```sql
+-- name: CreateRefreshToken :one
+INSERT INTO refresh_tokens (
+    user_id,
+    token_hash,
+    user_agent,
+    ip_address,
+    expires_at,
+    family_id
+) VALUES (
+    $1, $2, $3, $4, $5, $6
+)
+RETURNING *;
+```
+
+Then add the rotation and cleanup statements:
 
 ```sql
 -- name: ConsumeRefreshToken :one
@@ -649,87 +668,274 @@ go test ./internal/auth/... ./internal/server/... -count=1
 
 Expected: PASS, with no reference to the deleted symbols anywhere in the tree.
 
-### Task 4: Single-use rotation with family revocation
+### Task 4: Transactional single-use rotation with family revocation
 
 **Files:**
-- Modify: `internal/auth/service.go` (`RefreshToken`, and the rotation path in `Login`)
+- Create: `internal/db/tx.go`
+- Create: `internal/db/demo/tx.go`
+- Create: `internal/db/demo/tx_test.go`
+- Modify: `internal/auth/service.go` (`RefreshToken`, the replay path, `SessionRevoker`)
+- Modify: `internal/db/demo/querier.go` (`CreateRefreshToken` must copy `FamilyID`)
+- Modify: `internal/server/router.go` (wire the revoker)
 - Test: `internal/auth/service_test.go`
 
 **Interfaces:**
-- Consumes: `ConsumeRefreshToken`, `GetRefreshTokenByHash`, `DeleteRefreshTokenFamily`, `IncrementUserTokenVersion` from Task 1; `(*Queries).Begin` and `db.New` from SP7 (`internal/db/backup_tx.go`, `internal/db/db.go:20`).
-- Produces: `(*AuthService).RefreshToken(ctx, rawRefreshToken, ip, userAgent string) (accessToken, refreshToken string, err error)` with the semantics in spec §3.2.
-
-- [ ] **Step 1: Write the failing tests**
-
-Replace the grace-cache assertion in `internal/auth/service_test.go` and add:
+- Consumes: `ConsumeRefreshToken`, `GetRefreshTokenByHash`, `DeleteRefreshTokenFamily`, `IncrementUserTokenVersion`, `CurrentTokenVersion` from Task 1; `GenerateAccessToken` from Task 2.
+- Produces:
 
 ```go
-// TestRefreshTokenIsSingleUse: rotating consumes the presented token. The
-// 10-second grace cache used to hand the new pair to a second presenter.
-func TestRefreshTokenIsSingleUse(t *testing.T) {
-	svc, _ := newTestAuthService(t)
-	_, refresh, err := svc.Login(context.Background(), "a@example.de", "Str0ng!Pass", "", "127.0.0.1", "test")
-	require.NoError(t, err)
-
-	firstAccess, firstRefresh, err := svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
-	require.NoError(t, err)
-	require.NotEmpty(t, firstAccess)
-
-	// Replaying the consumed token must fail, not return the pair again.
-	_, _, err = svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
-	require.ErrorIs(t, err, ErrInvalidRefreshToken)
+// internal/auth — the seam that keeps internal/auth free of any sse import.
+type SessionRevoker interface {
+	RevokeUser(userID uuid.UUID)
 }
 
-// TestReplayBumpsTokenVersion: a replay is treated as account compromise, so it
-// invalidates the access token that was already issued, not just the family.
-func TestReplayBumpsTokenVersion(t *testing.T) {
-	svc, q := newTestAuthService(t)
-	access, refresh, err := svc.Login(context.Background(), "a@example.de", "Str0ng!Pass", "", "127.0.0.1", "test")
-	require.NoError(t, err)
-
-	_, _, err = svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
-	require.NoError(t, err)
-
-	// The legitimate caller still holds a valid access token.
-	claims, err := validateWithTestKey(t, svc, access)
-	require.NoError(t, err)
-	before := *claims.TokenVersion
-
-	// Replay the spent token.
-	_, _, err = svc.RefreshToken(context.Background(), refresh, "10.0.0.9", "attacker")
-	require.ErrorIs(t, err, ErrInvalidRefreshToken)
-
-	stored, err := q.CurrentTokenVersion(context.Background(), pgtype.UUID{Bytes: testUserID, Valid: true})
-	require.NoError(t, err)
-	require.Greater(t, stored, before, "a detected replay must invalidate existing access tokens")
-}
-
-// TestAbortDuringRotationLeavesTheTokenUsable: if the transaction aborts after
-// used_at is written, the client's next legitimate attempt would look like a
-// replay. Both writes must roll back together.
-func TestAbortDuringRotationLeavesTheTokenUsable(t *testing.T) {
-	svc, _ := newTestAuthService(t)
-	_, refresh, err := svc.Login(context.Background(), "a@example.de", "Str0ng!Pass", "", "127.0.0.1", "test")
-	require.NoError(t, err)
-
-	// Force the successor insert to fail by using a querier whose transaction
-	// handle is closed after Begin; the test asserts the original still works.
-	svc.querier = &failingTxQuerier{InMemoryQuerier: svc.querier.(*demo.InMemoryQuerier), failOn: "CreateRefreshToken"}
-	_, _, err = svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
-	require.Error(t, err)
+// internal/db and internal/db/demo — one transactional capability, two
+// implementations, so the refresh path works identically in production and
+// demo mode.
+type TxRunner interface {
+	RunTx(ctx context.Context, fn func(db.Querier) error) error
 }
 ```
 
-`failingTxQuerier` wraps the demo querier and returns an error from the named method; give it a real `Begin` that returns a handle whose `Rollback` discards the changes, so the assertion is meaningful.
+*Why `RunTx` and not the SP7 `Begin`:* `(*Queries).Begin` exists only on `*db.Queries`; `demo.InMemoryQuerier` has no pool, so a `Begin`-based rotation returns `ErrTransactionsUnsupported` for every demo refresh and the Playwright suite loses login rotation entirely. `RunTx` gives the demo the same all-or-nothing semantics by snapshotting under its own lock.
 
-- [ ] **Step 2: Run them to verify they fail**
+- [ ] **Step 1: Write the failing tests**
 
-Run: `go test ./internal/auth/ -run 'TestRefreshTokenIsSingleUse|TestReplayBumps|TestAbortDuringRotation' -count=1`
-Expected: FAIL — the second presenter currently succeeds.
+Append to `internal/auth/service_test.go`. Delete the existing grace-cache assertion at lines 82-85 — it encodes the behaviour being removed.
 
-- [ ] **Step 3: Implement rotation in one transaction**
+```go
+// newTestAuthService returns a service, its querier, and the public key, so a
+// test can drive the real middleware with a real version source.
+func newTestAuthService(t *testing.T) (*AuthService, db.Querier, ed25519.PublicKey) {
+	t.Helper()
+	priv, pub := testKeyPair(t)
+	q := demo.NewEmptyInMemoryQuerier()
+	seedTestUser(t, q, testUserID, "a@example.de", "Str0ng!Pass", "ACTIVE", "VERTRIEB")
+	svc := NewAuthService(q, priv, pub, auth.NewRateLimiterForTest())
+	return svc, q, pub
+}
 
-Replace the body of `RefreshToken` in `internal/auth/service.go` with this control flow. The transaction shape mirrors what SP7's restore does via `(*Queries).Begin` and `db.New(tx)`:
+// querierVersions is the real version source the middleware uses in
+// production; the test uses the same one rather than a constant.
+type querierVersions struct{ q db.Querier }
+
+func (v querierVersions) CurrentTokenVersion(ctx context.Context, id pgtype.UUID) (int32, error) {
+	return v.q.CurrentTokenVersion(ctx, id)
+}
+
+// TestRefreshTokenIsSingleUse: rotating consumes the presented token. The old
+// 10-second grace cache handed the new pair to a second presenter.
+func TestRefreshTokenIsSingleUse(t *testing.T) {
+	svc, _, _ := newTestAuthService(t)
+	_, refresh, err := svc.Login(context.Background(), "a@example.de", "Str0ng!Pass", "", "127.0.0.1", "test")
+	require.NoError(t, err)
+
+	_, _, err = svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
+	require.NoError(t, err)
+
+	_, _, err = svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
+	require.ErrorIs(t, err, ErrInvalidRefreshToken, "a spent refresh token must not be redeemable twice")
+}
+
+// TestReplayRejectsTheAccessTokenIssuedBeforeIt is the §10.4 guarantee. It
+// asserts the 401 through the real middleware; checking only the stored counter
+// would pass even if nothing consulted it.
+func TestReplayRejectsTheAccessTokenIssuedBeforeIt(t *testing.T) {
+	svc, q, pub := newTestAuthService(t)
+	access, refresh, err := svc.Login(context.Background(), "a@example.de", "Str0ng!Pass", "", "127.0.0.1", "test")
+	require.NoError(t, err)
+
+	// Before the replay the token works.
+	require.Equal(t, http.StatusOK, serveWithMiddleware(t, svc, q, pub, access).Code)
+
+	// A legitimate rotation succeeds.
+	_, _, err = svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
+	require.NoError(t, err)
+
+	// Replaying the spent token from another client is a compromise.
+	_, _, err = svc.RefreshToken(context.Background(), refresh, "10.0.0.9", "attacker")
+	require.ErrorIs(t, err, ErrInvalidRefreshToken)
+
+	// The access token minted before all of this is now dead.
+	rec := serveWithMiddleware(t, svc, q, pub, access)
+	require.Equal(t, http.StatusUnauthorized, rec.Code,
+		"without the token_version bump the stolen access token would still be accepted")
+}
+
+// TestRotationFailureDoesNotConsumeTheToken: if anything inside the transaction
+// fails, the presented token must remain usable. Committing used_at first and
+// failing afterwards would turn the client's next legitimate attempt into a
+// theft signal.
+func TestRotationFailureDoesNotConsumeTheToken(t *testing.T) {
+	svc, q, _ := newTestAuthService(t)
+	_, refresh, err := svc.Login(context.Background(), "a@example.de", "Str0ng!Pass", "", "127.0.0.1", "test")
+	require.NoError(t, err)
+
+	// A querier whose CreateRefreshToken always fails: the successor insert
+	// aborts, so used_at must roll back with it.
+	svc.querier = &failingQuerier{Querier: q, failCreateRefreshToken: true}
+	_, _, err = svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
+	require.Error(t, err)
+
+	svc.querier = q
+	// The original token still works, so the client was not punished.
+	_, _, err = svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
+	require.NoError(t, err)
+}
+
+// TestDeactivatedUserRotationDoesNotConsumeTheToken covers the ordering rule
+// for the status check specifically: it must run before the commit.
+func TestDeactivatedUserRotationDoesNotConsumeTheToken(t *testing.T) {
+	svc, q, _ := newTestAuthService(t)
+	_, refresh, err := svc.Login(context.Background(), "a@example.de", "Str0ng!Pass", "", "127.0.0.1", "test")
+	require.NoError(t, err)
+
+	setUserStatus(t, q, testUserID, "DEACTIVATED")
+	_, _, err = svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
+	require.Error(t, err)
+
+	// Reactivating the user and retrying must work; the token was never consumed.
+	setUserStatus(t, q, testUserID, "ACTIVE")
+	_, _, err = svc.RefreshToken(context.Background(), refresh, "127.0.0.1", "test")
+	require.NoError(t, err)
+}
+
+// TestDemoRefreshRollsBackLikeProduction: the demo path must have the same
+// all-or-nothing semantics, or demo mode would exercise a different code path
+// than production.
+func TestDemoRefreshRollsBackLikeProduction(t *testing.T) {
+	q := demo.NewEmptyInMemoryQuerier()
+	seedTestUser(t, q, testUserID, "a@example.de", "Str0ng!Pass", "ACTIVE", "VERTRIEB")
+	before := countRefreshTokens(t, q)
+
+	err := q.RunTx(context.Background(), func(txq db.Querier) error {
+		if _, err := txq.CreateRefreshToken(context.Background(), refreshParams(testUserID, "hash-a")); err != nil {
+			return err
+		}
+		return errors.New("abort")
+	})
+	require.Error(t, err)
+	require.Equal(t, before, countRefreshTokens(t, q), "RunTx must restore the snapshot on error")
+
+	require.NoError(t, q.RunTx(context.Background(), func(txq db.Querier) error {
+		_, err := txq.CreateRefreshToken(context.Background(), refreshParams(testUserID, "hash-b"))
+		return err
+	}))
+	require.Equal(t, before+1, countRefreshTokens(t, q), "a committed RunTx must keep its writes")
+}
+
+// TestEveryDemoMapIsSnapshotCovered guards the transaction itself: a new map
+// field that is not snapshotted would silently escape rollback.
+func TestEveryDemoMapIsSnapshotCovered(t *testing.T) {
+	q := demo.NewEmptyInMemoryQuerier()
+	taken := len(q.TakeSnapshotForTest())
+	want := 0
+	typ := reflect.TypeOf(*q)
+	for i := 0; i < typ.NumField(); i++ {
+		if typ.Field(i).Type.Kind() == reflect.Map {
+			want++
+		}
+	}
+	require.Equal(t, want, taken, "every map field on InMemoryQuerier needs a snapshot entry")
+}
+```
+
+Helper constructors `failingQuerier`, `setUserStatus`, `countRefreshTokens`, `refreshParams`, `serveWithMiddleware` and `seedTestUser` go in the same file when the task runs; `seedTestUser` writes a user row with an Argon2id hash of the given password.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+go test ./internal/auth/ -run 'TestRefreshTokenIsSingleUse|TestReplayRejects|TestRotationFailure|TestDeactivatedUser' -count=1
+go test ./internal/db/demo/ -run 'TestDemoRefresh|TestEveryDemoMap' -count=1
+```
+
+Expected: FAIL to compile — `RunTx`, `TxRunner`, `SessionRevoker`, and `TokenHash` on the params do not exist yet; and `TestRefreshTokenIsSingleUse` currently fails at runtime because the second presenter still succeeds.
+
+- [ ] **Step 3: Implement `RunTx` for PostgreSQL**
+
+Create `internal/db/tx.go`:
+
+```go
+package db
+
+import "context"
+
+// RunTx executes fn with a transactional Querier: either every statement
+// commits or none does. It exists so services can group writes without
+// reaching for the pool, and so the same call works against the in-memory demo
+// querier, which implements RunTx by snapshot and restore.
+func (q *Queries) RunTx(ctx context.Context, fn func(Querier) error) error {
+	tx, err := q.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	// The rollback is deferred immediately after Begin, before any work, so a
+	// failure on any path releases the transaction. After a successful Commit it
+	// is a no-op.
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	if err := fn(New(tx)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+```
+
+- [ ] **Step 4: Implement `RunTx` for the demo querier**
+
+Create `internal/db/demo/tx.go`. The demo stores flat value types, so a shallow copy of each map is a correct snapshot. Keep the list in one place and let `TestEveryDemoMapIsSnapshotCovered` fail if a new map is added without an entry:
+
+```go
+package demo
+
+import (
+	"context"
+	"maps"
+
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
+)
+
+// RunTx gives the in-memory querier all-or-nothing semantics without a pool. It
+// holds the write lock for the whole callback, snapshots every map first, and
+// restores the snapshot when fn returns an error. Without this, the refresh
+// rotation would have different semantics in demo mode than in production.
+func (q *InMemoryQuerier) RunTx(ctx context.Context, fn func(db.Querier) error) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	undo := q.TakeSnapshotForTest()
+	if err := fn(q); err != nil {
+		undo()
+		return err
+	}
+	return nil
+}
+
+// TakeSnapshotForTest returns a single undo closure that restores every map.
+// It is exported for the coverage test and unexported in spirit: adding a map
+// field to InMemoryQuerier without adding it here is caught by that test.
+func (q *InMemoryQuerier) TakeSnapshotForTest() func() {
+	users := maps.Clone(q.users)
+	refreshTokens := maps.Clone(q.refreshTokens)
+	userInvites := maps.Clone(q.userInvites)
+	emailTemplates := maps.Clone(q.emailTemplates)
+	// ... one entry per remaining map field on InMemoryQuerier ...
+
+	return func() {
+		q.users = users
+		q.refreshTokens = refreshTokens
+		q.userInvites = userInvites
+		q.emailTemplates = emailTemplates
+		// ... and the matching assignment for every entry above ...
+	}
+}
+```
+
+Also make the demo's `CreateRefreshToken` copy `FamilyID` from the params; it currently drops it, which would leave every demo rotation in an empty family.
+
+- [ ] **Step 5: Implement the rotation with the correct ordering**
+
+Replace `RefreshToken` in `internal/auth/service.go`. Everything that can fail runs **inside** the transaction, so a failure consumes nothing:
 
 ```go
 func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ip, userAgent string) (string, string, error) {
@@ -752,104 +958,139 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ip, use
 		return "", "", ErrInvalidRefreshToken
 	}
 
-	// Mark the presented token used and insert its successor together. If the
-	// insert fails, the used_at write rolls back and the client can retry
-	// legitimately instead of tripping the replay path.
-	beginner, ok := s.querier.(interface {
-		Begin(context.Context) (pgx.Tx, error)
+	var accessToken, newRefresh string
+	err = s.runTx(ctx, func(q db.Querier) error {
+		consumed, err := q.ConsumeRefreshToken(ctx, hash)
+		if err != nil {
+			// Another request consumed it between the read and here. That is a
+			// race, not a theft, so roll back and let the caller retry.
+			return ErrInvalidRefreshToken
+		}
+		// The status check runs before the commit. Checking it afterwards would
+		// leave the old token consumed while the client got an error, so the
+		// next attempt would look like a replay.
+		user, err := q.GetUserByID(ctx, consumed.UserID)
+		if err != nil {
+			return err
+		}
+		if user.Status != "ACTIVE" {
+			return ErrUserNotActive
+		}
+		if newRefresh, err = generateRefreshToken(); err != nil {
+			return err
+		}
+		if _, err := q.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
+			UserID:    consumed.UserID,
+			TokenHash: hashToken(newRefresh),
+			UserAgent: pgtype.Text{String: userAgent, Valid: userAgent != ""},
+			IpAddress: pgtype.Text{String: ip, Valid: ip != ""},
+			ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(refreshTokenDuration), Valid: true},
+			FamilyID:  consumed.FamilyID,
+		}); err != nil {
+			return err
+		}
+		// The access token is signed before the commit for the same reason: a
+		// signing failure must not leave the rotation half applied.
+		accessToken, err = s.issueAccessToken(user)
+		return err
 	})
-	if !ok {
-		return "", "", ErrTransactionsUnsupported
-	}
-	tx, err := beginner.Begin(ctx)
 	if err != nil {
 		return "", "", err
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-
-	txq := db.New(tx)
-	consumed, err := txq.ConsumeRefreshToken(ctx, hash)
-	if err != nil {
-		return "", "", ErrInvalidRefreshToken
-	}
-	newRefresh, err := generateRefreshToken()
-	if err != nil {
-		return "", "", err
-	}
-	if _, err := txq.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
-		UserID:    consumed.UserID,
-		TokenHash: hashToken(newRefresh),
-		UserAgent: sql.NullString{String: userAgent, Valid: userAgent != ""},
-		IPAddress: sql.NullString{String: ip, Valid: ip != ""},
-		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(refreshTokenDuration), Valid: true},
-		FamilyID:  consumed.FamilyID,
-	}); err != nil {
-		return "", "", err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return "", "", err
-	}
-
-	user, err := s.querier.GetUserByID(ctx, consumed.UserID)
-	if err != nil || user.Status != "ACTIVE" {
-		return "", "", ErrInvalidRefreshToken
-	}
-	return s.issueAccessToken(ctx, user)
+	return accessToken, newRefresh, nil
 }
 ```
 
-`handleReplay` is the compromise path — one transaction that ends the session rather than the family alone:
+`issueAccessToken(user db.User)` reads `user.TokenVersion` and calls `GenerateAccessToken` from Task 2.
+
+- [ ] **Step 6: Implement the replay path with the correct ordering**
 
 ```go
+// SessionRevoker terminates the live streams of a user whose session state was
+// invalidated. It is an interface so internal/auth does not import sse; the
+// router passes the real hub in.
+type SessionRevoker interface {
+	RevokeUser(userID uuid.UUID)
+}
+
 // handleReplay treats a spent refresh token as account compromise. Revoking the
 // family alone would leave the stolen access token valid for 30 minutes, so the
 // user's token_version is incremented in the same transaction: every access
 // token already issued dies with it.
 func (s *AuthService) handleReplay(ctx context.Context, spent db.RefreshToken, ip, userAgent string) {
 	reason := "refresh_token_reuse"
-	if spent.UserAgent.String != userAgent || spent.IPAddress.String != ip {
+	if spent.UserAgent.String != userAgent || spent.IpAddress.String != ip {
 		reason = "refresh_token_reuse_other_client"
 	}
 
-	if beginner, ok := s.querier.(interface {
-		Begin(context.Context) (pgx.Tx, error)
-	}); ok {
-		if tx, err := beginner.Begin(ctx); err == nil {
-			txq := db.New(tx)
-			if err := txq.DeleteRefreshTokenFamily(ctx, spent.FamilyID); err == nil {
-				_, _ = txq.IncrementUserTokenVersion(ctx, spent.UserID)
-				_ = tx.Commit(ctx)
-				defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-			}
+	revoked := s.runTx(ctx, func(q db.Querier) error {
+		if err := q.DeleteRefreshTokenFamily(ctx, spent.FamilyID); err != nil {
+			return err
 		}
+		// The error is not ignored: a family revocation without the version bump
+		// would leave the stolen access token alive.
+		_, err := q.IncrementUserTokenVersion(ctx, spent.UserID)
+		return err
+	}) == nil
+
+	// The streams are closed only after a successful commit, so a failed
+	// transaction cannot disconnect a user whose session was never invalidated.
+	if revoked && s.revoker != nil {
+		s.revoker.RevokeUser(uuid.UUID(spent.UserID.Bytes))
 	}
-	s.bumpNotifier.NotifyBump(ctx, spent.UserID) // see Task 5; nil-safe
+
+	// The audit is unconditional: a detected replay must be visible even when
+	// the revocation itself failed.
 	s.audit.Log(ctx, spent.UserID, "AUTH", pgtype.UUID{}, "REFRESH_TOKEN_REUSE", map[string]any{
-		"reason":        reason,
-		"family_id":     spent.FamilyID.String(),
-		"detected_ip":   ip,
+		"reason":         reason,
+		"family_id":      spent.FamilyID.String(),
+		"revoked":        revoked,
+		"detected_ip":    ip,
 		"detected_agent": userAgent,
 	}, ip, userAgent)
 }
+
+// runTx adapts the querier to the transactional capability. A querier without
+// one is reported honestly instead of silently running without a transaction,
+// which would make a partial rotation look successful.
+func (s *AuthService) runTx(ctx context.Context, fn func(db.Querier) error) error {
+	runner, ok := s.querier.(TxRunner)
+	if !ok {
+		return db.ErrTransactionsUnsupported
+	}
+	return runner.RunTx(ctx, fn)
+}
 ```
 
-- [ ] **Step 4: Make the login path write the family id**
+Add the fields `revoker SessionRevoker` and `audit` to `AuthService`, and a nil-safe setter used by the router:
 
-`Login` calls `CreateRefreshToken`; add `FamilyID: uuid.New()` there so the first token starts a family.
+```go
+// WithSessionRevoker attaches the live-stream revoker. It is optional so tests
+// and the launcher can build a service without a hub.
+func (s *AuthService) WithSessionRevoker(r SessionRevoker) *AuthService {
+	s.revoker = r
+	return s
+}
+```
 
-- [ ] **Step 5: Run the tests**
+- [ ] **Step 7: Wire the revoker in the router**
+
+In `internal/server/router.go`, right after the auth service is constructed: `authSvc = authSvc.WithSessionRevoker(cfg.SSEHub)` — only when `cfg.SSEHub != nil`, since a nil hub must not be stored.
+
+- [ ] **Step 8: Run the tests to verify they pass**
 
 ```bash
-gofmt -s -w internal/auth
-go test ./internal/auth/ -run 'Refresh|Replay|Rotation|Grace' -count=1
-go test ./internal/auth/... -count=1
+gofmt -s -w internal/auth internal/db
+go build ./...
+go vet ./...
+go test ./internal/auth/... ./internal/db/... -count=1
 ```
 
-Expected: PASS, with the old grace-cache assertion deleted.
+Expected: PASS, including the demo rollback tests.
 
-- [ ] **Step 6: Mutation-verify the two guarantees**
+- [ ] **Step 9: Mutation-verify the two guarantees**
 
-Revert the `used_at IS NULL` predicate in `ConsumeRefreshToken` and confirm `TestRefreshTokenIsSingleUse` fails. Then remove the `IncrementUserTokenVersion` call from `handleReplay` and confirm `TestReplayBumpsTokenVersion` fails — the access token issued before the replay is still accepted, and that survival is what fails the test. Restore both.
+Remove the `used_at IS NULL` predicate from `ConsumeRefreshToken` and confirm `TestRefreshTokenIsSingleUse` fails. Then remove the `IncrementUserTokenVersion` call from `handleReplay` and confirm `TestReplayRejectsTheAccessTokenIssuedBeforeIt` fails — the access token issued before the replay is still accepted, and that survival is what fails the test. Then move the `Status` check after the commit and confirm `TestDeactivatedUserRotationDoesNotConsumeTheToken` fails. Restore all three.
 
 ### Task 5: Logout-everywhere and SSE stream revocation
 
@@ -860,11 +1101,13 @@ Revert the `used_at IS NULL` predicate in `ConsumeRefreshToken` and confirm `Tes
 - Test: `internal/sse/hub_test.go`, `internal/server/handlers/session_test.go`
 
 **Interfaces:**
+- Consumes: the `auth.SessionRevoker` seam from Task 4 — `*sse.Hub` is what satisfies it, and Task 4 already wired it into the router, so this task only has to make the hub conform.
 - Produces:
 
 ```go
-// internal/sse
+// internal/sse — satisfies auth.SessionRevoker
 func (h *Hub) RevokeUser(userID uuid.UUID)
+func (h *Hub) ServeHTTPFor(w http.ResponseWriter, r *http.Request, userID uuid.UUID)
 
 // internal/server/handlers
 type SessionHandler struct{ Auth *auth.AuthService; Hub *sse.Hub }
@@ -891,18 +1134,33 @@ func TestHubRevokeUserClosesOnlyThatUsersStreams(t *testing.T) {
 	_ = bobCh
 	require.Equal(t, 1, hub.ClientCount(), "bob's stream must survive")
 }
+
+// TestHubSatisfiesTheAuthRevokerSeam pins the contract Task 4 depends on.
+func TestHubSatisfiesTheAuthRevokerSeam(t *testing.T) {
+	var _ auth.SessionRevoker = NewHub()
+}
 ```
 
 - [ ] **Step 2: Verify it fails**
 
-Run: `go test ./internal/sse/ -run TestHubRevokeUser -count=1`
-Expected: FAIL to compile — `register` and `RevokeUser` are undefined.
+Run: `go test ./internal/sse/ -run 'TestHubRevokeUser|TestHubSatisfies' -count=1`
+Expected: FAIL to compile — `register` and `RevokeUser` are undefined, and `*Hub` does not yet satisfy `auth.SessionRevoker`.
 
 - [ ] **Step 3: Implement the keyed hub**
 
-Change `clients map[chan Event]bool` to `clients map[chan Event]uuid.UUID`, add an unexported `register` used by `ServeHTTP`, and add:
+Change `clients map[chan Event]bool` to `clients map[chan Event]uuid.UUID`, move the body of the existing `ServeHTTP` into `ServeHTTPFor(w, r, userID)` so the hub knows whose stream it is, keep `ServeHTTP` as a thin wrapper passing the zero id for the unauthenticated case, and add:
 
 ```go
+// register records a subscriber's channel against its user id and returns the
+// channel, so a test can observe the close.
+func (h *Hub) register(userID uuid.UUID) chan Event {
+	ch := make(chan Event, 16)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clients[ch] = userID
+	return ch
+}
+
 // RevokeUser closes every stream belonging to userID. A role or status change
 // must terminate a long-lived stream immediately, not at token expiry.
 func (h *Hub) RevokeUser(userID uuid.UUID) {
@@ -917,7 +1175,7 @@ func (h *Hub) RevokeUser(userID uuid.UUID) {
 }
 ```
 
-`Broadcast` must skip a closed channel. Because `close` happens under the write lock and `Broadcast` holds the read lock, the two cannot race.
+`Broadcast` must skip a deleted channel. Because `close` happens under the write lock and `Broadcast` holds the read lock, the two cannot race. Update the SSE route in `internal/server/router.go:129-156` to call `ServeHTTPFor` with the user id it already resolved, and to run the 60-second `token_version` re-check from Step 5.
 
 - [ ] **Step 4: Add the logout-everywhere route**
 
@@ -1167,7 +1425,7 @@ go test -race ./... -count=1
 ./scripts/coverage.sh --min 50.0 --diff 50.0
 diff -r migrations/ internal/db/migrations/
 git add internal/auth internal/db internal/core/invite internal/server internal/sse cmd/server web/src
-git commit -m "fix(auth): enforce durable session revocation and refresh token family reuse detection (SP8a)"
+git commit -m "fix(auth): harden sessions, TOTP setup and password policy (SP8a)"
 ```
 
 Expected: `make check` exits 0 including the live-database script, race is clean, coverage passes, the migrations directories are identical.
@@ -1983,6 +2241,6 @@ Expected: exactly three SP8a commits, working tree clean, nothing pushed.
 
 **Spec coverage.** §2 migration → Task 1. §3.1 required claim → Task 2. §3.1 middleware and SSE → Task 3. §3.2 rotation, transaction, family revocation, bump → Task 4. §3.3 cross-tab → Task 17. §3.4 logout and the seven bump triggers → Tasks 3, 5, 7, 8. §3.5 `RevokeUser` and the 60-second backstop → Task 5. §4 no tokens in JSON → Task 6. §5 bootstrap and the flag → Task 7 and Task 19. §6.1 permission map → Task 9. §6.2 matrix → Tasks 9, 13. §6.3 fail-closed and the owner-column table → Task 10. §6.4 ownership rule → Task 11. §6.2 read scope → Task 12. §7 F-03 → Task 8, F-08 → Task 8 and Task 19, F-45 → Task 19. §8 backup contract → Task 1, live tests → Tasks 15, 20. §9 error codes → Tasks 6, 10. §10 verification → every task plus 13, 15, 20, 22. §11 release notes → Task 22. §12 residual risks → accepted in the spec; R5 is mitigated by Task 14. §14 commits → the commit map. No spec requirement is unassigned.
 
-**Placeholder scan.** No TBD, no "similar to Task N", no unspecified error handling. Every code step shows the code. Two helper constructors are referenced by tests — `newTestAuthService`, `newTestQuerier`, `newOwnershipHandler`, `doAs`, `performJSON`, `decodeContact` — and each must be written as a helper in the same test file when the task runs; the first task that uses one states it.
+**Placeholder scan.** No TBD, no "similar to Task N", no unspecified error handling. Every code step shows the code. Test helpers referenced across tasks — `newTestAuthService`, `seedTestUser`, `failingQuerier`, `setUserStatus`, `countRefreshTokens`, `refreshParams`, `serveWithMiddleware`, `newOwnershipHandler`, `doAs`, `performJSON`, `decodeContact`, `decodeContacts` — are written as helpers in the test file of the task that first uses them, and that step says so.
 
-**Type consistency.** `TokenVersion *int32` is used identically in `jwt.go`, `middleware.go`, Task 4's `claims.TokenVersion` read, and the test helper `validateWithTestKey`. `ConsumeRefreshToken` returns the family as `pgtype.UUID` in Task 1 and is read as `consumed.FamilyID` in Task 4. `canModify(claims, pgtype.UUID)` has one signature across Tasks 10, 11 and the frontend contract in Task 18. `RequirePermission` is introduced in Task 9 and used only from Task 9 onward.
+**Type consistency.** `TokenVersion *int32` is used identically in `jwt.go`, `middleware.go`, Task 4's `issueAccessToken`, and the Task 4 middleware test. `ConsumeRefreshToken` returns `family_id` as `pgtype.UUID` in Task 1 and is read as `consumed.FamilyID` in Task 4. `db.CreateRefreshTokenParams` uses `UserAgent`/`IpAddress` of type `pgtype.Text` and gains `FamilyID` in Task 1; Task 4 constructs it with exactly those fields. `canModify(claims, pgtype.UUID)` has one signature across Tasks 10, 11 and the frontend contract in Task 18. `RequirePermission` is introduced in Task 9 and used only from Task 9 onward. `auth.SessionRevoker` is declared in Task 4 and implemented by `*sse.Hub` in Task 5, with `TestHubSatisfiesTheAuthRevokerSeam` pinning the two together. `TxRunner`/`RunTx` is declared in Task 4 and implemented once in `internal/db/tx.go` and once in `internal/db/demo/tx.go`; the refresh path and the replay path both go through `(*AuthService).runTx`, never through `(*db.Queries).Begin`, so demo mode exercises the same semantics.

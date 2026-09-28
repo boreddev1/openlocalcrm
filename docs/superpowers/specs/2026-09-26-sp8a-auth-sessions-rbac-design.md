@@ -295,6 +295,6 @@ F-16/F-18/F-19 (CSRF session binding), F-22/F-23 (webhook rate limiting), F-24/F
 
 Three reviewable commits, each independently revertible:
 
-1. `fix(auth): enforce durable session revocation and refresh token family reuse detection (SP8a)`
+1. `fix(auth): harden sessions, TOTP setup and password policy (SP8a)`
 2. `fix(auth): enforce the RBAC role matrix and stable resource ownership (SP8a)`
 3. `feat(ui): wire ownership, password nag and route guards with the live session test (SP8a)`
