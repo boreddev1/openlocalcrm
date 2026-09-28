@@ -85,13 +85,15 @@ The hand-rolled SSE authentication at `internal/server/router.go:130-156` runs t
 
 ### 3.2 Refresh tokens and family revocation
 
-`refresh_tokens` gains `family_id` and `used_at`. Rotation is one atomic statement: mark the presented token used and return its family and user.
+`refresh_tokens` gains `family_id` and `used_at`. Rotation is one transaction: mark the presented token used, insert its successor, and only then return the new pair. Both writes must commit together — if the `used_at` update committed while the insert failed, the client's next legitimate attempt would present an already-used token and be reported as theft. An abort therefore leaves the original token usable and produces no false replay signal.
 
 1. The presented token hash does not exist, or exists but is already past `expires_at` → 401, and **no** family action. An expired token is treated as unknown; revoking a family because an old token was replayed would punish a user for a stale cookie.
-2. It exists and `used_at IS NULL` → set `used_at = NOW()`, issue a new access/refresh pair in the same family. The new row records the current request's `user_agent` and `ip_address`, as today.
-3. It exists and `used_at IS NOT NULL` → this is a replay. Revoke every token in that family and 401. The rejection is audited with IP and user agent; when they differ from the fingerprint recorded on the used token, the audit reason distinguishes the two, so a suspected theft is distinguishable from a lost device. Fingerprint mismatch alone never revokes a family — a mobile client changes address routinely.
+2. It exists and `used_at IS NULL` → in one transaction, set `used_at = NOW()` and insert the successor in the same family, then return the new pair. The new row records the current request's `user_agent` and `ip_address`, as today.
+3. It exists and `used_at IS NOT NULL` → this is a replay, and it is treated as a compromise of the account rather than of one session. In one transaction SP8a revokes every token in that family **and** increments `users.token_version`, which invalidates every access token already issued to that user, including the legitimate session. The response is 401 and `sse.Hub.RevokeUser` closes that user's open streams. Revoking only the refresh family would leave the stolen access token valid for up to 30 minutes, which is precisely the window the finding is about.
 
-The grace cache is deleted rather than shortened: an unconditional replay window is the finding. Cross-tab coordination (§3.3) reduces false positives; the `used_at` check remains the control.
+The grace cache is deleted rather than shortened: an unconditional replay window is the finding. Cross-tab coordination (§3.3) reduces false positives; the `used_at` check plus the version bump remains the control. The cost of a false positive is that the user is signed out everywhere and must log in again; that is the correct failure direction for a suspected theft.
+
+The rejection is audited with IP and user agent. When they differ from the fingerprint recorded on the used token, the audit reason distinguishes the two, so a suspected theft stays distinguishable from a lost device. Fingerprint mismatch alone never revokes a family — a mobile client changes address routinely.
 
 `RefreshToken` continues to refuse any user whose status is not `ACTIVE` (`internal/auth/service.go:297`).
 
@@ -120,8 +122,12 @@ The cookie jar is shared, so the tab that wins the lock satisfies the waiters th
 | Role change | `internal/server/handlers/users.go` `UpdateRole` |
 | Status change | `internal/server/handlers/users.go` `UpdateStatus` |
 | Password change | `internal/server/handlers/auth.go` `ChangePassword` |
-| TOTP enable or disable | `internal/server/handlers/auth.go` `SetupTOTP`/`VerifyTOTP`/`DisableTOTP` |
+| TOTP enabled (first successful verification) | `internal/server/handlers/auth.go` `VerifyTOTP` |
+| TOTP disabled | `internal/server/handlers/auth.go` `DisableTOTP` |
 | Logout-everywhere | new handler |
+| Refresh-token replay detected | `internal/auth` rotation path (§3.2, case 3) |
+
+`SetupTOTP` is deliberately **not** in this list. Under F-03 (§7) it stores nothing, so there is no security state to invalidate and a bump there would sign the user out of their own session for beginning a setup they have not finished.
 
 ### 3.5 Server-Sent Events
 
@@ -185,7 +191,19 @@ func canModify(claims *auth.AccessClaims, owner pgtype.UUID) bool
 
 `requireClaims` writes 401 and returns `false` when the context holds no claims. It replaces the fail-open `if claims != nil && ...` pattern at `appointments.go:103,136,170`, `deals.go:189,308`, `notes.go:109,141`, `todos.go:138`, and `notifications.go:49`.
 
-`canModify` reads **only** the new UUID column. It never reads `AssignedTo` or `author`, which is what makes `appointments.go:109` unsafe today: the column holds an e-mail, so the `claims.UserID.String()` comparison against it is meaningless.
+`canModify` takes the owner as a `pgtype.UUID` and the caller supplies the correct column. It never parses or compares a free-text column, which is what makes `appointments.go:109` unsafe today: the column holds an e-mail, so the `claims.UserID.String()` comparison against it is meaningless. The column per entity is fixed:
+
+| Entity | Authoritative owner column | Source |
+| --- | --- | --- |
+| Deals | `deals.assigned_to UUID` | existing (`00002_core_crm_schema.sql:51`) — no new column |
+| Todos | `todos.assigned_to UUID` | existing (`00002_core_crm_schema.sql:79`) — no new column |
+| Email accounts | `email_accounts.owner_user_id UUID` | existing (`00013`) — wired, not added |
+| Contacts | `contacts.owner_user_id UUID` | new in `00020` |
+| Companies | `companies.owner_user_id UUID` | new in `00020` |
+| Notes | `notes.user_id UUID` | new in `00020`; `notes.author VARCHAR` stays display-only |
+| Appointments | `appointments.user_id UUID` | new in `00020`; `appointments.assigned_to VARCHAR(255)` stays display-only and is **never** an authorization input |
+
+Deals and todos therefore keep their existing "assigned-only" rule and their existing column; the change is that the check becomes fail-closed and consistent with everything else. The SP7 review noted that the appointments check compares against a column that cannot hold a UUID — the new `user_id` removes that class of bug instead of working around it.
 
 `internal/core/notification/service.go:81-103` stops treating a nil user id as "skip the ownership check"; a null-out for admins is what let any admin mark any notification read.
 
@@ -210,7 +228,9 @@ Read scope follows §6.2, not this table: `BENUTZER` sees a `NULL`-owner record 
 
 **F-03 (TOTP setup race).** `POST /auth/totp/setup` stops writing `totp_secret_encrypted`. It returns the secret for display only. The first successful `POST /auth/totp/verify` takes the secret together with the code, proves the code is valid for that secret, then writes the secret and sets `totp_enabled = TRUE` in one statement. An unverified secret never reaches the database.
 
-**F-08 (password policy at creation).** A minimum of 8 characters is enforced wherever a password is chosen by the user: invite acceptance (`internal/core/invite`) and admin-created users. This is kept separate from the stricter change-password policy, which additionally requires a digit and a symbol.
+**F-08 (password policy at creation).** The policy is a minimum of 8 characters, applied wherever a password is chosen: invite acceptance (`internal/core/invite`) and admin-created users. The backend already enforces exactly this and nothing more — `internal/auth/service.go:431` is the whole of `ChangePassword`'s validation — so F-08 stays at 8 characters and no digit or symbol rule is introduced here.
+
+The frontend currently claims a stricter policy than the server enforces: "Mindestens 8 Zeichen, mindestens 1 Zahl und 1 Sonderzeichen" (`web/src/pages/SettingsPage.tsx:1713`, the placeholder at `:1756`, and the client-side check at `:501`). SP8a corrects those strings to the policy the server actually applies. Claiming a rule the server does not enforce is the same class of defect this project has been removing, and the e2e assertion that matches the old text is updated with it.
 
 **F-45 (frontend route guards).** The SPA guard derives strictly from the authenticated session state, with no optimistic render of a protected page, and is consistent with `/me` returning `null` for unknown TOTP state.
 
@@ -244,7 +264,7 @@ Handlers keep the existing `writeJSONError` pattern. Centralized error sanitizat
 1. Route × role table test asserting §6.2 through the real router, including `BENUTZER` list filtering and out-of-scope detail denial.
 2. Unit tests: rotation and family revocation, replay rejection, missing-claim rejection, version mismatch, `canModify` for every ownership case, `requireClaims` fail-closed, TOTP setup race, creation password policy, bootstrap file permissions and deletion.
 3. Live-database test: backfill correctness, atomic rotation, replay revocation of a whole family, ownership filters.
-4. The two highest-consequence guarantees are mutation-verified: removing the `used_at` check must make a replayed token succeed, and making a `NULL` owner writable by a non-admin must fail the test.
+4. The two highest-consequence guarantees are mutation-verified: removing the `used_at` check must make a replayed token succeed, and making a `NULL` owner writable by a non-admin must fail the test. A third mutation removes the `token_version` bump from the replay path; the access token issued before the replay must then fail, proving a detected theft actually ends the session rather than only the family.
 5. SP7 regression coverage for the backup round-trip and replace-mode completeness (§8).
 6. `make check`, which includes the live-database script; `go test -race ./...`; coverage ≥ 50 % total and ≥ 50 % on changed lines; `migrations` symlink identical to `internal/db/migrations`; `pnpm format`, `pnpm lint`, `pnpm typecheck`, `pnpm build`.
 7. E2E: the `must_change_password` banner, owner pickers, `BENUTZER` visibility, logout-everywhere, and the existing SP7 invite and backup specs.
