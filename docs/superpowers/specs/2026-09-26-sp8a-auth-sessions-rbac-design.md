@@ -61,7 +61,9 @@ UPDATE appointments SET user_id = u.id
   AND appointments.user_id IS NULL;
 ```
 
-Rows whose text does not match any user — including the `"Vertriebsmitarbeiter"` fallback written by `internal/core/note/service.go:154` — stay `NULL`. `contacts` and `companies` have no owner source at all, so all existing rows stay `NULL`. `deals.assigned_to` and `todos.assigned_to` are already `UUID` and need no backfill.
+Rows whose text does not match any user — including the `"Vertriebsmitarbeiter"` fallback written by `internal/core/note/service.go:154` or legacy full-name strings — stay `NULL`. `contacts` and `companies` have no owner source at all, so all existing rows stay `NULL`. `deals.assigned_to` and `todos.assigned_to` are already `UUID` and need no backfill.
+
+For legacy `notes` and `appointments` with `user_id IS NULL`, team roles (`ADMIN`, `VERTRIEB`, `BACKOFFICE`) retain full operational access; when editing an unowned note or appointment, the handler auto-claims it by setting `user_id` to the editor's user id, cleanly healing legacy records over time. For bulk administrative remediation, a documented SQL script is provided alongside the migration.
 
 ## 3. Session Architecture
 
@@ -187,9 +189,20 @@ Row filtering is part of the matrix, not an optional extra: `BENUTZER` list endp
 ```go
 func requireClaims(w http.ResponseWriter, r *http.Request) (*auth.AccessClaims, bool)
 func canModify(claims *auth.AccessClaims, owner pgtype.UUID) bool
+func canReassign(claims *auth.AccessClaims, currentOwner pgtype.UUID) bool
+func canModifyPersonal(claims *auth.AccessClaims, owner pgtype.UUID) bool
 ```
 
 `requireClaims` writes 401 and returns `false` when the context holds no claims. It replaces the fail-open `if claims != nil && ...` pattern at `appointments.go:103,136,170`, `deals.go:189,308`, `notes.go:109,141`, `todos.go:138`, and `notifications.go:49`.
+
+`canModify` applies the RBAC ownership rule for team resources (contacts, companies, deals, notes, appointments, todos):
+- `ADMIN` always has write access.
+- `VERTRIEB` and `BACKOFFICE` have team-wide write access for team resources per their domain permissions in §6.2 (contacts, companies, deals, team notes, team appointments). Both owned records and unowned (`NULL`) legacy records can be updated.
+- `BENUTZER` is strictly restricted to its own assigned items: `owner.Valid && uuid.UUID(owner.Bytes) == claims.UserID`. A `NULL` owner is never writable by `BENUTZER`.
+
+`canReassign` governs changing the `owner_user_id` or `assigned_to` on contacts, companies, and deals. It allows only `ADMIN` or the current owner to change the assigned owner, preventing team members from reassigning each other's accounts.
+
+`canModifyPersonal` strictly enforces that only `ADMIN` or the record owner (`owner.Valid && uuid.UUID(owner.Bytes) == claims.UserID`) may access or modify personal resources: `notifications` and personal `email_accounts`.
 
 `canModify` takes the owner as a `pgtype.UUID` and the caller supplies the correct column. It never parses or compares a free-text column, which is what makes `appointments.go:109` unsafe today: the column holds an e-mail, so the `claims.UserID.String()` comparison against it is meaningless. The column per entity is fixed:
 
@@ -203,7 +216,7 @@ func canModify(claims *auth.AccessClaims, owner pgtype.UUID) bool
 | Notes | `notes.user_id UUID` | new in `00020`; `notes.author VARCHAR` stays display-only |
 | Appointments | `appointments.user_id UUID` | new in `00020`; `appointments.assigned_to VARCHAR(255)` stays display-only and is **never** an authorization input |
 
-Deals and todos therefore keep their existing "assigned-only" rule and their existing column; the change is that the check becomes fail-closed and consistent with everything else. The SP7 review noted that the appointments check compares against a column that cannot hold a UUID — the new `user_id` removes that class of bug instead of working around it.
+The SP7 review noted that the appointments check compares against a column that cannot hold a UUID — the new `user_id` removes that class of bug instead of working around it.
 
 `internal/core/notification/service.go:81-103` stops treating a nil user id as "skip the ownership check"; a null-out for admins is what let any admin mark any notification read.
 
@@ -216,11 +229,10 @@ Applies to contacts, companies, notes, appointments, deals, todos, and email acc
 | Case | Rule |
 | --- | --- |
 | Create | The server sets the owner to the creator. Any owner field in the request body is ignored. |
-| Update / delete | Allowed when the caller is `ADMIN`, or when the owner is set and equals the caller. |
-| Reassign | Only `ADMIN` or the current owner may change the owner. |
-| Owner is `NULL` | Write access is `ADMIN` only. A `NULL` owner is never a write permission for any other role. |
-
-`NULL`-owner rows are therefore a deliberate operational cost: after the upgrade, every existing contact and company is `ADMIN`-only for writes until an owner is assigned. To make that tractable, SP8a adds an admin bulk-assign action over unowned contacts and companies, with an optional owner and a filter, plus a documented SQL alternative. The action is audited.
+| Update / delete (team resources) | Allowed for `ADMIN`. Allowed for `VERTRIEB` and `BACKOFFICE` per their domain permissions in §6.2. For `BENUTZER`, allowed only when the owner is set and equals the caller (`canModify`). |
+| Reassign owner | Only `ADMIN` or the current owner may change the owner (`canReassign`). |
+| Owner is `NULL` | For `BENUTZER`, write access is denied. For `VERTRIEB` and `BACKOFFICE`, team resources with `NULL` owner are editable; updating an unowned note or appointment claims it by setting `user_id = caller`. For contacts and companies, SP8a additionally adds an admin bulk-assign action with an optional owner and filter, plus a documented SQL alternative. |
+| Personal resources | Notifications and personal mailboxes are strictly own-only for all non-admin roles (`canModifyPersonal`). |
 
 Read scope follows §6.2, not this table: `BENUTZER` sees a `NULL`-owner record from no list, because `NULL` means assigned to nobody.
 
@@ -284,7 +296,7 @@ Two intentional breaking changes:
 | R2 | One extra indexed read per authenticated request. | Accepted; cheaper than a persistent deny list and it makes revocation immediate. |
 | R3 | After `logout` alone, a stolen access token stays valid up to 30 minutes. | Accepted; `logout-all` is the remedy, and the window is the access-token lifetime. |
 | R4 | `must_change_password` is not API-gated, so a bootstrap admin can ignore the banner. | User decision; the log-line removal and the flag are the security-relevant parts. |
-| R5 | `BENUTZER` loses visibility of `NULL`-owner records after the upgrade. | Consequence of the matrix; mitigated by the bulk-assign action. |
+| R5 | `BENUTZER` loses visibility of `NULL`-owner records after the upgrade. | Consequence of the matrix; team roles (`VERTRIEB`/`BACKOFFICE`) retain collaboration access, and unowned records are claimable or bulk-assigned. |
 | R6 | A genuine cross-device race that escapes Web Locks support revokes the family and logs the user out everywhere. | Failing closed on a suspected theft is the intended behaviour. |
 
 ## 13. Out of Scope

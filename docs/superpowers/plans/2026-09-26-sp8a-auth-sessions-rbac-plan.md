@@ -1731,27 +1731,48 @@ Expected: PASS.
 ```go
 func claimsFrom(r *http.Request) (*auth.AccessClaims, bool)
 func canModify(claims *auth.AccessClaims, owner pgtype.UUID) bool
+func canReassign(claims *auth.AccessClaims, currentOwner pgtype.UUID) bool
+func canModifyPersonal(claims *auth.AccessClaims, owner pgtype.UUID) bool
 func canRead(claims *auth.AccessClaims, owner pgtype.UUID) bool
 ```
 
 - [ ] **Step 1: Write the failing test**
 
 ```go
-// TestCanModifyNeverGrantsOnANilOwner is the NULL-owner rule: an unowned record
-// is ADMIN-only. Defaulting to "everyone may write" is what the free-text check
-// did by accident.
-func TestCanModifyNeverGrantsOnANilOwner(t *testing.T) {
+// TestCanModifyEnforcesRoleMatrixAndOwnership asserts that ADMIN, VERTRIEB and BACKOFFICE
+// may modify team resources, while BENUTZER is restricted to its own assigned items.
+func TestCanModifyEnforcesRoleMatrixAndOwnership(t *testing.T) {
 	sales := &auth.AccessClaims{UserID: uuid.MustParse(testUserID.String()), Role: "VERTRIEB"}
+	backoffice := &auth.AccessClaims{UserID: uuid.MustParse(testUserID.String()), Role: "BACKOFFICE"}
+	user := &auth.AccessClaims{UserID: uuid.MustParse(testUserID.String()), Role: "BENUTZER"}
 	admin := &auth.AccessClaims{UserID: uuid.MustParse(otherUserID.String()), Role: "ADMIN"}
 
 	nilOwner := pgtype.UUID{}
-	require.False(t, canModify(sales, nilOwner), "a NULL owner must not grant write access")
 	require.True(t, canModify(admin, nilOwner))
+	require.True(t, canModify(sales, nilOwner))
+	require.True(t, canModify(backoffice, nilOwner))
+	require.False(t, canModify(user, nilOwner), "a NULL owner must not grant write access to BENUTZER")
 
-	owned := pgtype.UUID{Bytes: sales.UserID, Valid: true}
-	require.True(t, canModify(sales, owned))
-	require.True(t, canModify(admin, owned))
-	require.False(t, canModify(sales, pgtype.UUID{Bytes: admin.UserID, Valid: true}))
+	ownedByAdmin := pgtype.UUID{Bytes: admin.UserID, Valid: true}
+	require.True(t, canModify(admin, ownedByAdmin))
+	require.True(t, canModify(sales, ownedByAdmin))
+	require.True(t, canModify(backoffice, ownedByAdmin))
+	require.False(t, canModify(user, ownedByAdmin))
+
+	ownedByUser := pgtype.UUID{Bytes: user.UserID, Valid: true}
+	require.True(t, canModify(user, ownedByUser))
+}
+
+// TestCanReassignRequiresOwnerOrAdmin: a team member cannot transfer away another user's owner assignment.
+func TestCanReassignRequiresOwnerOrAdmin(t *testing.T) {
+	owner := &auth.AccessClaims{UserID: uuid.MustParse(testUserID.String()), Role: "VERTRIEB"}
+	colleague := &auth.AccessClaims{UserID: uuid.MustParse(otherUserID.String()), Role: "VERTRIEB"}
+	admin := &auth.AccessClaims{UserID: uuid.New(), Role: "ADMIN"}
+
+	ownerUUID := pgtype.UUID{Bytes: owner.UserID, Valid: true}
+	require.True(t, canReassign(owner, ownerUUID))
+	require.True(t, canReassign(admin, ownerUUID))
+	require.False(t, canReassign(colleague, ownerUUID))
 }
 
 // TestClaimsFromIsFailClosed: a claim-less context must not authorize anything.
@@ -1765,7 +1786,7 @@ func TestClaimsFromIsFailClosed(t *testing.T) {
 
 - [ ] **Step 2: Verify it fails**
 
-Run: `go test ./internal/server/handlers/ -run 'TestCanModify|TestClaimsFrom' -count=1`
+Run: `go test ./internal/server/handlers/ -run 'TestCanModify|TestCanReassign|TestClaimsFrom' -count=1`
 Expected: FAIL to compile — the helpers do not exist.
 
 - [ ] **Step 3: Implement the helpers**
@@ -1781,10 +1802,41 @@ func claimsFrom(r *http.Request) (*auth.AccessClaims, bool) {
 	return claims, true
 }
 
-// canModify applies the ownership rule: ADMIN, or the owner. A NULL owner is
-// never a write permission for a non-admin. The owner must be a UUID column;
-// free-text columns such as notes.author are not usable here.
+// canModify applies the ownership rule for team resources (contacts, companies, deals,
+// notes, appointments, todos).
+// - ADMIN always has write access.
+// - VERTRIEB and BACKOFFICE have team-wide write access for team resources per their domain permissions.
+// - BENUTZER is strictly restricted to its own assigned items.
+//   A NULL owner is never writable by BENUTZER.
 func canModify(claims *auth.AccessClaims, owner pgtype.UUID) bool {
+	if claims == nil {
+		return false
+	}
+	if claims.Role == "ADMIN" || claims.Role == "VERTRIEB" || claims.Role == "BACKOFFICE" {
+		return true
+	}
+	if !owner.Valid {
+		return false
+	}
+	return uuid.UUID(owner.Bytes) == claims.UserID
+}
+
+// canReassign enforces that only ADMIN or the current owner can change owner_user_id or assigned_to.
+func canReassign(claims *auth.AccessClaims, currentOwner pgtype.UUID) bool {
+	if claims == nil {
+		return false
+	}
+	if claims.Role == "ADMIN" {
+		return true
+	}
+	if !currentOwner.Valid {
+		return claims.Role == "VERTRIEB" || claims.Role == "BACKOFFICE"
+	}
+	return uuid.UUID(currentOwner.Bytes) == claims.UserID
+}
+
+// canModifyPersonal strictly enforces that only ADMIN or the record owner can modify personal resources.
+func canModifyPersonal(claims *auth.AccessClaims, owner pgtype.UUID) bool {
 	if claims == nil {
 		return false
 	}
@@ -1800,7 +1852,7 @@ func canModify(claims *auth.AccessClaims, owner pgtype.UUID) bool {
 
 - [ ] **Step 4: Replace the nine fail-open sites**
 
-At each of `appointments.go:103,136,170`, `deals.go:189,308`, `notes.go:109,141`, `todos.go:138`, `notifications.go:49`, replace `if claims != nil && claims.Role != "ADMIN" { ... }` with:
+At each of `appointments.go:103,136,170`, `deals.go:189,308`, `notes.go:109,141`, `todos.go:138`, replace `if claims != nil && claims.Role != "ADMIN" { ... }` with:
 
 ```go
 claims, ok := claimsFrom(r)
@@ -1808,9 +1860,15 @@ if !ok {
 	writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
 	return
 }
+if !canModify(claims, ownerUUID) {
+	writeJSONError(w, http.StatusForbidden, "forbidden", "Keine Berechtigung für diesen Datensatz")
+	return
+}
 ```
 
-and then the ownership check against the correct UUID column: `deals.assigned_to` and `todos.assigned_to` (existing), `notes.user_id` and `appointments.user_id` (new). Delete the `claims.UserID.String()` comparison against `appointments.assigned_to`, which cannot hold a UUID.
+and for `notifications.go:49`, use `canModifyPersonal(claims, notifOwner)`. When updating a note or appointment with an unowned `user_id IS NULL`, setting `user_id = claims.UserID` automatically heals the legacy row.
+
+Delete the `claims.UserID.String()` comparison against `appointments.assigned_to`, which cannot hold a UUID.
 
 - [ ] **Step 5: Fix the notification null-out**
 
@@ -1833,8 +1891,8 @@ Expected: PASS, and the last command returns **no matches**.
 - Test: `internal/server/handlers/ownership_test.go`
 
 **Interfaces:**
-- Consumes: `canModify`, `claimsFrom` from Task 10.
-- Produces: every create path sets the owner server-side; every update/delete path calls `canModify`; reassignment requires ADMIN or the current owner.
+- Consumes: `canModify`, `canReassign`, `canModifyPersonal`, `claimsFrom` from Task 10.
+- Produces: every create path sets the owner server-side; every update/delete path calls `canModify` (or `canModifyPersonal` for personal mailboxes); reassignment requires `canReassign`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1881,13 +1939,14 @@ In each create handler, drop `owner_user_id` / `user_id` from the decoded body s
 
 - [ ] **Step 4: Implement update and delete**
 
-Before mutating, load the record, call `canModify(claims, owner)`, and return 403 on failure. `appointments` and `notes` must use the new UUID column; the display text columns stay updated from the owner's e-mail so the UI keeps working.
+Before mutating, load the record, call `canModify(claims, owner)` (returning 403 on failure), and if `owner_user_id` or `assigned_to` is being changed, verify `canReassign(claims, existing.OwnerUserID)`. `appointments` and `notes` must use the new UUID column; the display text columns stay updated from the owner's e-mail so the UI keeps working.
 
 - [ ] **Step 5: Wire the email-account owner**
 
-`email_accounts.owner_user_id` already exists. Set it on `CreateAccount` (`internal/server/handlers/emails.go:163-194`) to the creator, enforce `canModify` on update, delete, send and tag, and re-assign it on update only for ADMIN or the current owner.
+`email_accounts.owner_user_id` already exists. Set it on `CreateAccount` (`internal/server/handlers/emails.go:163-194`) to the creator, enforce `canModifyPersonal` on personal mailbox update, delete, send and tag, and re-assign it on update only with `canReassign`.
 
 - [ ] **Step 6: Run the gates**
+
 
 ```bash
 gofmt -s -w internal/server/handlers
