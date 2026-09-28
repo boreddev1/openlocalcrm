@@ -1064,10 +1064,11 @@ Also make the demo's `CreateRefreshToken` copy `FamilyID` from the params; it cu
 An embedded `db.Querier` promotes the inner querier's `RunTx`, which hands the callback the **real** querier. The injection would then be dead code and the rollback test would pass for the wrong reason, so the wrapper implements `RunTx` itself and passes `f` to `fn`:
 
 ```go
-// failingQuerier injects a failure into one method. It implements RunTx itself
-// and passes *itself* to the callback: embedding db.Querier would promote the
-// inner querier's RunTx, the callback would receive the real querier, and the
-// injected failure would never fire.
+// failingQuerier injects a failure into one method. It wraps whatever querier
+// the runner hands to the callback: embedding db.Querier and delegating RunTx
+// unchanged would run the callback against the demo runner's shadow clone, so
+// CreateRefreshToken inside the transaction would never hit the injection and
+// the test would prove nothing.
 type failingQuerier struct {
 	db.Querier
 	failCreateRefreshToken bool
@@ -1078,7 +1079,13 @@ func (f *failingQuerier) RunTx(ctx context.Context, fn func(db.Querier) error) e
 	if !ok {
 		return db.ErrTransactionsUnsupported
 	}
-	return runner.RunTx(ctx, fn)
+	// The callback must receive the wrapper, not whatever querier the runner
+	// hands it. The demo runner passes its shadow clone, so handing fn straight
+	// through would run every statement on the real querier and the injection
+	// would never fire.
+	return runner.RunTx(ctx, func(txq db.Querier) error {
+		return fn(&failingQuerier{Querier: txq, failCreateRefreshToken: f.failCreateRefreshToken})
+	})
 }
 
 func (f *failingQuerier) CreateRefreshToken(ctx context.Context, arg db.CreateRefreshTokenParams) (db.RefreshToken, error) {
