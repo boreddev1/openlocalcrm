@@ -1,6 +1,6 @@
 # Sub-Project 8a (SP8a): Authentication, Sessions & RBAC Design Spec
 
-**Status:** Draft — awaiting user review
+**Status:** Approved
 **Target Branch:** `fix/sp8a-auth-sessions-rbac`
 **Baseline:** `main` at `e2762fb33df0bd8aed459c3839003e33d5cbb5d6`
 **Parent Design:** `docs/superpowers/specs/2026-09-21-fake-feature-elimination-design.md` §12 (SP8a) and §12.1 (Defined RBAC Role Matrix)
