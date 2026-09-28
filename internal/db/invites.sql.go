@@ -33,7 +33,7 @@ SET password_hash = $1,
     updated_at = NOW()
 FROM consumed c
 WHERE u.id = c.user_id
-RETURNING u.id, u.email, u.password_hash, u.first_name, u.last_name, u.role, u.status, u.totp_secret_encrypted, u.totp_enabled, u.last_login_at, u.created_at, u.updated_at, u.totp_last_used_step
+RETURNING u.id, u.email, u.password_hash, u.first_name, u.last_name, u.role, u.status, u.totp_secret_encrypted, u.totp_enabled, u.last_login_at, u.created_at, u.updated_at, u.totp_last_used_step, u.token_version, u.must_change_password
 `
 
 type AcceptUserInviteParams struct {
@@ -62,6 +62,8 @@ func (q *Queries) AcceptUserInvite(ctx context.Context, arg AcceptUserInvitePara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TotpLastUsedStep,
+		&i.TokenVersion,
+		&i.MustChangePassword,
 	)
 	return i, err
 }

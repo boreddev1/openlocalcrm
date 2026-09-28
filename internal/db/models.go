@@ -143,6 +143,7 @@ type Appointment struct {
 	IsPrivate  bool               `json:"is_private"`
 	IsPushed   bool               `json:"is_pushed"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	UserID     pgtype.UUID        `json:"user_id"`
 }
 
 type AuditLog struct {
@@ -181,6 +182,7 @@ type Company struct {
 	CustomFields   []byte             `json:"custom_fields"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	OwnerUserID    pgtype.UUID        `json:"owner_user_id"`
 }
 
 type CompanyResearch struct {
@@ -220,6 +222,7 @@ type Contact struct {
 	Zaehlernummer     pgtype.Text        `json:"zaehlernummer"`
 	EigentuemerStatus pgtype.Text        `json:"eigentuemer_status"`
 	Tags              json.RawMessage    `json:"tags"`
+	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
 }
 
 type Deal struct {
@@ -337,6 +340,7 @@ type Note struct {
 	Content    string             `json:"content"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	UserID     pgtype.UUID        `json:"user_id"`
 }
 
 type Notification struct {
@@ -358,6 +362,8 @@ type RefreshToken struct {
 	IpAddress pgtype.Text        `json:"ip_address"`
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	FamilyID  pgtype.UUID        `json:"family_id"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
 }
 
 type Todo struct {
@@ -388,6 +394,8 @@ type User struct {
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	TotpLastUsedStep    int64              `json:"totp_last_used_step"`
+	TokenVersion        int32              `json:"token_version"`
+	MustChangePassword  bool               `json:"must_change_password"`
 }
 
 type UserInvite struct {

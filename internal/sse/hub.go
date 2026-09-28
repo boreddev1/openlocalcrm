@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+
+	"github.com/google/uuid"
 )
 
 // Event represents a Server-Sent Event message
@@ -16,13 +18,13 @@ type Event struct {
 // Hub manages active SSE client streams and broadcasting
 type Hub struct {
 	mu      sync.RWMutex
-	clients map[chan Event]bool
+	clients map[chan Event]uuid.UUID
 }
 
 // NewHub creates a new SSE Hub instance
 func NewHub() *Hub {
 	return &Hub{
-		clients: make(map[chan Event]bool),
+		clients: make(map[chan Event]uuid.UUID),
 	}
 }
 
@@ -47,7 +49,34 @@ func (h *Hub) ClientCount() int {
 	return len(h.clients)
 }
 
+// register records a subscriber's channel against its user id and returns the
+// channel, so a test can observe the close.
+func (h *Hub) register(userID uuid.UUID) chan Event {
+	ch := make(chan Event, 16)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clients[ch] = userID
+	return ch
+}
+
+// RevokeUser closes every stream belonging to userID. A role or status change
+// must terminate a long-lived stream immediately, not at token expiry.
+func (h *Hub) RevokeUser(userID uuid.UUID) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for ch, owner := range h.clients {
+		if owner == userID {
+			close(ch)
+			delete(h.clients, ch)
+		}
+	}
+}
+
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.ServeHTTPFor(w, r, uuid.Nil)
+}
+
+func (h *Hub) ServeHTTPFor(w http.ResponseWriter, r *http.Request, userID uuid.UUID) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, `{"error":"Streaming unsupported"}`, http.StatusInternalServerError)
@@ -59,15 +88,14 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	ch := make(chan Event, 16)
-	h.mu.Lock()
-	h.clients[ch] = true
-	h.mu.Unlock()
+	ch := h.register(userID)
 
 	defer func() {
 		h.mu.Lock()
-		delete(h.clients, ch)
-		close(ch)
+		if _, ok := h.clients[ch]; ok {
+			delete(h.clients, ch)
+			close(ch)
+		}
 		h.mu.Unlock()
 	}()
 

@@ -74,11 +74,16 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || loginRes.StatusCode != http.StatusOK {
 		t.Fatalf("login failed: %v, status: %d", err, loginRes.StatusCode)
 	}
-	var loginData struct {
-		Token string `json:"token"`
+	var token string
+	for _, c := range loginRes.Cookies() {
+		if c.Name == "access_token" {
+			token = c.Value
+			break
+		}
 	}
-	_ = json.NewDecoder(loginRes.Body).Decode(&loginData)
-	token := loginData.Token
+	if token == "" {
+		t.Fatalf("missing access_token cookie from login")
+	}
 
 	reqWithAuth := func(method, path string) *http.Request {
 		req, _ := http.NewRequest(method, ts.URL+path, nil)

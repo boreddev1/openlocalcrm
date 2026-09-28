@@ -58,7 +58,7 @@ func TestAcceptInviteRoutesArePublicAndCSRFFree(t *testing.T) {
 		t.Fatalf("demo admin user missing: %v", err)
 	}
 	adminToken, _ := auth.GenerateAccessToken(
-		uuid.UUID(adminUser.ID.Bytes), "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+		uuid.UUID(adminUser.ID.Bytes), "admin@openlocalcrm.local", "ADMIN", 0, privKey, 15*time.Minute)
 
 	// Admin issues an invite.
 	issueBody := []byte(`{"email":"tim@example.de","first_name":"Tim","last_name":"Tester","role":"BENUTZER"}`)
@@ -158,9 +158,9 @@ func TestEmailTemplateRoutesAreAdminOnly(t *testing.T) {
 	})
 
 	benutzerToken, _ := auth.GenerateAccessToken(
-		uuid.UUID(demoAdminID(t, querier)), "u@openlocalcrm.local", "BENUTZER", privKey, 15*time.Minute)
+		uuid.UUID(demoAdminID(t, querier)), "u@openlocalcrm.local", "BENUTZER", 0, privKey, 15*time.Minute)
 	adminToken, _ := auth.GenerateAccessToken(
-		uuid.UUID(demoAdminID(t, querier)), "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+		uuid.UUID(demoAdminID(t, querier)), "admin@openlocalcrm.local", "ADMIN", 0, privKey, 15*time.Minute)
 
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
 		req := httptest.NewRequest(method, "/api/v1/email-templates", nil)
@@ -192,7 +192,7 @@ func TestEmailTemplateCreateReadUpdateDeleteRoundTrip(t *testing.T) {
 		DemoMode: true,
 	})
 	adminToken, _ := auth.GenerateAccessToken(
-		uuid.UUID(demoAdminID(t, querier)), "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+		uuid.UUID(demoAdminID(t, querier)), "admin@openlocalcrm.local", "ADMIN", 0, privKey, 15*time.Minute)
 
 	do := func(method, target, body string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -261,7 +261,7 @@ func TestEmailTemplateGenerationNeverReturnsCannedText(t *testing.T) {
 		AIProvider: "anthropic",
 	})
 	adminToken, _ := auth.GenerateAccessToken(
-		uuid.UUID(demoAdminID(t, querier)), "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+		uuid.UUID(demoAdminID(t, querier)), "admin@openlocalcrm.local", "ADMIN", 0, privKey, 15*time.Minute)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/email-templates/generate",
 		strings.NewReader(`{"prompt":"Erstelle eine Nachfass-Mail"}`))
@@ -289,7 +289,7 @@ func TestEmailTemplateGenerationRejectsAnEmptyPrompt(t *testing.T) {
 		DemoMode: true,
 	})
 	adminToken, _ := auth.GenerateAccessToken(
-		uuid.UUID(demoAdminID(t, querier)), "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+		uuid.UUID(demoAdminID(t, querier)), "admin@openlocalcrm.local", "ADMIN", 0, privKey, 15*time.Minute)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/email-templates/generate",
 		strings.NewReader(`{"prompt":"   "}`))
@@ -319,7 +319,7 @@ func TestMeTotpEnabledComesFromTheDatabaseUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("demo admin user missing: %v", err)
 	}
-	adminToken, _ := auth.GenerateAccessToken(uuid.UUID(adminUser.ID.Bytes), adminUser.Email, "ADMIN", privKey, 15*time.Minute)
+	adminToken, _ := auth.GenerateAccessToken(uuid.UUID(adminUser.ID.Bytes), adminUser.Email, "ADMIN", 0, privKey, 15*time.Minute)
 
 	fetch := func() map[string]any {
 		t.Helper()
@@ -358,8 +358,8 @@ func TestMeTotpEnabledComesFromTheDatabaseUser(t *testing.T) {
 	}
 }
 
-// A token for a user that no longer exists must not report totp_enabled:false.
-// A missing row is unknown, not "2FA is off".
+// Under SP8a, a token for a user that no longer exists in the database must be
+// rejected with 401 Unauthorized by AuthMiddleware (fail closed).
 func TestMeTotpEnabledIsNullWhenTheUserRowIsMissing(t *testing.T) {
 	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
 	querier := demo.NewInMemoryQuerier()
@@ -371,24 +371,13 @@ func TestMeTotpEnabledIsNullWhenTheUserRowIsMissing(t *testing.T) {
 		DemoMode: true,
 	})
 
-	ghostToken, _ := auth.GenerateAccessToken(uuid.UUID([16]byte{7, 7, 7, 7}), "ghost@example.de", "ADMIN", privKey, 15*time.Minute)
+	ghostToken, _ := auth.GenerateAccessToken(uuid.UUID([16]byte{7, 7, 7, 7}), "ghost@example.de", "ADMIN", 0, privKey, 15*time.Minute)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
 	req.Header.Set("Authorization", "Bearer "+ghostToken)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /me: expected 200, got %d (body: %s)", rec.Code, rec.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode /me: %v", err)
-	}
-	value, present := body["totp_enabled"]
-	if !present {
-		t.Fatalf("/me must always state the 2FA field, got %v", body)
-	}
-	if value != nil {
-		t.Fatalf("a missing user row is unknown, not false: got %v", value)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET /me for missing user: expected 401, got %d (body: %s)", rec.Code, rec.Body.String())
 	}
 }

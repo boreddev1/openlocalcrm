@@ -22,7 +22,7 @@ INSERT INTO notes (
 ) VALUES (
     $1, $2, $3, $4, $5
 )
-RETURNING id, entity_type, entity_id, type, author, content, created_at, updated_at
+RETURNING id, entity_type, entity_id, type, author, content, created_at, updated_at, user_id
 `
 
 type CreateNoteParams struct {
@@ -52,6 +52,7 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 		&i.Content,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserID,
 	)
 	return i, err
 }
@@ -67,7 +68,7 @@ func (q *Queries) DeleteNote(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getNoteByID = `-- name: GetNoteByID :one
-SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at FROM notes
+SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at, user_id FROM notes
 WHERE id = $1 LIMIT 1
 `
 
@@ -83,12 +84,13 @@ func (q *Queries) GetNoteByID(ctx context.Context, id pgtype.UUID) (Note, error)
 		&i.Content,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const listNotes = `-- name: ListNotes :many
-SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at FROM notes
+SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at, user_id FROM notes
 ORDER BY created_at DESC
 `
 
@@ -110,6 +112,7 @@ func (q *Queries) ListNotes(ctx context.Context) ([]Note, error) {
 			&i.Content,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.UserID,
 		); err != nil {
 			return nil, err
 		}
@@ -122,7 +125,7 @@ func (q *Queries) ListNotes(ctx context.Context) ([]Note, error) {
 }
 
 const listNotesByEntity = `-- name: ListNotesByEntity :many
-SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at FROM notes
+SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at, user_id FROM notes
 WHERE entity_type = $1 AND entity_id = $2
 ORDER BY created_at DESC
 `
@@ -150,6 +153,7 @@ func (q *Queries) ListNotesByEntity(ctx context.Context, arg ListNotesByEntityPa
 			&i.Content,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.UserID,
 		); err != nil {
 			return nil, err
 		}
@@ -167,7 +171,7 @@ SET content = $2,
     type = $3,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, entity_type, entity_id, type, author, content, created_at, updated_at
+RETURNING id, entity_type, entity_id, type, author, content, created_at, updated_at, user_id
 `
 
 type UpdateNoteParams struct {
@@ -188,6 +192,7 @@ func (q *Queries) UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, e
 		&i.Content,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserID,
 	)
 	return i, err
 }

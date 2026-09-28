@@ -9,25 +9,27 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 var (
-	ErrInvalidCredentials = errors.New("ungültige E-Mail-Adresse oder Passwort")
-	ErrRateLimited        = errors.New("zu viele fehlgeschlagene Versuche. Bitte warten Sie 5 Minuten")
-	ErrUserNotActive      = errors.New("dieses Benutzerkonto ist nicht aktiv")
-	ErrInvalidTOTPCode    = errors.New("Ungültiger Authenticator-Code")
-	ErrTOTPRequired       = errors.New("totp_code_required")
-	ErrPasswordTooShort   = errors.New("das Passwort muss mindestens 8 Zeichen lang sein")
-	ErrInvalidOldPassword = errors.New("das aktuelle Passwort ist ungültig")
-	ErrUserNotFound       = errors.New("benutzer nicht gefunden")
+	ErrInvalidCredentials  = errors.New("ungültige E-Mail-Adresse oder Passwort")
+	ErrRateLimited         = errors.New("zu viele fehlgeschlagene Versuche. Bitte warten Sie 5 Minuten")
+	ErrUserNotActive       = errors.New("dieses Benutzerkonto ist nicht aktiv")
+	ErrInvalidTOTPCode     = errors.New("Ungültiger Authenticator-Code")
+	ErrTOTPRequired        = errors.New("totp_code_required")
+	ErrPasswordTooShort    = errors.New("das Passwort muss mindestens 8 Zeichen lang sein")
+	ErrInvalidOldPassword  = errors.New("das aktuelle Passwort ist ungültig")
+	ErrUserNotFound        = errors.New("benutzer nicht gefunden")
+	ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
 )
 
 var (
@@ -68,61 +70,59 @@ func HashPasswordLimited(ctx context.Context, password string) (string, error) {
 	return HashPassword(password)
 }
 
-type rotatedTokenEntry struct {
-	accessToken  string
-	refreshToken string
-	rotatedAt    time.Time
+const (
+	AccessTokenDuration  = 30 * time.Minute
+	refreshTokenDuration = 30 * 24 * time.Hour
+)
+
+type SessionRevoker interface {
+	RevokeUser(userID uuid.UUID)
+}
+
+type AuditLogger interface {
+	Log(ctx context.Context, userID pgtype.UUID, entityType string, entityID pgtype.UUID, action string, changes any, ip, userAgent string) error
+}
+
+type TxRunner interface {
+	RunTx(ctx context.Context, fn func(db.Querier) error) error
 }
 
 type AuthService struct {
-	querier    db.Querier
-	privKey    ed25519.PrivateKey
-	pubKey     ed25519.PublicKey
-	limiter    *RateLimiter
-	graceCache sync.Map // oldTokenHash -> rotatedTokenEntry
+	querier             db.Querier
+	privKey             ed25519.PrivateKey
+	pubKey              ed25519.PublicKey
+	limiter             *RateLimiter
+	revoker             SessionRevoker
+	audit               AuditLogger
+	bootstrapSecretPath string
 }
 
-const (
-	AccessTokenDuration = 30 * time.Minute
-)
-
-var revokedAccessTokens sync.Map // tokenString -> expiresAt time.Time
-
-func RevokeToken(token string, expiresAt time.Time) {
-	if token != "" {
-		revokedAccessTokens.Store(token, expiresAt)
-	}
+func (s *AuthService) WithSessionRevoker(r SessionRevoker) *AuthService {
+	s.revoker = r
+	return s
 }
 
-func IsTokenRevoked(token string) bool {
-	if token == "" {
-		return false
-	}
-	exp, ok := revokedAccessTokens.Load(token)
-	if !ok {
-		return false
-	}
-	if expiresAt, ok := exp.(time.Time); ok && time.Now().After(expiresAt) {
-		revokedAccessTokens.Delete(token)
-		return false
-	}
-	return true
+func (s *AuthService) WithAuditLogger(a AuditLogger) *AuthService {
+	s.audit = a
+	return s
 }
 
-func (s *AuthService) RevokeAccessToken(token string) {
-	if token == "" {
-		return
-	}
-	claims, err := ValidateAccessToken(token, s.pubKey)
-	expiresAt := time.Now().Add(AccessTokenDuration)
-	if err == nil && claims != nil && claims.ExpiresAt != nil {
-		expiresAt = claims.ExpiresAt.Time
-	}
-	RevokeToken(token, expiresAt)
+func (s *AuthService) WithBootstrapSecretPath(path string) *AuthService {
+	s.bootstrapSecretPath = path
+	return s
 }
 
-func (s *AuthService) IsAccessTokenRevoked(token string) bool {
-	return IsTokenRevoked(token)
+func (s *AuthService) SetQuerierForTest(q db.Querier) {
+	s.querier = q
+}
+
+func (s *AuthService) issueAccessToken(user db.User) (string, error) {
+	userID := uuid.UUID(user.ID.Bytes)
+	return GenerateAccessToken(userID, user.Email, user.Role, user.TokenVersion, s.privKey, AccessTokenDuration)
+}
+
+func generateRefreshToken() (string, error) {
+	return generateRandomHex(32)
 }
 
 func (s *AuthService) RevokeRefreshToken(ctx context.Context, rawRefreshToken string) error {
@@ -131,6 +131,23 @@ func (s *AuthService) RevokeRefreshToken(ctx context.Context, rawRefreshToken st
 	}
 	tokenHash := hashToken(rawRefreshToken)
 	return s.querier.DeleteRefreshToken(ctx, tokenHash)
+}
+
+func (s *AuthService) RevokeAllSessions(ctx context.Context, userID pgtype.UUID) error {
+	err := s.runTx(ctx, func(q db.Querier) error {
+		if err := q.DeleteUserRefreshTokens(ctx, userID); err != nil {
+			return err
+		}
+		_, err := q.IncrementUserTokenVersion(ctx, userID)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if s.revoker != nil {
+		s.revoker.RevokeUser(uuid.UUID(userID.Bytes))
+	}
+	return nil
 }
 
 func generateRandomHex(n int) (string, error) {
@@ -241,26 +258,26 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 	}
 
 	// Generate Access Token (JWT with Ed25519)
-	userID := uuid.UUID(user.ID.Bytes)
-	token, err := GenerateAccessToken(userID, user.Email, user.Role, s.privKey, AccessTokenDuration)
+	token, err := s.issueAccessToken(user)
 	if err != nil {
 		return nil, fmt.Errorf("failed generating access token: %w", err)
 	}
 
 	// Generate Refresh Token
-	rawBytes := make([]byte, 32)
-	if _, err := rand.Read(rawBytes); err != nil {
+	rawRefreshToken, err := generateRefreshToken()
+	if err != nil {
 		return nil, fmt.Errorf("failed generating refresh token entropy: %w", err)
 	}
-	rawRefreshToken := hex.EncodeToString(rawBytes)
 	tokenHash := hashToken(rawRefreshToken)
+	familyID := uuid.New()
 
 	if _, err := s.querier.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
 		UserID:    user.ID,
 		TokenHash: tokenHash,
 		UserAgent: pgtype.Text{String: userAgent, Valid: userAgent != ""},
 		IpAddress: pgtype.Text{String: ip, Valid: ip != ""},
-		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(30 * 24 * time.Hour), Valid: true},
+		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(refreshTokenDuration), Valid: true},
+		FamilyID:  pgtype.UUID{Bytes: familyID, Valid: true},
 	}); err != nil {
 		return nil, fmt.Errorf("failed persisting refresh token: %w", err)
 	}
@@ -274,63 +291,110 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 
 func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ip, userAgent string) (string, string, error) {
 	if rawRefreshToken == "" {
-		return "", "", errors.New("refresh token required")
+		return "", "", ErrInvalidRefreshToken
 	}
+	hash := hashToken(rawRefreshToken)
 
-	tokenHash := hashToken(rawRefreshToken)
-
-	// Check 10-second grace cache for parallel tab refresh race conditions
-	if entryVal, ok := s.graceCache.Load(tokenHash); ok {
-		entry := entryVal.(rotatedTokenEntry)
-		if time.Since(entry.rotatedAt) < 10*time.Second {
-			return entry.accessToken, entry.refreshToken, nil
+	existing, err := s.querier.GetRefreshTokenByHash(ctx, hash)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", ErrInvalidRefreshToken
 		}
-		s.graceCache.Delete(tokenHash)
+		return "", "", err
+	}
+	// An expired token is treated as unknown. Revoking a family because an old
+	// cookie was replayed would punish the user for a stale cookie.
+	if time.Now().After(existing.ExpiresAt.Time) {
+		return "", "", ErrInvalidRefreshToken
+	}
+	if existing.UsedAt.Valid {
+		s.handleReplay(ctx, existing, ip, userAgent)
+		return "", "", ErrInvalidRefreshToken
 	}
 
-	rf, err := s.querier.GetRefreshToken(ctx, tokenHash)
-	if err != nil {
-		return "", "", errors.New("invalid or expired refresh token")
-	}
-
-	user, err := s.querier.GetUserByID(ctx, rf.UserID)
-	if err != nil || user.Status != "ACTIVE" {
-		return "", "", errors.New("user account invalid or inactive")
-	}
-
-	// Single-Use Rotation: delete old token from DB
-	_ = s.querier.DeleteRefreshToken(ctx, tokenHash)
-
-	userID := uuid.UUID(user.ID.Bytes)
-	newToken, err := GenerateAccessToken(userID, user.Email, user.Role, s.privKey, AccessTokenDuration)
-	if err != nil {
-		return "", "", fmt.Errorf("failed generating access token: %w", err)
-	}
-
-	// Generate new refresh token
-	newRawRF, err := generateRandomHex(32)
-	if err != nil {
-		return "", "", fmt.Errorf("failed generating refresh token entropy: %w", err)
-	}
-	newHash := hashToken(newRawRF)
-	if _, err := s.querier.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
-		UserID:    rf.UserID,
-		TokenHash: newHash,
-		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(30 * 24 * time.Hour), Valid: true},
-		IpAddress: pgtype.Text{String: ip, Valid: true},
-		UserAgent: pgtype.Text{String: userAgent, Valid: true},
-	}); err != nil {
-		return "", "", fmt.Errorf("failed persisting rotated refresh token: %w", err)
-	}
-
-	// Store in grace cache for 10 seconds
-	s.graceCache.Store(tokenHash, rotatedTokenEntry{
-		accessToken:  newToken,
-		refreshToken: newRawRF,
-		rotatedAt:    time.Now(),
+	var accessToken, newRefresh string
+	err = s.runTx(ctx, func(q db.Querier) error {
+		consumed, err := q.ConsumeRefreshToken(ctx, hash)
+		if err != nil {
+			// Another request consumed it between the read and here. That is a
+			// race, not a theft, so roll back and let the caller retry.
+			return ErrInvalidRefreshToken
+		}
+		// The status check runs before the commit. Checking it afterwards would
+		// leave the old token consumed while the client got an error, so the
+		// next attempt would look like a replay.
+		user, err := q.GetUserByID(ctx, consumed.UserID)
+		if err != nil {
+			return err
+		}
+		if user.Status != "ACTIVE" {
+			return ErrUserNotActive
+		}
+		if newRefresh, err = generateRefreshToken(); err != nil {
+			return err
+		}
+		if _, err := q.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
+			UserID:    consumed.UserID,
+			TokenHash: hashToken(newRefresh),
+			UserAgent: pgtype.Text{String: userAgent, Valid: userAgent != ""},
+			IpAddress: pgtype.Text{String: ip, Valid: ip != ""},
+			ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(refreshTokenDuration), Valid: true},
+			FamilyID:  consumed.FamilyID,
+		}); err != nil {
+			return err
+		}
+		// The access token is signed before the commit for the same reason: a
+		// signing failure must not leave the rotation half applied.
+		accessToken, err = s.issueAccessToken(user)
+		return err
 	})
+	if err != nil {
+		return "", "", err
+	}
+	return accessToken, newRefresh, nil
+}
 
-	return newToken, newRawRF, nil
+func (s *AuthService) handleReplay(ctx context.Context, spent db.RefreshToken, ip, userAgent string) {
+	reason := "refresh_token_reuse"
+	if spent.UserAgent.String != userAgent || spent.IpAddress.String != ip {
+		reason = "refresh_token_reuse_other_client"
+	}
+
+	revoked := s.runTx(ctx, func(q db.Querier) error {
+		if err := q.DeleteRefreshTokenFamily(ctx, spent.FamilyID); err != nil {
+			return err
+		}
+		// The error is not ignored: a family revocation without the version bump
+		// would leave the stolen access token alive.
+		_, err := q.IncrementUserTokenVersion(ctx, spent.UserID)
+		return err
+	}) == nil
+
+	// The streams are closed only after a successful commit, so a failed
+	// transaction cannot disconnect a user whose session was never invalidated.
+	if revoked && s.revoker != nil {
+		s.revoker.RevokeUser(uuid.UUID(spent.UserID.Bytes))
+	}
+
+	// The audit is unconditional: a detected replay must be visible even when
+	// the revocation itself failed.
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, spent.UserID, "AUTH", pgtype.UUID{}, "REFRESH_TOKEN_REUSE", map[string]any{
+			"reason":         reason,
+			"family_id":      uuid.UUID(spent.FamilyID.Bytes).String(),
+			"revoked":        revoked,
+			"detected_ip":    ip,
+			"detected_agent": userAgent,
+		}, ip, userAgent)
+	}
+}
+
+func (s *AuthService) runTx(ctx context.Context, fn func(db.Querier) error) error {
+	runner, ok := s.querier.(TxRunner)
+	if !ok {
+		return db.ErrTransactionsUnsupported
+	}
+	return runner.RunTx(ctx, fn)
 }
 
 type TOTPSetupResult struct {
@@ -350,56 +414,38 @@ func (s *AuthService) SetupTOTP(ctx context.Context, userID uuid.UUID) (*TOTPSet
 		return nil, err
 	}
 
-	encryptedSecret, err := crypto.EncryptSecret(secret)
-	if err != nil {
-		return nil, fmt.Errorf("failed encrypting totp secret: %w", err)
-	}
-
-	// Store encrypted secret temporarily (not enabled until verified)
-	err = s.querier.UpdateUserTOTP(ctx, db.UpdateUserTOTPParams{
-		ID:                  pgID,
-		TotpSecretEncrypted: pgtype.Text{String: encryptedSecret, Valid: true},
-		TotpEnabled:         false,
-		TotpLastUsedStep:    0,
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	return &TOTPSetupResult{
 		Secret: secret,
 		URL:    url,
 	}, nil
 }
 
-func (s *AuthService) VerifyTOTP(ctx context.Context, userID uuid.UUID, code string) error {
-	pgID := pgtype.UUID{Bytes: userID, Valid: true}
-	user, err := s.querier.GetUserByID(ctx, pgID)
-	if err != nil {
-		return ErrUserNotFound
-	}
-
-	encryptedSecret := user.TotpSecretEncrypted.String
-	if encryptedSecret == "" {
-		return errors.New("no TOTP setup found in progress")
-	}
-
-	plainSecret, err := crypto.DecryptSecret(encryptedSecret)
-	if err != nil {
-		return errors.New("failed decrypting TOTP secret")
-	}
-
-	valid, usedStep := ValidateTOTPCodeWithStep(code, plainSecret, 0)
+func (s *AuthService) VerifyTOTP(ctx context.Context, userID uuid.UUID, secret, code string) error {
+	valid, usedStep := ValidateTOTPCodeWithStep(code, secret, 0)
 	if !valid {
 		return ErrInvalidTOTPCode
 	}
 
-	return s.querier.UpdateUserTOTP(ctx, db.UpdateUserTOTPParams{
+	encrypted, err := crypto.EncryptSecret(secret)
+	if err != nil {
+		return fmt.Errorf("failed encrypting totp secret: %w", err)
+	}
+
+	pgID := pgtype.UUID{Bytes: userID, Valid: true}
+	if err := s.querier.EnableTOTPWithSecret(ctx, db.EnableTOTPWithSecretParams{
 		ID:                  pgID,
-		TotpSecretEncrypted: pgtype.Text{String: encryptedSecret, Valid: true},
-		TotpEnabled:         true,
-		TotpLastUsedStep:    usedStep,
+		TotpSecretEncrypted: pgtype.Text{String: encrypted, Valid: true},
+	}); err != nil {
+		return err
+	}
+
+	_ = s.querier.UpdateUserTOTPLastUsedStep(ctx, db.UpdateUserTOTPLastUsedStepParams{
+		ID:               pgID,
+		TotpLastUsedStep: usedStep,
 	})
+
+	_, _ = s.querier.IncrementUserTokenVersion(ctx, pgID)
+	return nil
 }
 
 func (s *AuthService) DisableTOTP(ctx context.Context, userID uuid.UUID, currentPassword string) error {
@@ -419,12 +465,17 @@ func (s *AuthService) DisableTOTP(ctx context.Context, userID uuid.UUID, current
 		return ErrInvalidOldPassword
 	}
 
-	return s.querier.UpdateUserTOTP(ctx, db.UpdateUserTOTPParams{
+	if err := s.querier.UpdateUserTOTP(ctx, db.UpdateUserTOTPParams{
 		ID:                  pgID,
 		TotpSecretEncrypted: pgtype.Text{Valid: false},
 		TotpEnabled:         false,
 		TotpLastUsedStep:    0,
-	})
+	}); err != nil {
+		return err
+	}
+
+	_, _ = s.querier.IncrementUserTokenVersion(ctx, pgID)
+	return nil
 }
 
 func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldPassword, newPassword string) error {
@@ -457,10 +508,23 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldP
 		return fmt.Errorf("failed hashing password: %w", err)
 	}
 
-	return s.querier.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
+	if err := s.querier.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
 		ID:           pgID,
 		PasswordHash: hash,
+	}); err != nil {
+		return err
+	}
+
+	_ = s.querier.SetUserMustChangePassword(ctx, db.SetUserMustChangePasswordParams{
+		ID:                 pgID,
+		MustChangePassword: false,
 	})
+
+	if s.bootstrapSecretPath != "" {
+		_ = os.Remove(s.bootstrapSecretPath)
+	}
+
+	return nil
 }
 
 func hashToken(token string) string {

@@ -25,7 +25,7 @@ INSERT INTO companies (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-RETURNING id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at
+RETURNING id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at, owner_user_id
 `
 
 type CreateCompanyParams struct {
@@ -67,6 +67,7 @@ func (q *Queries) CreateCompany(ctx context.Context, arg CreateCompanyParams) (C
 		&i.CustomFields,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -82,7 +83,7 @@ func (q *Queries) DeleteCompany(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getCompanyByID = `-- name: GetCompanyByID :one
-SELECT id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at FROM companies
+SELECT id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at, owner_user_id FROM companies
 WHERE id = $1 LIMIT 1
 `
 
@@ -102,12 +103,13 @@ func (q *Queries) GetCompanyByID(ctx context.Context, id pgtype.UUID) (Company, 
 		&i.CustomFields,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
 
 const listCompanies = `-- name: ListCompanies :many
-SELECT id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at FROM companies
+SELECT id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at, owner_user_id FROM companies
 ORDER BY name ASC
 LIMIT $1 OFFSET $2
 `
@@ -139,6 +141,7 @@ func (q *Queries) ListCompanies(ctx context.Context, arg ListCompaniesParams) ([
 			&i.CustomFields,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -151,7 +154,7 @@ func (q *Queries) ListCompanies(ctx context.Context, arg ListCompaniesParams) ([
 }
 
 const searchCompanies = `-- name: SearchCompanies :many
-SELECT id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at FROM companies
+SELECT id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at, owner_user_id FROM companies
 WHERE name ILIKE '%' || $1 || '%' OR domain ILIKE '%' || $1 || '%'
 ORDER BY name ASC
 LIMIT $2
@@ -184,6 +187,7 @@ func (q *Queries) SearchCompanies(ctx context.Context, arg SearchCompaniesParams
 			&i.CustomFields,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -208,7 +212,7 @@ SET name = $2,
     custom_fields = $10,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at
+RETURNING id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at, owner_user_id
 `
 
 type UpdateCompanyParams struct {
@@ -251,6 +255,7 @@ func (q *Queries) UpdateCompany(ctx context.Context, arg UpdateCompanyParams) (C
 		&i.CustomFields,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerUserID,
 	)
 	return i, err
 }

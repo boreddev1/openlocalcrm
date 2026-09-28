@@ -283,12 +283,12 @@ func TestScratchDrillRoundTripsTypedRowsWithoutFalseZeroPass(t *testing.T) {
 // writing the rows into the live public table, and every public count must be
 // left exactly as it was.
 func TestScratchDrillRefusesToFallBackToPublicWhenAScratchTableIsMissing(t *testing.T) {
-	// notes carries no foreign key, so the only thing its removal can break is
+	// intake_forms carries no foreign key, so the only thing its removal can break is
 	// the write itself. That isolates the search_path question: the import has
 	// to fail with "relation does not exist" rather than quietly create or fill
 	// the live public table. todos additionally loses three foreign keys with
 	// it, so it is also the case that proves the constraint check is real.
-	for _, table := range []string{"notes", "todos"} {
+	for _, table := range []string{"intake_forms", "todos"} {
 		t.Run(table, func(t *testing.T) {
 			ctx := context.Background()
 			pool := testPool(t)
@@ -314,7 +314,7 @@ func TestScratchDrillRefusesToFallBackToPublicWhenAScratchTableIsMissing(t *test
 			require.False(t, result.Passed)
 			require.NotEmpty(t, observedSchema)
 			require.NotContains(t, err.Error(), "passed")
-			if table == "notes" {
+			if table == "intake_forms" {
 				require.Contains(t, err.Error(), table)
 				require.Contains(t, err.Error(), "does not exist",
 					"with search_path pinned to the scratch schema the write must fail, not fall back to public")

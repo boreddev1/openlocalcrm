@@ -32,7 +32,7 @@ INSERT INTO appointments (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
-RETURNING id, title, contact_id, company_id, deal_id, start_time, end_time, location, notes, ics_uid, created_at, assigned_to, type, is_external, provider, is_private, is_pushed, updated_at
+RETURNING id, title, contact_id, company_id, deal_id, start_time, end_time, location, notes, ics_uid, created_at, assigned_to, type, is_external, provider, is_private, is_pushed, updated_at, user_id
 `
 
 type CreateAppointmentParams struct {
@@ -92,6 +92,7 @@ func (q *Queries) CreateAppointment(ctx context.Context, arg CreateAppointmentPa
 		&i.IsPrivate,
 		&i.IsPushed,
 		&i.UpdatedAt,
+		&i.UserID,
 	)
 	return i, err
 }
@@ -107,7 +108,7 @@ func (q *Queries) DeleteAppointment(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getAppointmentByID = `-- name: GetAppointmentByID :one
-SELECT id, title, contact_id, company_id, deal_id, start_time, end_time, location, notes, ics_uid, created_at, assigned_to, type, is_external, provider, is_private, is_pushed, updated_at FROM appointments
+SELECT id, title, contact_id, company_id, deal_id, start_time, end_time, location, notes, ics_uid, created_at, assigned_to, type, is_external, provider, is_private, is_pushed, updated_at, user_id FROM appointments
 WHERE id = $1 LIMIT 1
 `
 
@@ -133,12 +134,13 @@ func (q *Queries) GetAppointmentByID(ctx context.Context, id pgtype.UUID) (Appoi
 		&i.IsPrivate,
 		&i.IsPushed,
 		&i.UpdatedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const listAppointments = `-- name: ListAppointments :many
-SELECT id, title, contact_id, company_id, deal_id, start_time, end_time, location, notes, ics_uid, created_at, assigned_to, type, is_external, provider, is_private, is_pushed, updated_at FROM appointments
+SELECT id, title, contact_id, company_id, deal_id, start_time, end_time, location, notes, ics_uid, created_at, assigned_to, type, is_external, provider, is_private, is_pushed, updated_at, user_id FROM appointments
 ORDER BY start_time ASC
 `
 
@@ -170,6 +172,7 @@ func (q *Queries) ListAppointments(ctx context.Context) ([]Appointment, error) {
 			&i.IsPrivate,
 			&i.IsPushed,
 			&i.UpdatedAt,
+			&i.UserID,
 		); err != nil {
 			return nil, err
 		}
@@ -193,7 +196,7 @@ SET title = $2,
     type = $9,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, title, contact_id, company_id, deal_id, start_time, end_time, location, notes, ics_uid, created_at, assigned_to, type, is_external, provider, is_private, is_pushed, updated_at
+RETURNING id, title, contact_id, company_id, deal_id, start_time, end_time, location, notes, ics_uid, created_at, assigned_to, type, is_external, provider, is_private, is_pushed, updated_at, user_id
 `
 
 type UpdateAppointmentParams struct {
@@ -240,6 +243,7 @@ func (q *Queries) UpdateAppointment(ctx context.Context, arg UpdateAppointmentPa
 		&i.IsPrivate,
 		&i.IsPushed,
 		&i.UpdatedAt,
+		&i.UserID,
 	)
 	return i, err
 }
@@ -249,7 +253,7 @@ UPDATE appointments
 SET is_pushed = $2,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, title, contact_id, company_id, deal_id, start_time, end_time, location, notes, ics_uid, created_at, assigned_to, type, is_external, provider, is_private, is_pushed, updated_at
+RETURNING id, title, contact_id, company_id, deal_id, start_time, end_time, location, notes, ics_uid, created_at, assigned_to, type, is_external, provider, is_private, is_pushed, updated_at, user_id
 `
 
 type UpdateAppointmentPushStatusParams struct {
@@ -279,6 +283,7 @@ func (q *Queries) UpdateAppointmentPushStatus(ctx context.Context, arg UpdateApp
 		&i.IsPrivate,
 		&i.IsPushed,
 		&i.UpdatedAt,
+		&i.UserID,
 	)
 	return i, err
 }

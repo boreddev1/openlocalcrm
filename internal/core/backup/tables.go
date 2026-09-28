@@ -313,6 +313,16 @@ var tableSpecs = []tableSpec{
 	},
 }
 
+// TableColumns returns the restore allow-list for one backup table.
+func TableColumns(table string) []string {
+	for _, spec := range tableSpecs {
+		if spec.Name == table {
+			return spec.Columns
+		}
+	}
+	return nil
+}
+
 // The column allowlists below mirror the jsonb_to_record fields of the matching
 // Upsert*Row statement in internal/db/queries/backup.sql, invites.sql and
 // email_templates.sql. They are the restore validation contract: a column the
@@ -322,12 +332,13 @@ var tableSpecs = []tableSpec{
 var userColumns = []string{
 	"id", "email", "password_hash", "first_name", "last_name", "role", "status",
 	"totp_secret_encrypted", "totp_enabled", "last_login_at", "created_at", "updated_at",
-	"totp_last_used_step",
+	"totp_last_used_step", "token_version", "must_change_password",
 }
 
 var companyColumns = []string{
 	"id", "name", "domain", "phone", "email", "address_street", "address_zip",
 	"address_city", "address_country", "custom_fields", "created_at", "updated_at",
+	"owner_user_id",
 }
 
 var workflowColumns = []string{
@@ -340,7 +351,7 @@ var contactColumns = []string{
 	"lead_source", "address_street", "address_zip", "address_city", "latitude", "longitude",
 	"custom_fields", "created_at", "updated_at", "consent_phone", "consent_email",
 	"consent_updated_at", "stromverbrauch_kwh", "gasverbrauch_kwh", "zaehlernummer",
-	"eigentuemer_status", "tags",
+	"eigentuemer_status", "tags", "owner_user_id",
 }
 
 var dealColumns = []string{
@@ -362,6 +373,7 @@ var todoColumns = []string{
 
 var refreshTokenColumns = []string{
 	"id", "user_id", "token_hash", "user_agent", "ip_address", "expires_at", "created_at",
+	"family_id", "used_at",
 }
 
 var auditLogColumns = []string{
@@ -386,7 +398,7 @@ var emailAttachmentColumns = []string{
 var appointmentColumns = []string{
 	"id", "title", "contact_id", "company_id", "deal_id", "start_time", "end_time", "location",
 	"notes", "ics_uid", "created_at", "assigned_to", "type", "is_external", "provider",
-	"is_private", "is_pushed", "updated_at",
+	"is_private", "is_pushed", "updated_at", "user_id",
 }
 
 var callActivityColumns = []string{
@@ -410,6 +422,7 @@ var workflowStepColumns = []string{
 
 var noteColumns = []string{
 	"id", "entity_type", "entity_id", "type", "author", "content", "created_at", "updated_at",
+	"user_id",
 }
 
 var intakeFormColumns = []string{

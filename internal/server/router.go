@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -141,18 +142,21 @@ func NewRouter(cfg Config) http.Handler {
 				return
 			}
 
-			if auth.IsTokenRevoked(token) {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
-			}
-
 			claims, err := auth.ValidateAccessToken(token, cfg.PubKey)
 			if err != nil || claims == nil {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
 
-			cfg.SSEHub.ServeHTTP(w, r)
+			if cfg.DB != nil {
+				stored, verr := cfg.DB.CurrentTokenVersion(r.Context(), pgtype.UUID{Bytes: claims.UserID, Valid: true})
+				if verr != nil || claims.TokenVersion == nil || *claims.TokenVersion != stored {
+					http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+					return
+				}
+			}
+
+			cfg.SSEHub.ServeHTTPFor(w, r, claims.UserID)
 		})
 	}
 
@@ -174,6 +178,7 @@ func NewRouter(cfg Config) http.Handler {
 	var backupH *handlers.BackupHandler
 	var settingsH *handlers.SettingsHandler
 	var automationH *handlers.AutomationHandler
+	var sessionH *handlers.SessionHandler
 	var authLimiter *auth.RateLimiter
 	var aiLimiter *auth.RateLimiter
 
@@ -230,6 +235,13 @@ func NewRouter(cfg Config) http.Handler {
 		}
 
 		authSvc := auth.NewAuthService(cfg.DB, cfg.PrivKey, cfg.PubKey, authLimiter)
+		if cfg.SSEHub != nil {
+			authSvc = authSvc.WithSessionRevoker(cfg.SSEHub)
+		}
+		if localStorage, ok := cfg.Storage.(*storage.LocalStorage); ok && localStorage != nil {
+			authSvc = authSvc.WithBootstrapSecretPath(filepath.Join(localStorage.BaseDir(), "bootstrap-admin.txt"))
+		}
+		authSvc = authSvc.WithAuditLogger(auditSvc)
 		authH = handlers.NewAuthHandlerWithService(authSvc)
 		contactH = handlers.NewContactHandler(contactSvc)
 		companyH = handlers.NewCompanyHandler(companySvc)
@@ -256,6 +268,7 @@ func NewRouter(cfg Config) http.Handler {
 		backupH = handlers.NewBackupHandler(backup.NewService(rowSource, auditSvc, cfg.Pool, cfg.DB))
 		settingsH = handlers.NewSettingsHandler()
 		automationH = handlers.NewAutomationHandler(automationSvc)
+		sessionH = handlers.NewSessionHandler(authSvc, cfg.SSEHub)
 	}
 
 	if authLimiter == nil {
@@ -311,7 +324,7 @@ func NewRouter(cfg Config) http.Handler {
 
 		// Protected routes (Always enforced JWT authentication, then CSRF protection)
 		api.Group(func(protected chi.Router) {
-			protected.Use(auth.AuthMiddleware(cfg.PubKey))
+			protected.Use(auth.AuthMiddleware(cfg.PubKey, cfg.DB))
 			protected.Use(CSRFProtectionMiddleware)
 
 			// /me returns the JWT claims plus the real 2FA state read from the
@@ -325,15 +338,16 @@ func NewRouter(cfg Config) http.Handler {
 					return
 				}
 				body := map[string]any{
-					"user_id":      claims.UserID,
-					"email":        claims.Email,
-					"role":         claims.Role,
-					"sub":          claims.Subject,
-					"iss":          claims.Issuer,
-					"aud":          claims.Audience,
-					"iat":          claims.IssuedAt,
-					"exp":          claims.ExpiresAt,
-					"totp_enabled": nil,
+					"user_id":              claims.UserID,
+					"email":                claims.Email,
+					"role":                 claims.Role,
+					"sub":                  claims.Subject,
+					"iss":                  claims.Issuer,
+					"aud":                  claims.Audience,
+					"iat":                  claims.IssuedAt,
+					"exp":                  claims.ExpiresAt,
+					"totp_enabled":         nil,
+					"must_change_password": false,
 				}
 				var userID pgtype.UUID
 				if cfg.DB != nil {
@@ -341,6 +355,7 @@ func NewRouter(cfg Config) http.Handler {
 						if user, dbErr := cfg.DB.GetUserByID(r.Context(), userID); dbErr == nil {
 							enabled := user.TotpEnabled
 							body["totp_enabled"] = enabled
+							body["must_change_password"] = user.MustChangePassword
 							body["first_name"] = user.FirstName
 							body["last_name"] = user.LastName
 						}
@@ -358,6 +373,9 @@ func NewRouter(cfg Config) http.Handler {
 					secRouter.Post("/auth/totp/setup", authH.SetupTOTP)
 					secRouter.Post("/auth/totp/verify", authH.VerifyTOTP)
 					secRouter.Post("/auth/totp/disable", authH.DisableTOTP)
+					if sessionH != nil {
+						secRouter.Post("/auth/logout-all", sessionH.LogoutAll)
+					}
 				})
 			}
 

@@ -42,6 +42,11 @@ func NewLocalStorage(baseDir string) *LocalStorage {
 	return &LocalStorage{baseDir: baseDir}
 }
 
+// BaseDir returns the root directory for storage
+func (s *LocalStorage) BaseDir() string {
+	return s.baseDir
+}
+
 func (s *LocalStorage) sanitizeRelPath(relPath string) (string, error) {
 	clean := filepath.Clean(relPath)
 	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {

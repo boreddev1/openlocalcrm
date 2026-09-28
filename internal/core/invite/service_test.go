@@ -526,8 +526,8 @@ func TestAcceptRefusesAWeakPasswordAndKeepsTheInviteUsable(t *testing.T) {
 	if _, err := svc.Validate(ctx, issued.RawToken); err != nil {
 		t.Fatalf("a refused weak password must leave the invite usable, got %v", err)
 	}
-	if _, err := svc.Accept(ctx, issued.RawToken, "SuperSecret1!"); err != nil {
-		t.Fatalf("Accept with a good password failed: %v", err)
+	if _, err := svc.Accept(ctx, issued.RawToken, "abcdefgh"); err != nil {
+		t.Fatalf("Accept with an 8-character password failed: %v", err)
 	}
 }
 

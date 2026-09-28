@@ -65,7 +65,16 @@ func loadOrGenerateKey(keyPath string, isDemoMode bool) (ed25519.PublicKey, ed25
 	return pubKey, privKey, nil
 }
 
-func bootstrapAdminUser(ctx context.Context, querier db.Querier) {
+// writeBootstrapSecret stores a generated administrator password in the storage
+// directory with owner-only permissions and returns its path. The value is never
+// written to the process log.
+func writeBootstrapSecret(storagePath, email, password string) error {
+	path := filepath.Join(storagePath, "bootstrap-admin.txt")
+	body := fmt.Sprintf("email=%s\npassword=%s\nwritten=%s\n", email, password, time.Now().UTC().Format(time.RFC3339))
+	return os.WriteFile(path, []byte(body), 0o600)
+}
+
+func bootstrapAdminUser(ctx context.Context, querier db.Querier, storagePath string) {
 	count, err := querier.CountUsers(ctx)
 	if err == nil && count == 0 {
 		password := os.Getenv("INITIAL_ADMIN_PASSWORD")
@@ -79,12 +88,12 @@ func bootstrapAdminUser(ctx context.Context, querier db.Querier) {
 			pwBytes := make([]byte, 16)
 			_, _ = rand.Read(pwBytes)
 			password = hex.EncodeToString(pwBytes)
-			log.Printf("==================================================================")
-			log.Printf("[BOOTSTRAP] GENERATED SECURE INITIAL ADMIN PASSWORD:")
-			log.Printf("User:     %s", adminEmail)
-			log.Printf("Password: %s", password)
-			log.Printf("PLEASE CHANGE THIS PASSWORD IMMEDIATELY UPON FIRST LOGIN!")
-			log.Printf("==================================================================")
+			secretPath := filepath.Join(storagePath, "bootstrap-admin.txt")
+			if err := writeBootstrapSecret(storagePath, adminEmail, password); err != nil {
+				log.Printf("[BOOTSTRAP_ERROR] Failed writing bootstrap secret to %s: %v", secretPath, err)
+			} else {
+				log.Printf("[BOOTSTRAP] Initial admin password written to %s (permissions 0600). Please change this password immediately upon first login!", secretPath)
+			}
 		} else {
 			log.Printf("[Bootstrap] Using INITIAL_ADMIN_PASSWORD from environment for %s", adminEmail)
 		}
@@ -103,7 +112,7 @@ func bootstrapAdminUser(ctx context.Context, querier db.Querier) {
 			lastName = "User"
 		}
 
-		_, createErr := querier.CreateUser(ctx, db.CreateUserParams{
+		adminUser, createErr := querier.CreateUser(ctx, db.CreateUserParams{
 			Email:        adminEmail,
 			PasswordHash: hash,
 			FirstName:    firstName,
@@ -113,6 +122,13 @@ func bootstrapAdminUser(ctx context.Context, querier db.Querier) {
 		})
 		if createErr != nil {
 			log.Fatalf("[FATAL] Failed initializing default admin user: %v", createErr)
+		}
+
+		if err := querier.SetUserMustChangePassword(ctx, db.SetUserMustChangePasswordParams{
+			ID:                 adminUser.ID,
+			MustChangePassword: true,
+		}); err != nil {
+			log.Printf("[BOOTSTRAP_WARN] Failed setting must_change_password: %v", err)
 		}
 	}
 }
@@ -200,7 +216,7 @@ func main() {
 		}
 
 		querier = db.New(dbPool)
-		bootstrapAdminUser(ctx, querier)
+		bootstrapAdminUser(ctx, querier, storagePath)
 		defer dbPool.Close()
 	}
 

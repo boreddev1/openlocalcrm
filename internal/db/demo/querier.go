@@ -642,6 +642,64 @@ func (q *InMemoryQuerier) UpdateUserTOTPLastUsedStep(ctx context.Context, arg db
 	return nil
 }
 
+func (q *InMemoryQuerier) EnableTOTPWithSecret(ctx context.Context, arg db.EnableTOTPWithSecretParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	u, ok := q.users[idStr]
+	if !ok {
+		return ErrNotFound
+	}
+	u.TotpSecretEncrypted = arg.TotpSecretEncrypted
+	u.TotpEnabled = true
+	u.TotpLastUsedStep = 0
+	u.UpdatedAt = nowTimestamptz()
+	q.users[idStr] = u
+	return nil
+}
+
+func (q *InMemoryQuerier) CurrentTokenVersion(ctx context.Context, id pgtype.UUID) (int32, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	u, ok := q.users[uuidToStr(id)]
+	if !ok {
+		return 0, ErrNotFound
+	}
+	return u.TokenVersion, nil
+}
+
+func (q *InMemoryQuerier) IncrementUserTokenVersion(ctx context.Context, id pgtype.UUID) (int32, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(id)
+	u, ok := q.users[idStr]
+	if !ok {
+		return 0, ErrNotFound
+	}
+	u.TokenVersion++
+	u.UpdatedAt = nowTimestamptz()
+	q.users[idStr] = u
+	return u.TokenVersion, nil
+}
+
+func (q *InMemoryQuerier) SetUserMustChangePassword(ctx context.Context, arg db.SetUserMustChangePasswordParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	u, ok := q.users[idStr]
+	if !ok {
+		return ErrNotFound
+	}
+	u.MustChangePassword = arg.MustChangePassword
+	u.UpdatedAt = nowTimestamptz()
+	q.users[idStr] = u
+	return nil
+}
+
 // Company methods
 func (q *InMemoryQuerier) CreateCompany(ctx context.Context, arg db.CreateCompanyParams) (db.Company, error) {
 	q.mu.Lock()
@@ -742,6 +800,42 @@ func (q *InMemoryQuerier) UpdateCompany(ctx context.Context, arg db.UpdateCompan
 	c.AddressCity = arg.AddressCity
 	c.AddressCountry = arg.AddressCountry
 	c.CustomFields = arg.CustomFields
+	c.UpdatedAt = nowTimestamptz()
+	q.companies[idStr] = c
+	return c, nil
+}
+
+func (q *InMemoryQuerier) ListUnownedCompanies(ctx context.Context) ([]db.Company, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.Company
+	for _, c := range q.companies {
+		if !c.OwnerUserID.Valid {
+			list = append(list, c)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		ti := list[i].CreatedAt.Time
+		tj := list[j].CreatedAt.Time
+		if ti.Equal(tj) {
+			return uuidToStr(list[i].ID) < uuidToStr(list[j].ID)
+		}
+		return ti.Before(tj)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) SetCompanyOwner(ctx context.Context, arg db.SetCompanyOwnerParams) (db.Company, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	c, ok := q.companies[idStr]
+	if !ok {
+		return db.Company{}, ErrNotFound
+	}
+	c.OwnerUserID = arg.OwnerUserID
 	c.UpdatedAt = nowTimestamptz()
 	q.companies[idStr] = c
 	return c, nil
@@ -955,6 +1049,42 @@ func (q *InMemoryQuerier) ListInactiveContacts(ctx context.Context, arg db.ListI
 		list = list[:arg.Limit]
 	}
 	return list, nil
+}
+
+func (q *InMemoryQuerier) ListUnownedContacts(ctx context.Context) ([]db.Contact, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.Contact
+	for _, c := range q.contacts {
+		if !c.OwnerUserID.Valid {
+			list = append(list, c)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		ti := list[i].CreatedAt.Time
+		tj := list[j].CreatedAt.Time
+		if ti.Equal(tj) {
+			return uuidToStr(list[i].ID) < uuidToStr(list[j].ID)
+		}
+		return ti.Before(tj)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) SetContactOwner(ctx context.Context, arg db.SetContactOwnerParams) (db.Contact, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	c, ok := q.contacts[idStr]
+	if !ok {
+		return db.Contact{}, ErrNotFound
+	}
+	c.OwnerUserID = arg.OwnerUserID
+	c.UpdatedAt = nowTimestamptz()
+	q.contacts[idStr] = c
+	return c, nil
 }
 
 // Deal methods
@@ -1362,6 +1492,29 @@ func (q *InMemoryQuerier) ListRecentAuditLogs(ctx context.Context, arg db.ListRe
 	return list, nil
 }
 
+func (q *InMemoryQuerier) SeedUserForTest(id uuid.UUID, email, passwordHash, status, role string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	pgID := pgtype.UUID{Bytes: id, Valid: true}
+	q.users[uuidToStr(pgID)] = db.User{
+		ID:           pgID,
+		Email:        email,
+		PasswordHash: passwordHash,
+		FirstName:    "Test",
+		LastName:     "User",
+		Role:         role,
+		Status:       status,
+		CreatedAt:    nowTimestamptz(),
+		UpdatedAt:    nowTimestamptz(),
+	}
+}
+
+func (q *InMemoryQuerier) RefreshTokensCountForTest() int {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	return len(q.refreshTokens)
+}
+
 // Refresh token methods
 func (q *InMemoryQuerier) CreateRefreshToken(ctx context.Context, arg db.CreateRefreshTokenParams) (db.RefreshToken, error) {
 	q.mu.Lock()
@@ -1374,10 +1527,80 @@ func (q *InMemoryQuerier) CreateRefreshToken(ctx context.Context, arg db.CreateR
 		UserAgent: arg.UserAgent,
 		IpAddress: arg.IpAddress,
 		ExpiresAt: arg.ExpiresAt,
+		FamilyID:  arg.FamilyID,
 		CreatedAt: nowTimestamptz(),
 	}
 	q.refreshTokens[arg.TokenHash] = t
 	return t, nil
+}
+
+func (q *InMemoryQuerier) ConsumeRefreshToken(ctx context.Context, tokenHash string) (db.ConsumeRefreshTokenRow, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	t, ok := q.refreshTokens[tokenHash]
+	if !ok {
+		return db.ConsumeRefreshTokenRow{}, ErrNotFound
+	}
+	if t.UsedAt.Valid {
+		return db.ConsumeRefreshTokenRow{}, ErrNotFound
+	}
+	if t.ExpiresAt.Valid && t.ExpiresAt.Time.Before(time.Now()) {
+		return db.ConsumeRefreshTokenRow{}, ErrNotFound
+	}
+
+	t.UsedAt = nowTimestamptz()
+	q.refreshTokens[tokenHash] = t
+
+	return db.ConsumeRefreshTokenRow{
+		ID:        t.ID,
+		UserID:    t.UserID,
+		FamilyID:  t.FamilyID,
+		UserAgent: t.UserAgent,
+		IpAddress: t.IpAddress,
+		ExpiresAt: t.ExpiresAt,
+	}, nil
+}
+
+func (q *InMemoryQuerier) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (db.RefreshToken, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	t, ok := q.refreshTokens[tokenHash]
+	if !ok {
+		return db.RefreshToken{}, ErrNotFound
+	}
+	return t, nil
+}
+
+func (q *InMemoryQuerier) DeleteRefreshTokenFamily(ctx context.Context, familyID pgtype.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	for hash, t := range q.refreshTokens {
+		if t.FamilyID.Valid && familyID.Valid && t.FamilyID.Bytes == familyID.Bytes {
+			delete(q.refreshTokens, hash)
+		}
+	}
+	return nil
+}
+
+func (q *InMemoryQuerier) DeleteExpiredAndSpentRefreshTokens(ctx context.Context) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	cutoff := time.Now().Add(-30 * 24 * time.Hour)
+	now := time.Now()
+	for hash, t := range q.refreshTokens {
+		if t.ExpiresAt.Valid && t.ExpiresAt.Time.Before(now) {
+			delete(q.refreshTokens, hash)
+			continue
+		}
+		if t.UsedAt.Valid && t.UsedAt.Time.Before(cutoff) {
+			delete(q.refreshTokens, hash)
+		}
+	}
+	return nil
 }
 
 func (q *InMemoryQuerier) DeleteRefreshToken(ctx context.Context, tokenHash string) error {

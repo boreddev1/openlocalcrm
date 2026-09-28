@@ -654,15 +654,16 @@ func (q *Queries) UpsertAIResearchJobsRow(ctx context.Context, row []byte) error
 const upsertAppointmentsRow = `-- name: UpsertAppointmentsRow :exec
 INSERT INTO appointments (id, title, contact_id, company_id, deal_id, start_time, end_time,
                           location, notes, ics_uid, created_at, assigned_to, type, is_external,
-                          provider, is_private, is_pushed, updated_at)
+                          provider, is_private, is_pushed, updated_at, user_id)
 SELECT r.id::uuid, r.title, r.contact_id::uuid, r.company_id::uuid, r.deal_id::uuid,
        r.start_time::timestamptz, r.end_time::timestamptz, r.location, r.notes, r.ics_uid,
        r.created_at::timestamptz, r.assigned_to, r.type, r.is_external::boolean, r.provider,
-       r.is_private::boolean, r.is_pushed::boolean, r.updated_at::timestamptz
+       r.is_private::boolean, r.is_pushed::boolean, r.updated_at::timestamptz, r.user_id::uuid
 FROM jsonb_to_record($1::jsonb) AS r(
     id text, title text, contact_id text, company_id text, deal_id text, start_time text,
     end_time text, location text, notes text, ics_uid text, created_at text, assigned_to text,
-    type text, is_external text, provider text, is_private text, is_pushed text, updated_at text)
+    type text, is_external text, provider text, is_private text, is_pushed text, updated_at text,
+    user_id text)
 ON CONFLICT (id) DO UPDATE SET
     title = EXCLUDED.title,
     contact_id = EXCLUDED.contact_id,
@@ -680,7 +681,8 @@ ON CONFLICT (id) DO UPDATE SET
     provider = EXCLUDED.provider,
     is_private = EXCLUDED.is_private,
     is_pushed = EXCLUDED.is_pushed,
-    updated_at = EXCLUDED.updated_at
+    updated_at = EXCLUDED.updated_at,
+    user_id = EXCLUDED.user_id
 `
 
 func (q *Queries) UpsertAppointmentsRow(ctx context.Context, row []byte) error {
@@ -735,14 +737,16 @@ func (q *Queries) UpsertCallActivitiesRow(ctx context.Context, row []byte) error
 
 const upsertCompaniesRow = `-- name: UpsertCompaniesRow :exec
 INSERT INTO companies (id, name, domain, phone, email, address_street, address_zip,
-                       address_city, address_country, custom_fields, created_at, updated_at)
+                       address_city, address_country, custom_fields, created_at, updated_at,
+                       owner_user_id)
 SELECT r.id::uuid, r.name, r.domain, r.phone, r.email, r.address_street, r.address_zip,
        r.address_city, r.address_country, r.custom_fields,
-       r.created_at::timestamptz, r.updated_at::timestamptz
+       r.created_at::timestamptz, r.updated_at::timestamptz,
+       r.owner_user_id::uuid
 FROM jsonb_to_record($1::jsonb) AS r(
     id text, name text, domain text, phone text, email text, address_street text,
     address_zip text, address_city text, address_country text, custom_fields jsonb,
-    created_at text, updated_at text)
+    created_at text, updated_at text, owner_user_id text)
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,
     domain = EXCLUDED.domain,
@@ -754,7 +758,8 @@ ON CONFLICT (id) DO UPDATE SET
     address_country = EXCLUDED.address_country,
     custom_fields = EXCLUDED.custom_fields,
     created_at = EXCLUDED.created_at,
-    updated_at = EXCLUDED.updated_at
+    updated_at = EXCLUDED.updated_at,
+    owner_user_id = EXCLUDED.owner_user_id
 `
 
 func (q *Queries) UpsertCompaniesRow(ctx context.Context, row []byte) error {
@@ -791,21 +796,21 @@ INSERT INTO contacts (id, company_id, first_name, last_name, email, phone, mobil
                       lead_source, address_street, address_zip, address_city, latitude, longitude,
                       custom_fields, created_at, updated_at, consent_phone, consent_email,
                       consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer,
-                      eigentuemer_status, tags)
+                      eigentuemer_status, tags, owner_user_id)
 SELECT r.id::uuid, r.company_id::uuid, r.first_name, r.last_name, r.email, r.phone, r.mobile,
        r.position, r.lead_source, r.address_street, r.address_zip, r.address_city,
        r.latitude::double precision, r.longitude::double precision, r.custom_fields,
        r.created_at::timestamptz, r.updated_at::timestamptz,
        r.consent_phone::boolean, r.consent_email::boolean, r.consent_updated_at::timestamptz,
        r.stromverbrauch_kwh::numeric, r.gasverbrauch_kwh::numeric, r.zaehlernummer, r.eigentuemer_status,
-       r.tags
+       r.tags, r.owner_user_id::uuid
 FROM jsonb_to_record($1::jsonb) AS r(
     id text, company_id text, first_name text, last_name text, email text, phone text,
     mobile text, position text, lead_source text, address_street text, address_zip text,
     address_city text, latitude text, longitude text, custom_fields jsonb, created_at text,
     updated_at text, consent_phone text, consent_email text, consent_updated_at text,
     stromverbrauch_kwh text, gasverbrauch_kwh text, zaehlernummer text, eigentuemer_status text,
-    tags jsonb)
+    tags jsonb, owner_user_id text)
 ON CONFLICT (id) DO UPDATE SET
     company_id = EXCLUDED.company_id,
     first_name = EXCLUDED.first_name,
@@ -830,7 +835,8 @@ ON CONFLICT (id) DO UPDATE SET
     gasverbrauch_kwh = EXCLUDED.gasverbrauch_kwh,
     zaehlernummer = EXCLUDED.zaehlernummer,
     eigentuemer_status = EXCLUDED.eigentuemer_status,
-    tags = EXCLUDED.tags
+    tags = EXCLUDED.tags,
+    owner_user_id = EXCLUDED.owner_user_id
 `
 
 func (q *Queries) UpsertContactsRow(ctx context.Context, row []byte) error {
@@ -1018,12 +1024,12 @@ func (q *Queries) UpsertKnowledgeBaseArticlesRow(ctx context.Context, row []byte
 }
 
 const upsertNotesRow = `-- name: UpsertNotesRow :exec
-INSERT INTO notes (id, entity_type, entity_id, type, author, content, created_at, updated_at)
+INSERT INTO notes (id, entity_type, entity_id, type, author, content, created_at, updated_at, user_id)
 SELECT r.id::uuid, r.entity_type, r.entity_id::uuid, r.type, r.author, r.content,
-       r.created_at::timestamptz, r.updated_at::timestamptz
+       r.created_at::timestamptz, r.updated_at::timestamptz, r.user_id::uuid
 FROM jsonb_to_record($1::jsonb) AS r(
     id text, entity_type text, entity_id text, type text, author text, content text,
-    created_at text, updated_at text)
+    created_at text, updated_at text, user_id text)
 ON CONFLICT (id) DO UPDATE SET
     entity_type = EXCLUDED.entity_type,
     entity_id = EXCLUDED.entity_id,
@@ -1031,7 +1037,8 @@ ON CONFLICT (id) DO UPDATE SET
     author = EXCLUDED.author,
     content = EXCLUDED.content,
     created_at = EXCLUDED.created_at,
-    updated_at = EXCLUDED.updated_at
+    updated_at = EXCLUDED.updated_at,
+    user_id = EXCLUDED.user_id
 `
 
 func (q *Queries) UpsertNotesRow(ctx context.Context, row []byte) error {
@@ -1062,19 +1069,23 @@ func (q *Queries) UpsertNotificationsRow(ctx context.Context, row []byte) error 
 }
 
 const upsertRefreshTokensRow = `-- name: UpsertRefreshTokensRow :exec
-INSERT INTO refresh_tokens (id, user_id, token_hash, user_agent, ip_address, expires_at, created_at)
+INSERT INTO refresh_tokens (id, user_id, token_hash, user_agent, ip_address, expires_at, created_at,
+                            family_id, used_at)
 SELECT r.id::uuid, r.user_id::uuid, r.token_hash, r.user_agent, r.ip_address,
-       r.expires_at::timestamptz, r.created_at::timestamptz
+       r.expires_at::timestamptz, r.created_at::timestamptz,
+       r.family_id::uuid, r.used_at::timestamptz
 FROM jsonb_to_record($1::jsonb) AS r(
     id text, user_id text, token_hash text, user_agent text, ip_address text,
-    expires_at text, created_at text)
+    expires_at text, created_at text, family_id text, used_at text)
 ON CONFLICT (id) DO UPDATE SET
     user_id = EXCLUDED.user_id,
     token_hash = EXCLUDED.token_hash,
     user_agent = EXCLUDED.user_agent,
     ip_address = EXCLUDED.ip_address,
     expires_at = EXCLUDED.expires_at,
-    created_at = EXCLUDED.created_at
+    created_at = EXCLUDED.created_at,
+    family_id = EXCLUDED.family_id,
+    used_at = EXCLUDED.used_at
 `
 
 func (q *Queries) UpsertRefreshTokensRow(ctx context.Context, row []byte) error {
@@ -1112,15 +1123,18 @@ func (q *Queries) UpsertTodosRow(ctx context.Context, row []byte) error {
 
 const upsertUsersRow = `-- name: UpsertUsersRow :exec
 INSERT INTO users (id, email, password_hash, first_name, last_name, role, status,
-                   totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step)
+                   totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step,
+                   token_version, must_change_password)
 SELECT r.id::uuid, r.email, r.password_hash, r.first_name, r.last_name,
        r.role::public.user_role, r.status::public.user_status,
        r.totp_secret_encrypted, r.totp_enabled::boolean, r.last_login_at::timestamptz,
-       r.created_at::timestamptz, r.updated_at::timestamptz, r.totp_last_used_step::bigint
+       r.created_at::timestamptz, r.updated_at::timestamptz, r.totp_last_used_step::bigint,
+       r.token_version::integer, r.must_change_password::boolean
 FROM jsonb_to_record($1::jsonb) AS r(
     id text, email text, password_hash text, first_name text, last_name text,
     role text, status text, totp_secret_encrypted text, totp_enabled text,
-    last_login_at text, created_at text, updated_at text, totp_last_used_step text)
+    last_login_at text, created_at text, updated_at text, totp_last_used_step text,
+    token_version text, must_change_password text)
 ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
     password_hash = EXCLUDED.password_hash,
@@ -1133,7 +1147,9 @@ ON CONFLICT (id) DO UPDATE SET
     last_login_at = EXCLUDED.last_login_at,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at,
-    totp_last_used_step = EXCLUDED.totp_last_used_step
+    totp_last_used_step = EXCLUDED.totp_last_used_step,
+    token_version = EXCLUDED.token_version,
+    must_change_password = EXCLUDED.must_change_password
 `
 
 func (q *Queries) UpsertUsersRow(ctx context.Context, row []byte) error {

@@ -16,6 +16,7 @@ type Querier interface {
 	// concurrent second acceptance match zero rows instead of reactivating the
 	// account. No raw token is stored or returned: the caller supplies the hash.
 	AcceptUserInvite(ctx context.Context, arg AcceptUserInviteParams) (User, error)
+	ConsumeRefreshToken(ctx context.Context, tokenHash string) (ConsumeRefreshTokenRow, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// internal/db/queries/ai_research_jobs.sql
 	CreateAIResearchJob(ctx context.Context, arg CreateAIResearchJobParams) (AiResearchJob, error)
@@ -60,17 +61,21 @@ type Querier interface {
 	// internal/db/queries/workflows.sql
 	CreateWorkflow(ctx context.Context, arg CreateWorkflowParams) (Workflow, error)
 	CreateWorkflowRun(ctx context.Context, arg CreateWorkflowRunParams) (WorkflowRun, error)
+	CurrentTokenVersion(ctx context.Context, id pgtype.UUID) (int32, error)
 	DeleteAppointment(ctx context.Context, id pgtype.UUID) error
 	DeleteCompany(ctx context.Context, id pgtype.UUID) error
 	DeleteContact(ctx context.Context, id pgtype.UUID) error
 	DeleteDeal(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	DeleteEmailAccount(ctx context.Context, id pgtype.UUID) error
 	DeleteEmailTemplate(ctx context.Context, key string) error
+	DeleteExpiredAndSpentRefreshTokens(ctx context.Context) error
 	DeleteKBArticle(ctx context.Context, id pgtype.UUID) error
 	DeleteNote(ctx context.Context, id pgtype.UUID) error
 	DeleteRefreshToken(ctx context.Context, tokenHash string) error
+	DeleteRefreshTokenFamily(ctx context.Context, familyID pgtype.UUID) error
 	DeleteTodo(ctx context.Context, id pgtype.UUID) error
 	DeleteUserRefreshTokens(ctx context.Context, userID pgtype.UUID) error
+	EnableTOTPWithSecret(ctx context.Context, arg EnableTOTPWithSecretParams) error
 	ExportAIAuditLogsRows(ctx context.Context) ([][]byte, error)
 	ExportAIResearchJobsRows(ctx context.Context) ([][]byte, error)
 	ExportAppointmentsRows(ctx context.Context) ([][]byte, error)
@@ -132,12 +137,17 @@ type Querier interface {
 	GetKBArticleByID(ctx context.Context, id pgtype.UUID) (GetKBArticleByIDRow, error)
 	GetNoteByID(ctx context.Context, id pgtype.UUID) (Note, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error)
+	// Deliberately ignores expiry and used_at: the replay path needs to see a spent
+	// token in order to detect the replay.
+	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetTodoByID(ctx context.Context, id pgtype.UUID) (Todo, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	GetUserInviteByTokenHash(ctx context.Context, tokenHash string) (UserInvite, error)
 	GetWorkflowByID(ctx context.Context, id string) (Workflow, error)
 	GetWorkflowRunByID(ctx context.Context, id string) (WorkflowRun, error)
+	// Invalidates every access token already issued to this user.
+	IncrementUserTokenVersion(ctx context.Context, id pgtype.UUID) (int32, error)
 	ListAIResearchJobs(ctx context.Context) ([]AiResearchJob, error)
 	ListAllNotifications(ctx context.Context, arg ListAllNotificationsParams) ([]Notification, error)
 	ListAppointments(ctx context.Context) ([]Appointment, error)
@@ -161,6 +171,8 @@ type Querier interface {
 	ListRecentCallActivities(ctx context.Context, limit int32) ([]CallActivity, error)
 	ListTodos(ctx context.Context, arg ListTodosParams) ([]Todo, error)
 	ListTodosByAssignee(ctx context.Context, assignedTo pgtype.UUID) ([]Todo, error)
+	ListUnownedCompanies(ctx context.Context) ([]Company, error)
+	ListUnownedContacts(ctx context.Context) ([]Contact, error)
 	ListUnreadNotifications(ctx context.Context, arg ListUnreadNotificationsParams) ([]Notification, error)
 	ListUserInvites(ctx context.Context) ([]UserInvite, error)
 	ListUsers(ctx context.Context) ([]User, error)
@@ -174,6 +186,9 @@ type Querier interface {
 	SearchCompanies(ctx context.Context, arg SearchCompaniesParams) ([]Company, error)
 	SearchContacts(ctx context.Context, arg SearchContactsParams) ([]Contact, error)
 	SearchKBArticlesByEmbedding(ctx context.Context, arg SearchKBArticlesByEmbeddingParams) ([]SearchKBArticlesByEmbeddingRow, error)
+	SetCompanyOwner(ctx context.Context, arg SetCompanyOwnerParams) (Company, error)
+	SetContactOwner(ctx context.Context, arg SetContactOwnerParams) (Contact, error)
+	SetUserMustChangePassword(ctx context.Context, arg SetUserMustChangePasswordParams) error
 	TruncateBackupTables(ctx context.Context) error
 	UpdateAIResearchJobStatus(ctx context.Context, arg UpdateAIResearchJobStatusParams) (AiResearchJob, error)
 	UpdateAppointment(ctx context.Context, arg UpdateAppointmentParams) (Appointment, error)

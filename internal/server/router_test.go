@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
@@ -85,7 +86,7 @@ func TestAuthenticatedRoute(t *testing.T) {
 
 	// 2. Authenticated request with Bearer token should succeed
 	userID := uuid.New()
-	token, _ := auth.GenerateAccessToken(userID, "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+	token, _ := auth.GenerateAccessToken(userID, "admin@openlocalcrm.local", "ADMIN", 0, privKey, 15*time.Minute)
 	authReq := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
 	authReq.Header.Set("Authorization", "Bearer "+token)
 	authRec := httptest.NewRecorder()
@@ -107,9 +108,10 @@ func TestRBAC_AdminEndpointsProtection(t *testing.T) {
 		DemoMode: true,
 	})
 
-	userID := uuid.New()
-	benutzerToken, _ := auth.GenerateAccessToken(userID, "user@openlocalcrm.local", "BENUTZER", privKey, 15*time.Minute)
-	adminToken, _ := auth.GenerateAccessToken(userID, "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+	adminUser, _ := querier.GetUserByEmail(context.Background(), "admin@openlocalcrm.local")
+	vertriebUser, _ := querier.GetUserByEmail(context.Background(), "vertrieb@openlocalcrm.local")
+	benutzerToken, _ := auth.GenerateAccessToken(uuid.UUID(vertriebUser.ID.Bytes), vertriebUser.Email, vertriebUser.Role, 0, privKey, 15*time.Minute)
+	adminToken, _ := auth.GenerateAccessToken(uuid.UUID(adminUser.ID.Bytes), adminUser.Email, adminUser.Role, 0, privKey, 15*time.Minute)
 
 	adminRoutes := []string{
 		"/api/v1/users",
@@ -149,8 +151,8 @@ func TestSettingsEndpoints(t *testing.T) {
 		DemoMode: true,
 	})
 
-	userID := uuid.New()
-	adminToken, _ := auth.GenerateAccessToken(userID, "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+	adminUser, _ := querier.GetUserByEmail(context.Background(), "admin@openlocalcrm.local")
+	adminToken, _ := auth.GenerateAccessToken(uuid.UUID(adminUser.ID.Bytes), adminUser.Email, adminUser.Role, 0, privKey, 15*time.Minute)
 
 	// GET /api/v1/settings/export
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings/export", nil)

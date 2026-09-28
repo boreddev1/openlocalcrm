@@ -38,7 +38,7 @@ INSERT INTO contacts (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
     $14, $15, $16, $17, $18, $19, $20, $21
 )
-RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags
+RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id
 `
 
 type CreateContactParams struct {
@@ -117,6 +117,7 @@ func (q *Queries) CreateContact(ctx context.Context, arg CreateContactParams) (C
 		&i.Zaehlernummer,
 		&i.EigentuemerStatus,
 		&i.Tags,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -132,7 +133,7 @@ func (q *Queries) DeleteContact(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getContactByID = `-- name: GetContactByID :one
-SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags FROM contacts
+SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
 WHERE id = $1 LIMIT 1
 `
 
@@ -165,12 +166,13 @@ func (q *Queries) GetContactByID(ctx context.Context, id pgtype.UUID) (Contact, 
 		&i.Zaehlernummer,
 		&i.EigentuemerStatus,
 		&i.Tags,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
 
 const listContacts = `-- name: ListContacts :many
-SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags FROM contacts
+SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
 ORDER BY last_name ASC, first_name ASC
 LIMIT $1 OFFSET $2
 `
@@ -215,6 +217,7 @@ func (q *Queries) ListContacts(ctx context.Context, arg ListContactsParams) ([]C
 			&i.Zaehlernummer,
 			&i.EigentuemerStatus,
 			&i.Tags,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -227,7 +230,7 @@ func (q *Queries) ListContacts(ctx context.Context, arg ListContactsParams) ([]C
 }
 
 const listContactsByCompany = `-- name: ListContactsByCompany :many
-SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags FROM contacts
+SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
 WHERE company_id = $1
 ORDER BY last_name ASC, first_name ASC
 `
@@ -267,6 +270,7 @@ func (q *Queries) ListContactsByCompany(ctx context.Context, companyID pgtype.UU
 			&i.Zaehlernummer,
 			&i.EigentuemerStatus,
 			&i.Tags,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -279,7 +283,7 @@ func (q *Queries) ListContactsByCompany(ctx context.Context, companyID pgtype.UU
 }
 
 const listInactiveContacts = `-- name: ListInactiveContacts :many
-SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags FROM contacts
+SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
 WHERE updated_at < $1
 ORDER BY updated_at ASC
 LIMIT $2
@@ -325,6 +329,7 @@ func (q *Queries) ListInactiveContacts(ctx context.Context, arg ListInactiveCont
 			&i.Zaehlernummer,
 			&i.EigentuemerStatus,
 			&i.Tags,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -337,7 +342,7 @@ func (q *Queries) ListInactiveContacts(ctx context.Context, arg ListInactiveCont
 }
 
 const searchContacts = `-- name: SearchContacts :many
-SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags FROM contacts
+SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
 WHERE first_name ILIKE '%' || $1 || '%'
    OR last_name ILIKE '%' || $1 || '%'
    OR email ILIKE '%' || $1 || '%'
@@ -386,6 +391,7 @@ func (q *Queries) SearchContacts(ctx context.Context, arg SearchContactsParams) 
 			&i.Zaehlernummer,
 			&i.EigentuemerStatus,
 			&i.Tags,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -422,7 +428,7 @@ SET company_id = $2,
     custom_fields = $22,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags
+RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id
 `
 
 type UpdateContactParams struct {
@@ -502,6 +508,7 @@ func (q *Queries) UpdateContact(ctx context.Context, arg UpdateContactParams) (C
 		&i.Zaehlernummer,
 		&i.EigentuemerStatus,
 		&i.Tags,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -511,7 +518,7 @@ UPDATE contacts
 SET tags = CASE WHEN tags @> $1::jsonb THEN tags ELSE tags || $1::jsonb END,
     updated_at = NOW()
 WHERE id = $2
-RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags
+RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id
 `
 
 type UpdateContactTagsParams struct {
@@ -548,6 +555,7 @@ func (q *Queries) UpdateContactTags(ctx context.Context, arg UpdateContactTagsPa
 		&i.Zaehlernummer,
 		&i.EigentuemerStatus,
 		&i.Tags,
+		&i.OwnerUserID,
 	)
 	return i, err
 }

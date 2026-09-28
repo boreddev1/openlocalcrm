@@ -405,7 +405,7 @@ export const SettingsPage: React.FC = () => {
     try {
       await apiFetch('/api/v1/auth/totp/verify', {
         method: 'POST',
-        body: JSON.stringify({ code: totpCodeInput.trim() }),
+        body: JSON.stringify({ code: totpCodeInput.trim(), secret: totpSecret }),
       });
       setTotpCodeInput('');
       // The state comes from the server, never from an optimistic local toggle.

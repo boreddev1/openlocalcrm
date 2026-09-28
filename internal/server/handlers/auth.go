@@ -58,11 +58,10 @@ type UserPayload struct {
 }
 
 type LoginResponse struct {
-	Token        string       `json:"token,omitempty"`
-	RefreshToken string       `json:"refresh_token,omitempty"`
-	TOTPRequired bool         `json:"totp_required,omitempty"`
-	Message      string       `json:"message,omitempty"`
-	User         *UserPayload `json:"user,omitempty"`
+	TOTPRequired       bool         `json:"totp_required,omitempty"`
+	MustChangePassword bool         `json:"must_change_password,omitempty"`
+	Message            string       `json:"message,omitempty"`
+	User               *UserPayload `json:"user,omitempty"`
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -134,8 +133,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(LoginResponse{
-		Token:        res.Token,
-		RefreshToken: res.RefreshToken,
+		MustChangePassword: res.User.MustChangePassword,
 		User: &UserPayload{
 			UserID:    uuid.UUID(res.User.ID.Bytes).String(),
 			Email:     res.User.Email,
@@ -146,25 +144,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type RefreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
-}
-
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
-	var token string
-
-	// Check body first
-	var req RefreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
-		token = req.RefreshToken
-	} else if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
-		token = cookie.Value
-	}
-
-	if token == "" {
+	cookie, err := r.Cookie("refresh_token")
+	if err != nil || cookie.Value == "" {
 		http.Error(w, `{"error":"missing_token","message":"refresh token required"}`, http.StatusBadRequest)
 		return
 	}
+	token := cookie.Value
 
 	newToken, newRefreshToken, err := h.service.RefreshToken(r.Context(), token, auth.ClientIP(r), r.UserAgent())
 	if err != nil {
@@ -199,9 +185,8 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"token":         newToken,
-		"refresh_token": newRefreshToken,
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
 	})
 }
 
@@ -214,16 +199,14 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		_ = h.service.RevokeRefreshToken(r.Context(), refreshToken)
 	}
 
-	var accessToken string
-	if cookie, err := r.Cookie("access_token"); err == nil && cookie.Value != "" {
-		accessToken = cookie.Value
-	} else if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
-		accessToken = strings.TrimPrefix(authHeader, "Bearer ")
-	}
-	if accessToken != "" {
-		h.service.RevokeAccessToken(accessToken)
-	}
+	ClearAuthCookies(w, r)
 
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// ClearAuthCookies removes the session cookies (access_token, refresh_token, csrf_token).
+func ClearAuthCookies(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "access_token",
 		Value:    "",
@@ -245,9 +228,6 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 	auth.ClearCSRFCookie(w, isSecureRequest(r))
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
 type ChangePasswordRequest struct {
@@ -300,7 +280,8 @@ func (h *AuthHandler) SetupTOTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type VerifyTOTPRequest struct {
-	Code string `json:"code"`
+	Secret string `json:"secret"`
+	Code   string `json:"code"`
 }
 
 func (h *AuthHandler) VerifyTOTP(w http.ResponseWriter, r *http.Request) {
@@ -311,12 +292,12 @@ func (h *AuthHandler) VerifyTOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req VerifyTOTPRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" {
-		http.Error(w, `{"error":"invalid_request","message":"code is required"}`, http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" || req.Secret == "" {
+		http.Error(w, `{"error":"invalid_request","message":"code and secret are required"}`, http.StatusBadRequest)
 		return
 	}
 
-	err := h.service.VerifyTOTP(r.Context(), claims.UserID, req.Code)
+	err := h.service.VerifyTOTP(r.Context(), claims.UserID, req.Secret, req.Code)
 	if err != nil {
 		http.Error(w, `{"error":"totp_verification_failed","message":"`+err.Error()+`"}`, http.StatusBadRequest)
 		return

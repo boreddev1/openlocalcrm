@@ -71,17 +71,25 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 		t.Fatalf("expected 200 for admin login, got %d", res.StatusCode)
 	}
 	var loginData struct {
-		Token string `json:"token"`
-		User  struct {
+		User struct {
 			Email string `json:"email"`
 			Role  string `json:"role"`
 		} `json:"user"`
 	}
 	_ = json.NewDecoder(res.Body).Decode(&loginData)
-	if loginData.Token == "" || loginData.User.Role != "ADMIN" {
+	if loginData.User.Role != "ADMIN" {
 		t.Fatalf("invalid login response: %+v", loginData)
 	}
-	adminToken := loginData.Token
+	var adminToken string
+	for _, c := range res.Cookies() {
+		if c.Name == "access_token" {
+			adminToken = c.Value
+			break
+		}
+	}
+	if adminToken == "" {
+		t.Fatalf("expected access_token cookie from login")
+	}
 
 	// 4b. Legacy alias login (admin@mavalio.local) also succeeds
 	legacyPayload := []byte(`{"email":"admin@mavalio.local","password":"demo123"}`)
@@ -114,11 +122,16 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for sales login, got %d", res.StatusCode)
 	}
-	var salesData struct {
-		Token string `json:"token"`
+	var salesToken string
+	for _, c := range res.Cookies() {
+		if c.Name == "access_token" {
+			salesToken = c.Value
+			break
+		}
 	}
-	_ = json.NewDecoder(res.Body).Decode(&salesData)
-	salesToken := salesData.Token
+	if salesToken == "" {
+		t.Fatalf("expected access_token cookie from sales login")
+	}
 
 	// 7. RBAC Check: Sales user attempts to DELETE contact -> 403 Forbidden
 	delReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/contacts/44444444-4444-4444-4444-444444444441", nil)
