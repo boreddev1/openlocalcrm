@@ -481,6 +481,11 @@ func (q *InMemoryQuerier) CreateUser(ctx context.Context, arg db.CreateUserParam
 		}
 	}
 
+	status := arg.Status
+	if status == "" {
+		status = "ACTIVE"
+	}
+
 	u := db.User{
 		ID:           newUUID(),
 		Email:        arg.Email,
@@ -488,7 +493,7 @@ func (q *InMemoryQuerier) CreateUser(ctx context.Context, arg db.CreateUserParam
 		FirstName:    arg.FirstName,
 		LastName:     arg.LastName,
 		Role:         arg.Role,
-		Status:       arg.Status,
+		Status:       status,
 		CreatedAt:    nowTimestamptz(),
 		UpdatedAt:    nowTimestamptz(),
 	}
@@ -746,6 +751,9 @@ func (q *InMemoryQuerier) ListCompanies(ctx context.Context, arg db.ListCompanie
 
 	var list []db.Company
 	for _, c := range q.companies {
+		if arg.OwnerUserID.Valid && (!c.OwnerUserID.Valid || c.OwnerUserID.Bytes != arg.OwnerUserID.Bytes) {
+			continue
+		}
 		list = append(list, c)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -770,6 +778,9 @@ func (q *InMemoryQuerier) SearchCompanies(ctx context.Context, arg db.SearchComp
 	query := strings.ToLower(arg.Column1.String)
 	var list []db.Company
 	for _, c := range q.companies {
+		if arg.OwnerUserID.Valid && (!c.OwnerUserID.Valid || c.OwnerUserID.Bytes != arg.OwnerUserID.Bytes) {
+			continue
+		}
 		if strings.Contains(strings.ToLower(c.Name), query) ||
 			strings.Contains(strings.ToLower(c.Domain.String), query) ||
 			strings.Contains(strings.ToLower(c.AddressCity.String), query) {
@@ -899,6 +910,9 @@ func (q *InMemoryQuerier) ListContacts(ctx context.Context, arg db.ListContactsP
 
 	var list []db.Contact
 	for _, c := range q.contacts {
+		if arg.OwnerUserID.Valid && (!c.OwnerUserID.Valid || c.OwnerUserID.Bytes != arg.OwnerUserID.Bytes) {
+			continue
+		}
 		list = append(list, c)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -939,6 +953,9 @@ func (q *InMemoryQuerier) SearchContacts(ctx context.Context, arg db.SearchConta
 	query := strings.ToLower(arg.Column1.String)
 	var list []db.Contact
 	for _, c := range q.contacts {
+		if arg.OwnerUserID.Valid && (!c.OwnerUserID.Valid || c.OwnerUserID.Bytes != arg.OwnerUserID.Bytes) {
+			continue
+		}
 		if strings.Contains(strings.ToLower(c.FirstName), query) ||
 			strings.Contains(strings.ToLower(c.LastName), query) ||
 			strings.Contains(strings.ToLower(c.Email.String), query) ||
@@ -1139,6 +1156,9 @@ func (q *InMemoryQuerier) ListDeals(ctx context.Context, arg db.ListDealsParams)
 
 	var list []db.Deal
 	for _, d := range q.deals {
+		if arg.AssignedTo.Valid && (!d.AssignedTo.Valid || d.AssignedTo.Bytes != arg.AssignedTo.Bytes) {
+			continue
+		}
 		list = append(list, d)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -1156,13 +1176,16 @@ func (q *InMemoryQuerier) ListDeals(ctx context.Context, arg db.ListDealsParams)
 	return list, nil
 }
 
-func (q *InMemoryQuerier) ListDealsByStage(ctx context.Context, stage string) ([]db.Deal, error) {
+func (q *InMemoryQuerier) ListDealsByStage(ctx context.Context, arg db.ListDealsByStageParams) ([]db.Deal, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	var list []db.Deal
 	for _, d := range q.deals {
-		if d.Stage == stage {
+		if d.Stage == arg.Stage {
+			if arg.AssignedTo.Valid && (!d.AssignedTo.Valid || d.AssignedTo.Bytes != arg.AssignedTo.Bytes) {
+				continue
+			}
 			list = append(list, d)
 		}
 	}
@@ -1290,6 +1313,9 @@ func (q *InMemoryQuerier) ListTodos(ctx context.Context, arg db.ListTodosParams)
 
 	var list []db.Todo
 	for _, t := range q.todos {
+		if arg.AssignedTo.Valid && (!t.AssignedTo.Valid || t.AssignedTo.Bytes != arg.AssignedTo.Bytes) {
+			continue
+		}
 		list = append(list, t)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -1816,12 +1842,15 @@ func (q *InMemoryQuerier) GetEmailMessageByID(ctx context.Context, id pgtype.UUI
 	return msg, nil
 }
 
-func (q *InMemoryQuerier) ListEmailAccounts(ctx context.Context) ([]db.EmailAccount, error) {
+func (q *InMemoryQuerier) ListEmailAccounts(ctx context.Context, ownerUserID pgtype.UUID) ([]db.EmailAccount, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	var list []db.EmailAccount
 	for _, acc := range q.emailAccounts {
+		if ownerUserID.Valid && (!acc.OwnerUserID.Valid || acc.OwnerUserID.Bytes != ownerUserID.Bytes) {
+			continue
+		}
 		list = append(list, acc)
 	}
 	return list, nil
@@ -1927,6 +1956,7 @@ func (q *InMemoryQuerier) CreateAppointment(ctx context.Context, arg db.CreateAp
 		Provider:   arg.Provider,
 		IsPrivate:  arg.IsPrivate,
 		IsPushed:   arg.IsPushed,
+		UserID:     arg.UserID,
 		CreatedAt:  nowTimestamptz(),
 		UpdatedAt:  nowTimestamptz(),
 	}
@@ -1945,12 +1975,15 @@ func (q *InMemoryQuerier) GetAppointmentByID(ctx context.Context, id pgtype.UUID
 	return app, nil
 }
 
-func (q *InMemoryQuerier) ListAppointments(ctx context.Context) ([]db.Appointment, error) {
+func (q *InMemoryQuerier) ListAppointments(ctx context.Context, userID pgtype.UUID) ([]db.Appointment, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	var list []db.Appointment
 	for _, app := range q.appointments {
+		if userID.Valid && (!app.UserID.Valid || app.UserID.Bytes != userID.Bytes) {
+			continue
+		}
 		list = append(list, app)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -2020,6 +2053,7 @@ func (q *InMemoryQuerier) CreateNote(ctx context.Context, arg db.CreateNoteParam
 		Type:       arg.Type,
 		Author:     arg.Author,
 		Content:    arg.Content,
+		UserID:     arg.UserID,
 		CreatedAt:  nowTimestamptz(),
 		UpdatedAt:  nowTimestamptz(),
 	}
@@ -2038,12 +2072,15 @@ func (q *InMemoryQuerier) GetNoteByID(ctx context.Context, id pgtype.UUID) (db.N
 	return n, nil
 }
 
-func (q *InMemoryQuerier) ListNotes(ctx context.Context) ([]db.Note, error) {
+func (q *InMemoryQuerier) ListNotes(ctx context.Context, userID pgtype.UUID) ([]db.Note, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	var list []db.Note
 	for _, n := range q.notes {
+		if userID.Valid && (!n.UserID.Valid || n.UserID.Bytes != userID.Bytes) {
+			continue
+		}
 		list = append(list, n)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -2060,6 +2097,9 @@ func (q *InMemoryQuerier) ListNotesByEntity(ctx context.Context, arg db.ListNote
 	entityIDStr := uuidToStr(arg.EntityID)
 	for _, n := range q.notes {
 		if strings.EqualFold(n.EntityType, arg.EntityType) && uuidToStr(n.EntityID) == entityIDStr {
+			if arg.UserID.Valid && (!n.UserID.Valid || n.UserID.Bytes != arg.UserID.Bytes) {
+				continue
+			}
 			list = append(list, n)
 		}
 	}

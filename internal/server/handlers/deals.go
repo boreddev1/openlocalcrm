@@ -13,7 +13,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/deal"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
@@ -67,11 +66,12 @@ type RevokeDealRequest struct {
 }
 
 func (h *DealHandler) Create(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	var actorID pgtype.UUID
-	if claims != nil {
-		_ = actorID.Scan(claims.UserID.String())
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
 	}
+	actorID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
 
 	var req CreateDealRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -102,6 +102,16 @@ func (h *DealHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DealHandler) List(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var assignedTo pgtype.UUID
+	if claims.Role == "BENUTZER" {
+		_ = assignedTo.Scan(claims.UserID.String())
+	}
+
 	stage := r.URL.Query().Get("stage")
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
@@ -117,9 +127,9 @@ func (h *DealHandler) List(w http.ResponseWriter, r *http.Request) {
 	var deals []db.Deal
 	var err error
 	if stage != "" {
-		deals, err = h.service.ListByStage(r.Context(), stage, int32(limit), int32(offset))
+		deals, err = h.service.ListByStage(r.Context(), stage, assignedTo, int32(limit), int32(offset))
 	} else {
-		deals, err = h.service.List(r.Context(), int32(limit), int32(offset))
+		deals, err = h.service.List(r.Context(), int32(limit), int32(offset), assignedTo)
 	}
 	if err != nil {
 		http.Error(w, `{"error":"failed to list deals"}`, http.StatusInternalServerError)
@@ -135,6 +145,12 @@ func (h *DealHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DealHandler) Get(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	idStr := chi.URLParam(r, "id")
 	var dealID pgtype.UUID
 	if err := dealID.Scan(idStr); err != nil {
@@ -145,6 +161,11 @@ func (h *DealHandler) Get(w http.ResponseWriter, r *http.Request) {
 	dealItem, err := h.service.GetByID(r.Context(), dealID)
 	if err != nil {
 		writeDealError(w, err, "get")
+		return
+	}
+
+	if !canRead(claims, dealItem.AssignedTo) {
+		http.Error(w, `{"error":"forbidden","message":"insufficient permissions to view deal"}`, http.StatusForbidden)
 		return
 	}
 
@@ -161,11 +182,12 @@ type UpdateDealRequest struct {
 }
 
 func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	var actorID pgtype.UUID
-	if claims != nil {
-		_ = actorID.Scan(claims.UserID.String())
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
 	}
+	actorID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
 
 	idStr := chi.URLParam(r, "id")
 	var dealID pgtype.UUID
@@ -186,11 +208,9 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if claims != nil && claims.Role != "ADMIN" {
-		if !existing.AssignedTo.Valid || existing.AssignedTo.Bytes != claims.UserID {
-			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihnen zugewiesene Deals bearbeiten"}`, http.StatusForbidden)
-			return
-		}
+	if !canModify(claims, existing.AssignedTo) {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "Keine Berechtigung für diesen Datensatz")
+		return
 	}
 
 	title := req.Title
@@ -255,18 +275,27 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DealHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	if claims == nil || claims.Role != "ADMIN" {
-		http.Error(w, `{"error":"forbidden","message":"Löschen von Deals erfordert Administrator-Rechte"}`, http.StatusForbidden)
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
 		return
 	}
-	var actorID pgtype.UUID
-	_ = actorID.Scan(claims.UserID.String())
+	actorID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
 
 	idStr := chi.URLParam(r, "id")
 	var dealID pgtype.UUID
 	if err := dealID.Scan(idStr); err != nil {
 		http.Error(w, `{"error":"invalid_id"}`, http.StatusBadRequest)
+		return
+	}
+
+	existing, err := h.service.GetByID(r.Context(), dealID)
+	if err != nil {
+		writeDealError(w, err, "get for delete")
+		return
+	}
+	if !canModify(claims, existing.AssignedTo) {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "Keine Berechtigung für diesen Datensatz")
 		return
 	}
 
@@ -280,11 +309,12 @@ func (h *DealHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DealHandler) AttachSolarCalculation(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	var actorID pgtype.UUID
-	if claims != nil {
-		_ = actorID.Scan(claims.UserID.String())
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
 	}
+	actorID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
 
 	idStr := chi.URLParam(r, "id")
 	var dealID pgtype.UUID
@@ -305,11 +335,9 @@ func (h *DealHandler) AttachSolarCalculation(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if claims != nil && claims.Role != "ADMIN" {
-		if !existing.AssignedTo.Valid || existing.AssignedTo.Bytes != claims.UserID {
-			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihnen zugewiesene Deals bearbeiten"}`, http.StatusForbidden)
-			return
-		}
+	if !canModify(claims, existing.AssignedTo) {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "Keine Berechtigung für diesen Datensatz")
+		return
 	}
 
 	val := existing.Value
@@ -339,16 +367,27 @@ func (h *DealHandler) AttachSolarCalculation(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *DealHandler) Revoke(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	var actorID pgtype.UUID
-	if claims != nil {
-		_ = actorID.Scan(claims.UserID.String())
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
 	}
+	actorID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
 
 	idStr := chi.URLParam(r, "id")
 	var dealID pgtype.UUID
 	if err := dealID.Scan(idStr); err != nil {
 		http.Error(w, `{"error":"invalid_id"}`, http.StatusBadRequest)
+		return
+	}
+
+	existing, err := h.service.GetByID(r.Context(), dealID)
+	if err != nil {
+		writeDealError(w, err, "get for revoke")
+		return
+	}
+	if !canModify(claims, existing.AssignedTo) {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "Keine Berechtigung für diesen Datensatz")
 		return
 	}
 

@@ -299,6 +299,17 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateC
 		return db.Contact{}, err
 	}
 
+	if actorID.Valid {
+		if updated, err := s.queries.SetContactOwner(ctx, db.SetContactOwnerParams{
+			ID:          contact.ID,
+			OwnerUserID: actorID,
+		}); err != nil {
+			log.Printf("[contact] failed to set initial owner: %v", err)
+		} else {
+			contact = updated
+		}
+	}
+
 	if s.audit != nil {
 		if err := s.audit.Log(ctx, actorID, "CONTACT", contact.ID, "CREATE", contact, "", ""); err != nil {
 			log.Printf("[audit] failed to log contact create: %v", err)
@@ -308,27 +319,45 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateC
 	return contact, nil
 }
 
+func (s *Service) SetOwner(ctx context.Context, id pgtype.UUID, ownerID pgtype.UUID) error {
+	_, err := s.queries.SetContactOwner(ctx, db.SetContactOwnerParams{
+		ID:          id,
+		OwnerUserID: ownerID,
+	})
+	return err
+}
+
 func (s *Service) GetByID(ctx context.Context, id pgtype.UUID) (db.Contact, error) {
 	return s.queries.GetContactByID(ctx, id)
 }
 
-func (s *Service) List(ctx context.Context, limit, offset int32) ([]db.Contact, error) {
+func (s *Service) List(ctx context.Context, limit, offset int32, ownerID ...pgtype.UUID) ([]db.Contact, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
+	var owner pgtype.UUID
+	if len(ownerID) > 0 {
+		owner = ownerID[0]
+	}
 	return s.queries.ListContacts(ctx, db.ListContactsParams{
-		Limit:  limit,
-		Offset: offset,
+		Limit:       limit,
+		Offset:      offset,
+		OwnerUserID: owner,
 	})
 }
 
-func (s *Service) Search(ctx context.Context, query string, limit int32) ([]db.Contact, error) {
+func (s *Service) Search(ctx context.Context, query string, limit int32, ownerID ...pgtype.UUID) ([]db.Contact, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
+	var owner pgtype.UUID
+	if len(ownerID) > 0 {
+		owner = ownerID[0]
+	}
 	return s.queries.SearchContacts(ctx, db.SearchContactsParams{
-		Column1: pgtype.Text{String: query, Valid: true},
-		Limit:   limit,
+		Column1:     pgtype.Text{String: query, Valid: true},
+		Limit:       limit,
+		OwnerUserID: owner,
 	})
 }
 

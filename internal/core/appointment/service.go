@@ -39,6 +39,7 @@ type Appointment struct {
 	AssignedTo  string    `json:"assigned_to,omitempty"`
 	Type        string    `json:"type,omitempty"`
 	IsPushed    bool      `json:"is_pushed"`
+	UserID      *string   `json:"user_id,omitempty"`
 }
 
 type CreateAppointmentInput struct {
@@ -58,6 +59,7 @@ type CreateAppointmentInput struct {
 	IsExternal   bool      `json:"is_external,omitempty"`
 	Provider     string    `json:"provider,omitempty"`
 	IsPrivate    bool      `json:"is_private,omitempty"`
+	UserID       *string   `json:"user_id,omitempty"`
 }
 
 type Service struct {
@@ -95,7 +97,7 @@ func uuidToStrPtr(u pgtype.UUID) *string {
 	return &str
 }
 
-func (s *Service) List(ctx context.Context, pagination ...int) ([]Appointment, error) {
+func (s *Service) List(ctx context.Context, userID pgtype.UUID, pagination ...int) ([]Appointment, error) {
 	limit := 100
 	offset := 0
 	if len(pagination) > 0 && pagination[0] > 0 {
@@ -109,7 +111,7 @@ func (s *Service) List(ctx context.Context, pagination ...int) ([]Appointment, e
 	}
 
 	if s.querier != nil {
-		dbApps, err := s.querier.ListAppointments(ctx)
+		dbApps, err := s.querier.ListAppointments(ctx, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -142,6 +144,7 @@ func (s *Service) List(ctx context.Context, pagination ...int) ([]Appointment, e
 				Provider:   a.Provider,
 				IsPrivate:  a.IsPrivate,
 				IsPushed:   a.IsPushed,
+				UserID:     uuidToStrPtr(a.UserID),
 			}
 		}
 		return result, nil
@@ -149,14 +152,23 @@ func (s *Service) List(ctx context.Context, pagination ...int) ([]Appointment, e
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if offset >= len(s.inMem) {
+	var filtered []Appointment
+	for _, app := range s.inMem {
+		if userID.Valid {
+			if app.UserID == nil || *app.UserID != uuid.UUID(userID.Bytes).String() {
+				continue
+			}
+		}
+		filtered = append(filtered, app)
+	}
+	if offset >= len(filtered) {
 		return []Appointment{}, nil
 	}
 	end := offset + limit
-	if end > len(s.inMem) {
-		end = len(s.inMem)
+	if end > len(filtered) {
+		end = len(filtered)
 	}
-	return append([]Appointment(nil), s.inMem[offset:end]...), nil
+	return append([]Appointment(nil), filtered[offset:end]...), nil
 }
 
 func (s *Service) GetByID(ctx context.Context, id string) (Appointment, error) {
@@ -189,6 +201,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (Appointment, error) {
 			Provider:   a.Provider,
 			IsPrivate:  a.IsPrivate,
 			IsPushed:   a.IsPushed,
+			UserID:     uuidToStrPtr(a.UserID),
 		}, nil
 	}
 
@@ -237,6 +250,7 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateA
 			Provider:   provider,
 			IsPrivate:  input.IsPrivate,
 			IsPushed:   false,
+			UserID:     actorID,
 		})
 		if err == nil {
 			app := Appointment{
@@ -256,6 +270,7 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateA
 				Provider:    created.Provider,
 				IsPrivate:   created.IsPrivate,
 				IsPushed:    created.IsPushed,
+				UserID:      uuidToStrPtr(created.UserID),
 				ContactName: input.ContactName,
 				CompanyName: input.CompanyName,
 			}

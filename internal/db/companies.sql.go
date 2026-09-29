@@ -110,17 +110,19 @@ func (q *Queries) GetCompanyByID(ctx context.Context, id pgtype.UUID) (Company, 
 
 const listCompanies = `-- name: ListCompanies :many
 SELECT id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at, owner_user_id FROM companies
+WHERE ($3::uuid IS NULL OR owner_user_id = $3::uuid)
 ORDER BY name ASC
 LIMIT $1 OFFSET $2
 `
 
 type ListCompaniesParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit       int32       `json:"limit"`
+	Offset      int32       `json:"offset"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
 }
 
 func (q *Queries) ListCompanies(ctx context.Context, arg ListCompaniesParams) ([]Company, error) {
-	rows, err := q.db.Query(ctx, listCompanies, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listCompanies, arg.Limit, arg.Offset, arg.OwnerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -155,18 +157,20 @@ func (q *Queries) ListCompanies(ctx context.Context, arg ListCompaniesParams) ([
 
 const searchCompanies = `-- name: SearchCompanies :many
 SELECT id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at, owner_user_id FROM companies
-WHERE name ILIKE '%' || $1 || '%' OR domain ILIKE '%' || $1 || '%'
+WHERE (name ILIKE '%' || $1 || '%' OR domain ILIKE '%' || $1 || '%')
+  AND ($3::uuid IS NULL OR owner_user_id = $3::uuid)
 ORDER BY name ASC
 LIMIT $2
 `
 
 type SearchCompaniesParams struct {
-	Column1 pgtype.Text `json:"column_1"`
-	Limit   int32       `json:"limit"`
+	Column1     pgtype.Text `json:"column_1"`
+	Limit       int32       `json:"limit"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
 }
 
 func (q *Queries) SearchCompanies(ctx context.Context, arg SearchCompaniesParams) ([]Company, error) {
-	rows, err := q.db.Query(ctx, searchCompanies, arg.Column1, arg.Limit)
+	rows, err := q.db.Query(ctx, searchCompanies, arg.Column1, arg.Limit, arg.OwnerUserID)
 	if err != nil {
 		return nil, err
 	}

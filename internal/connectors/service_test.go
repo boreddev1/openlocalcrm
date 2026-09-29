@@ -14,19 +14,26 @@ import (
 
 type MockContactQuerier struct {
 	db.Querier
-	created []db.CreateContactParams
+	created     []db.CreateContactParams
+	lastContact db.Contact
 }
 
 func (m *MockContactQuerier) CreateContact(ctx context.Context, arg db.CreateContactParams) (db.Contact, error) {
 	m.created = append(m.created, arg)
 	var id pgtype.UUID
 	_ = id.Scan("33333333-3333-3333-3333-333333333333")
-	return db.Contact{
+	m.lastContact = db.Contact{
 		ID:        id,
 		FirstName: arg.FirstName,
 		LastName:  arg.LastName,
 		Email:     arg.Email,
-	}, nil
+	}
+	return m.lastContact, nil
+}
+
+func (m *MockContactQuerier) SetContactOwner(ctx context.Context, arg db.SetContactOwnerParams) (db.Contact, error) {
+	m.lastContact.OwnerUserID = arg.OwnerUserID
+	return m.lastContact, nil
 }
 
 func TestConnectorLeadIntake(t *testing.T) {

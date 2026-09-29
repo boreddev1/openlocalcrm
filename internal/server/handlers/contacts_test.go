@@ -141,7 +141,12 @@ func TestContactHandler_UpdatePreservesOmittedConsentAndNullableValues(t *testin
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", id)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/contacts/"+id, bytes.NewBufferString(`{"first_name":"Klaus","last_name":"Schneider"}`))
-	req = req.WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+	reqCtx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+	reqCtx = context.WithValue(reqCtx, auth.UserContextKey, &auth.AccessClaims{
+		UserID: uuid.UUID(actorID.Bytes),
+		Role:   "ADMIN",
+	})
+	req = req.WithContext(reqCtx)
 	rec := httptest.NewRecorder()
 	h.Update(rec, req)
 	if rec.Code != http.StatusOK {
@@ -185,7 +190,12 @@ func TestContactHandler_UpdateClearsExplicitNulls(t *testing.T) {
 	rctx.URLParams.Add("id", id)
 	body := `{"first_name":"Klaus","last_name":"Schneider","stromverbrauch_kwh":null,"gasverbrauch_kwh":null,"eigentuemer_status":null}`
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/contacts/"+id, bytes.NewBufferString(body))
-	req = req.WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+	reqCtx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+	reqCtx = context.WithValue(reqCtx, auth.UserContextKey, &auth.AccessClaims{
+		UserID: uuid.UUID(actorID.Bytes),
+		Role:   "ADMIN",
+	})
+	req = req.WithContext(reqCtx)
 	rec := httptest.NewRecorder()
 	h.Update(rec, req)
 	if rec.Code != http.StatusOK {
@@ -205,7 +215,8 @@ func TestContactHandler_UpdateRejectsNullConsent(t *testing.T) {
 	querier := demo.NewInMemoryQuerier()
 	svc := contact.NewService(querier, audit.NewService(querier))
 	h := handlers.NewContactHandler(svc)
-	created, err := svc.Create(context.Background(), pgtype.UUID{}, contact.CreateContactInput{
+	actorID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	created, err := svc.Create(context.Background(), actorID, contact.CreateContactInput{
 		FirstName: "Klaus",
 		LastName:  "Schneider",
 	})
@@ -218,7 +229,12 @@ func TestContactHandler_UpdateRejectsNullConsent(t *testing.T) {
 	rctx.URLParams.Add("id", id)
 	body := `{"first_name":"Klaus","last_name":"Schneider","consent_email":null}`
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/contacts/"+id, bytes.NewBufferString(body))
-	req = req.WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+	reqCtx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+	reqCtx = context.WithValue(reqCtx, auth.UserContextKey, &auth.AccessClaims{
+		UserID: uuid.UUID(actorID.Bytes),
+		Role:   "ADMIN",
+	})
+	req = req.WithContext(reqCtx)
 	rec := httptest.NewRecorder()
 	h.Update(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -242,6 +258,10 @@ func TestContactHandler_RejectsInvalidEnergy(t *testing.T) {
 			svc := contact.NewService(querier, audit.NewService(querier))
 			h := handlers.NewContactHandler(svc)
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/contacts", bytes.NewBufferString(tt.body))
+			req = req.WithContext(context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+				UserID: uuid.New(),
+				Role:   "ADMIN",
+			}))
 			rec := httptest.NewRecorder()
 			h.Create(rec, req)
 			if rec.Code != http.StatusBadRequest {

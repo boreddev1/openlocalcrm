@@ -31,6 +31,13 @@ func (m *mockContactDB) CreateContact(ctx context.Context, arg db.CreateContactP
 	}, nil
 }
 
+func (m *mockContactDB) SetContactOwner(ctx context.Context, arg db.SetContactOwnerParams) (db.Contact, error) {
+	return db.Contact{
+		ID:          arg.ID,
+		OwnerUserID: arg.OwnerUserID,
+	}, nil
+}
+
 func TestConnectorHandler_LeadIntake(t *testing.T) {
 	contactSvc := contact.NewService(&mockContactDB{}, nil)
 	engine := connectors.NewEngine(contactSvc, nil, "valid-token")

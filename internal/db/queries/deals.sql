@@ -22,12 +22,14 @@ WHERE id = $1 LIMIT 1;
 
 -- name: ListDeals :many
 SELECT * FROM deals
+WHERE (sqlc.narg('assigned_to')::uuid IS NULL OR assigned_to = sqlc.narg('assigned_to')::uuid)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 
 -- name: ListDealsByStage :many
 SELECT * FROM deals
 WHERE stage = $1
+  AND (sqlc.narg('assigned_to')::uuid IS NULL OR assigned_to = sqlc.narg('assigned_to')::uuid)
 ORDER BY created_at DESC;
 
 -- name: UpdateDealStage :one

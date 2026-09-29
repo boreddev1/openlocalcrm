@@ -123,17 +123,19 @@ func (q *Queries) GetDealByID(ctx context.Context, id pgtype.UUID) (Deal, error)
 
 const listDeals = `-- name: ListDeals :many
 SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags FROM deals
+WHERE ($3::uuid IS NULL OR assigned_to = $3::uuid)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListDealsParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit      int32       `json:"limit"`
+	Offset     int32       `json:"offset"`
+	AssignedTo pgtype.UUID `json:"assigned_to"`
 }
 
 func (q *Queries) ListDeals(ctx context.Context, arg ListDealsParams) ([]Deal, error) {
-	rows, err := q.db.Query(ctx, listDeals, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listDeals, arg.Limit, arg.Offset, arg.AssignedTo)
 	if err != nil {
 		return nil, err
 	}
@@ -172,11 +174,17 @@ func (q *Queries) ListDeals(ctx context.Context, arg ListDealsParams) ([]Deal, e
 const listDealsByStage = `-- name: ListDealsByStage :many
 SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags FROM deals
 WHERE stage = $1
+  AND ($2::uuid IS NULL OR assigned_to = $2::uuid)
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListDealsByStage(ctx context.Context, stage string) ([]Deal, error) {
-	rows, err := q.db.Query(ctx, listDealsByStage, stage)
+type ListDealsByStageParams struct {
+	Stage      string      `json:"stage"`
+	AssignedTo pgtype.UUID `json:"assigned_to"`
+}
+
+func (q *Queries) ListDealsByStage(ctx context.Context, arg ListDealsByStageParams) ([]Deal, error) {
+	rows, err := q.db.Query(ctx, listDealsByStage, arg.Stage, arg.AssignedTo)
 	if err != nil {
 		return nil, err
 	}

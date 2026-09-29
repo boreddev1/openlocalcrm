@@ -59,7 +59,7 @@ func (s *Service) SetTrigger(trigger EventTrigger) {
 }
 
 func (s *Service) EnsureDefaultAccount(ctx context.Context) (pgtype.UUID, error) {
-	accounts, err := s.queries.ListEmailAccounts(ctx)
+	accounts, err := s.queries.ListEmailAccounts(ctx, pgtype.UUID{})
 	if err == nil && len(accounts) > 0 {
 		return accounts[0].ID, nil
 	}
@@ -375,10 +375,14 @@ func (s *Service) CreateAccount(ctx context.Context, input AccountInput) (db.Ema
 	})
 }
 
-// ListAccounts returns every email account. Passwords remain encrypted;
+// ListAccounts returns email accounts, optionally filtered by owner. Passwords remain encrypted;
 // callers must never decrypt them for display.
-func (s *Service) ListAccounts(ctx context.Context) ([]db.EmailAccount, error) {
-	return s.queries.ListEmailAccounts(ctx)
+func (s *Service) ListAccounts(ctx context.Context, ownerID ...pgtype.UUID) ([]db.EmailAccount, error) {
+	var uid pgtype.UUID
+	if len(ownerID) > 0 {
+		uid = ownerID[0]
+	}
+	return s.queries.ListEmailAccounts(ctx, uid)
 }
 
 // GetAccount returns a single email account by ID.

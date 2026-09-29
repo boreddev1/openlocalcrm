@@ -19,7 +19,7 @@ func TestAppointmentService_CRUD_And_ICS(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. List initial seeded appointments
-	list, err := svc.List(ctx)
+	list, err := svc.List(ctx, pgtype.UUID{})
 	if err != nil {
 		t.Fatalf("failed listing appointments: %v", err)
 	}

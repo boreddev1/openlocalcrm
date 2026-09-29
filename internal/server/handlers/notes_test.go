@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/note"
 	"github.com/openlocalcrm/openlocalcrm/internal/server/handlers"
 	"github.com/openlocalcrm/openlocalcrm/internal/sse"
@@ -22,6 +24,12 @@ func TestNoteHandlerEndpoints(t *testing.T) {
 	h := handlers.NewNoteHandler(svc, nil)
 
 	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := &auth.AccessClaims{UserID: uuid.New(), Email: "admin@example.de", Role: "ADMIN"}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), auth.UserContextKey, claims)))
+		})
+	})
 	r.Get("/notes", h.List)
 	r.Post("/notes", h.Create)
 	r.Get("/notes/{id}", h.Get)

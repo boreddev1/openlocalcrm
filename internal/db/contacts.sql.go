@@ -173,17 +173,19 @@ func (q *Queries) GetContactByID(ctx context.Context, id pgtype.UUID) (Contact, 
 
 const listContacts = `-- name: ListContacts :many
 SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
+WHERE ($3::uuid IS NULL OR owner_user_id = $3::uuid)
 ORDER BY last_name ASC, first_name ASC
 LIMIT $1 OFFSET $2
 `
 
 type ListContactsParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit       int32       `json:"limit"`
+	Offset      int32       `json:"offset"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
 }
 
 func (q *Queries) ListContacts(ctx context.Context, arg ListContactsParams) ([]Contact, error) {
-	rows, err := q.db.Query(ctx, listContacts, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listContacts, arg.Limit, arg.Offset, arg.OwnerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -343,21 +345,23 @@ func (q *Queries) ListInactiveContacts(ctx context.Context, arg ListInactiveCont
 
 const searchContacts = `-- name: SearchContacts :many
 SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
-WHERE first_name ILIKE '%' || $1 || '%'
+WHERE (first_name ILIKE '%' || $1 || '%'
    OR last_name ILIKE '%' || $1 || '%'
    OR email ILIKE '%' || $1 || '%'
-   OR phone ILIKE '%' || $1 || '%'
+   OR phone ILIKE '%' || $1 || '%')
+  AND ($3::uuid IS NULL OR owner_user_id = $3::uuid)
 ORDER BY last_name ASC
 LIMIT $2
 `
 
 type SearchContactsParams struct {
-	Column1 pgtype.Text `json:"column_1"`
-	Limit   int32       `json:"limit"`
+	Column1     pgtype.Text `json:"column_1"`
+	Limit       int32       `json:"limit"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
 }
 
 func (q *Queries) SearchContacts(ctx context.Context, arg SearchContactsParams) ([]Contact, error) {
-	rows, err := q.db.Query(ctx, searchContacts, arg.Column1, arg.Limit)
+	rows, err := q.db.Query(ctx, searchContacts, arg.Column1, arg.Limit, arg.OwnerUserID)
 	if err != nil {
 		return nil, err
 	}

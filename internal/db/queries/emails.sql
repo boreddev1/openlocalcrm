@@ -21,6 +21,7 @@ RETURNING *;
 -- name: ListEmailAccounts :many
 SELECT * FROM email_accounts
 WHERE is_active = TRUE
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR owner_user_id = sqlc.narg('owner_user_id')::uuid)
 ORDER BY name ASC;
 
 -- name: GetEmailAccountByID :one

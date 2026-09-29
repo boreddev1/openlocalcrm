@@ -34,6 +34,7 @@ WHERE id = $1 LIMIT 1;
 
 -- name: ListContacts :many
 SELECT * FROM contacts
+WHERE (sqlc.narg('owner_user_id')::uuid IS NULL OR owner_user_id = sqlc.narg('owner_user_id')::uuid)
 ORDER BY last_name ASC, first_name ASC
 LIMIT $1 OFFSET $2;
 
@@ -44,10 +45,11 @@ ORDER BY last_name ASC, first_name ASC;
 
 -- name: SearchContacts :many
 SELECT * FROM contacts
-WHERE first_name ILIKE '%' || $1 || '%'
+WHERE (first_name ILIKE '%' || $1 || '%'
    OR last_name ILIKE '%' || $1 || '%'
    OR email ILIKE '%' || $1 || '%'
-   OR phone ILIKE '%' || $1 || '%'
+   OR phone ILIKE '%' || $1 || '%')
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR owner_user_id = sqlc.narg('owner_user_id')::uuid)
 ORDER BY last_name ASC
 LIMIT $2;
 

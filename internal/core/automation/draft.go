@@ -41,7 +41,7 @@ func (d *AIDrafter) DraftEmail(ctx context.Context, template string, targetType,
 	}
 
 	// 1. Resolve active sender account (never creates fake demo accounts)
-	accounts, err := d.queries.ListEmailAccounts(ctx)
+	accounts, err := d.queries.ListEmailAccounts(ctx, pgtype.UUID{})
 	if err != nil {
 		return fmt.Errorf("fehler beim laden der e-mail-konten: %w", err)
 	}

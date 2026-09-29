@@ -324,6 +324,7 @@ func (q *failingRevokeQuerier) RevokeDeal(context.Context, db.RevokeDealParams) 
 }
 
 func TestDealHandler_RevokeErrorSemantics(t *testing.T) {
+	claims := &auth.AccessClaims{UserID: uuid.New(), Role: "ADMIN"}
 	t.Run("missing", func(t *testing.T) {
 		querier := demo.NewInMemoryQuerier()
 		h := handlers.NewDealHandler(deal.NewService(querier, nil))
@@ -331,7 +332,9 @@ func TestDealHandler_RevokeErrorSemantics(t *testing.T) {
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("id", id)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/deals/"+id+"/revoke", bytes.NewBufferString(`{}`))
-		req = req.WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+		ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+		ctx = context.WithValue(ctx, auth.UserContextKey, claims)
+		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 		h.Revoke(rec, req)
 		require.Equal(t, http.StatusNotFound, rec.Code)
@@ -346,7 +349,9 @@ func TestDealHandler_RevokeErrorSemantics(t *testing.T) {
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("id", idString)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/deals/"+idString+"/revoke", bytes.NewBufferString(`{}`))
-		req = req.WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+		ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+		ctx = context.WithValue(ctx, auth.UserContextKey, claims)
+		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 		h.Revoke(rec, req)
 		require.Equal(t, http.StatusInternalServerError, rec.Code)

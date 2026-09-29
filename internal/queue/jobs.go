@@ -88,7 +88,7 @@ type EmailSyncAllWorker struct {
 }
 
 func (w *EmailSyncAllWorker) Work(ctx context.Context, job *river.Job[EmailSyncAllArgs]) error {
-	accounts, err := w.deps.Queries.ListEmailAccounts(ctx)
+	accounts, err := w.deps.Queries.ListEmailAccounts(ctx, pgtype.UUID{})
 	if err != nil {
 		return fmt.Errorf("email sync fan-out: failed to list accounts: %w", err)
 	}

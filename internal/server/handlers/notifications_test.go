@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/notification"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
@@ -31,8 +32,11 @@ func TestNotificationHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	claims := &auth.AccessClaims{UserID: uuid.New(), Email: "admin@example.de", Role: "ADMIN"}
+
 	t.Run("ListUnread", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/notifications", nil)
+		req = req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, claims))
 		rec := httptest.NewRecorder()
 
 		h.ListUnread(rec, req)
@@ -48,7 +52,9 @@ func TestNotificationHandler(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPut, "/api/notifications/invalid-id/read", nil)
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("id", "not-a-uuid")
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+		ctx = context.WithValue(ctx, auth.UserContextKey, claims)
+		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 
 		h.MarkRead(rec, req)
@@ -60,7 +66,9 @@ func TestNotificationHandler(t *testing.T) {
 		rctx := chi.NewRouteContext()
 		idStr := uuid.UUID(notif.ID.Bytes).String()
 		rctx.URLParams.Add("id", idStr)
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+		ctx = context.WithValue(ctx, auth.UserContextKey, claims)
+		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 
 		h.MarkRead(rec, req)
@@ -69,6 +77,7 @@ func TestNotificationHandler(t *testing.T) {
 
 	t.Run("MarkAllRead", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPut, "/api/notifications/read-all", nil)
+		req = req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, claims))
 		rec := httptest.NewRecorder()
 
 		h.MarkAllRead(rec, req)

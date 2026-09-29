@@ -112,13 +112,18 @@ func (s *Service) UpdateStatus(ctx context.Context, actorID, todoID pgtype.UUID,
 	return todo, nil
 }
 
-func (s *Service) List(ctx context.Context, limit, offset int32) ([]db.Todo, error) {
+func (s *Service) List(ctx context.Context, limit, offset int32, assignedTo ...pgtype.UUID) ([]db.Todo, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
+	var assignee pgtype.UUID
+	if len(assignedTo) > 0 {
+		assignee = assignedTo[0]
+	}
 	return s.queries.ListTodos(ctx, db.ListTodosParams{
-		Limit:  limit,
-		Offset: offset,
+		Limit:      limit,
+		Offset:     offset,
+		AssignedTo: assignee,
 	})
 }
 

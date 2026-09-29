@@ -45,8 +45,8 @@ func requestMeta(r *http.Request, claims *auth.AccessClaims) backup.RequestMeta 
 }
 
 func adminClaims(r *http.Request) (*auth.AccessClaims, bool) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	return claims, claims != nil && claims.Role == "ADMIN"
+	claims, ok := claimsFrom(r)
+	return claims, ok && claims.Role == "ADMIN"
 }
 
 // Export streams the full backup envelope straight to the client. Rows are

@@ -79,7 +79,10 @@ func (s *Service) ListUnread(ctx context.Context, userID *pgtype.UUID, limit int
 }
 
 func (s *Service) MarkAsRead(ctx context.Context, id pgtype.UUID, userID *pgtype.UUID) error {
-	if userID != nil && s.queries != nil {
+	if userID == nil || !userID.Valid {
+		return fmt.Errorf("user_id required")
+	}
+	if s.queries != nil {
 		notifications, err := s.queries.ListAllNotifications(ctx, db.ListAllNotificationsParams{
 			UserID: *userID,
 			Limit:  1000,

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/appointment"
 )
 
@@ -26,12 +26,21 @@ func NewAppointmentHandler(svc *appointment.Service) *AppointmentHandler {
 }
 
 func (h *AppointmentHandler) List(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
+	}
+	var uid pgtype.UUID
+	if claims.Role == "BENUTZER" {
+		uid = pgtype.UUID{Bytes: claims.UserID, Valid: true}
+	}
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 	limit, _ := strconv.Atoi(limitStr)
 	offset, _ := strconv.Atoi(offsetStr)
 
-	apps, err := h.svc.List(r.Context(), limit, offset)
+	apps, err := h.svc.List(r.Context(), uid, limit, offset)
 	if err != nil {
 		http.Error(w, `{"error":"failed to list appointments"}`, http.StatusInternalServerError)
 		return
@@ -67,8 +76,8 @@ func (h *AppointmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actorID := pgtype.UUID{Valid: false}
-	if claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims); ok && claims != nil {
-		_ = actorID.Scan(claims.UserID)
+	if claims, ok := claimsFrom(r); ok {
+		actorID = pgtype.UUID{Bytes: claims.UserID, Valid: true}
 	}
 
 	app, err := h.svc.Create(r.Context(), actorID, appointment.CreateAppointmentInput{
@@ -97,19 +106,25 @@ func (h *AppointmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AppointmentHandler) Update(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
+	}
 	id := chi.URLParam(r, "id")
 
-	if claims != nil && claims.Role != "ADMIN" {
-		existing, err := h.svc.GetByID(r.Context(), id)
-		if err != nil {
-			http.Error(w, `{"error":"appointment not found"}`, http.StatusNotFound)
-			return
-		}
-		if existing.AssignedTo != "" && existing.AssignedTo != claims.Email && existing.AssignedTo != claims.UserID.String() {
-			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihre eigenen Termine bearbeiten"}`, http.StatusForbidden)
-			return
-		}
+	existing, err := h.svc.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, `{"error":"appointment not found"}`, http.StatusNotFound)
+		return
+	}
+	var ownerUUID pgtype.UUID
+	if existing.UserID != nil && *existing.UserID != "" {
+		_ = ownerUUID.Scan(*existing.UserID)
+	}
+	if !canModify(claims, ownerUUID) {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "Keine Berechtigung für diesen Datensatz")
+		return
 	}
 
 	var input appointment.Appointment
@@ -118,6 +133,10 @@ func (h *AppointmentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.ID = id
+	if !ownerUUID.Valid {
+		uidStr := claims.UserID.String()
+		input.UserID = &uidStr
+	}
 
 	app, err := h.svc.Update(r.Context(), input)
 	if err != nil {
@@ -130,19 +149,25 @@ func (h *AppointmentHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AppointmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
+	}
 	id := chi.URLParam(r, "id")
 
-	if claims != nil && claims.Role != "ADMIN" {
-		existing, err := h.svc.GetByID(r.Context(), id)
-		if err != nil {
-			http.Error(w, `{"error":"appointment not found"}`, http.StatusNotFound)
-			return
-		}
-		if existing.AssignedTo != "" && existing.AssignedTo != claims.Email && existing.AssignedTo != claims.UserID.String() {
-			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihre eigenen Termine löschen"}`, http.StatusForbidden)
-			return
-		}
+	existing, err := h.svc.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, `{"error":"appointment not found"}`, http.StatusNotFound)
+		return
+	}
+	var ownerUUID pgtype.UUID
+	if existing.UserID != nil && *existing.UserID != "" {
+		_ = ownerUUID.Scan(*existing.UserID)
+	}
+	if !canModify(claims, ownerUUID) {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "Keine Berechtigung für diesen Datensatz")
+		return
 	}
 
 	if err := h.svc.Delete(r.Context(), id); err != nil {
@@ -155,6 +180,11 @@ func (h *AppointmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AppointmentHandler) DownloadICS(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
+	}
 	id := chi.URLParam(r, "id")
 	app, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
@@ -166,12 +196,14 @@ func (h *AppointmentHandler) DownloadICS(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	if claims != nil && claims.Role != "ADMIN" {
-		if app.AssignedTo != "" && app.AssignedTo != claims.Email && app.AssignedTo != claims.UserID.String() {
-			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihre eigenen Termine als ICS exportieren"}`, http.StatusForbidden)
-			return
-		}
+	var ownerUUID pgtype.UUID
+	if app.UserID != nil && *app.UserID != "" {
+		_ = ownerUUID.Scan(*app.UserID)
+	}
+	isOwner := (ownerUUID.Valid && uuid.UUID(ownerUUID.Bytes) == claims.UserID) || (app.AssignedTo != "" && app.AssignedTo == claims.Email)
+	if claims.Role != "ADMIN" && !isOwner {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "Sie können nur Ihre eigenen Termine als ICS exportieren")
+		return
 	}
 
 	icsContent := h.svc.GenerateICS(app)

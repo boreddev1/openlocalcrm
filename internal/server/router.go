@@ -179,6 +179,7 @@ func NewRouter(cfg Config) http.Handler {
 	var settingsH *handlers.SettingsHandler
 	var automationH *handlers.AutomationHandler
 	var sessionH *handlers.SessionHandler
+	var ownershipAdminH *handlers.OwnershipAdminHandler
 	var authLimiter *auth.RateLimiter
 	var aiLimiter *auth.RateLimiter
 
@@ -269,6 +270,7 @@ func NewRouter(cfg Config) http.Handler {
 		settingsH = handlers.NewSettingsHandler()
 		automationH = handlers.NewAutomationHandler(automationSvc)
 		sessionH = handlers.NewSessionHandler(authSvc, cfg.SSEHub)
+		ownershipAdminH = handlers.NewOwnershipAdminHandler(cfg.DB, auditSvc)
 	}
 
 	if authLimiter == nil {
@@ -382,7 +384,7 @@ func NewRouter(cfg Config) http.Handler {
 			// Protected User Management (Admin team endpoints)
 			if userH != nil {
 				protected.Route("/users", func(ur chi.Router) {
-					ur.Use(auth.RequireRole("ADMIN"))
+					ur.Use(auth.RequirePermission(auth.PermUsersAdmin))
 					ur.Get("/", userH.List)
 					ur.Post("/invite", userH.Invite)
 					ur.Put("/{id}/role", userH.UpdateRole)
@@ -393,7 +395,7 @@ func NewRouter(cfg Config) http.Handler {
 			// Protected Backup Endpoints (Drill & Export)
 			if backupH != nil {
 				protected.Route("/backup", func(br chi.Router) {
-					br.Use(auth.RequireRole("ADMIN"))
+					br.Use(auth.RequirePermission(auth.PermBackup))
 					br.Post("/drill", backupH.Drill)
 					br.Get("/export", backupH.Export)
 					br.Post("/restore", backupH.Restore)
@@ -403,9 +405,17 @@ func NewRouter(cfg Config) http.Handler {
 			// Protected Settings Endpoints (Export & Import without DB dump)
 			if settingsH != nil {
 				protected.Route("/settings", func(sr chi.Router) {
-					sr.Use(auth.RequireRole("ADMIN"))
+					sr.Use(auth.RequirePermission(auth.PermSettingsExport))
 					sr.Get("/export", settingsH.ExportSettings)
 					sr.Post("/import", settingsH.ImportSettings)
+				})
+			}
+
+			// Protected Ownership Bulk-Assignment (Admin only)
+			if ownershipAdminH != nil {
+				protected.Route("/ownership", func(or chi.Router) {
+					or.Use(auth.RequirePermission(auth.PermUsersAdmin))
+					or.Post("/bulk-assign", ownershipAdminH.BulkAssign)
 				})
 			}
 
@@ -414,7 +424,7 @@ func NewRouter(cfg Config) http.Handler {
 			// second lookup query would exist only to rename a parameter.
 			if emailTemplateH != nil {
 				protected.Route("/email-templates", func(etr chi.Router) {
-					etr.Use(auth.RequireRole("ADMIN"))
+					etr.Use(auth.RequirePermission(auth.PermEmailTemplates))
 					etr.Get("/", emailTemplateH.List)
 					etr.Post("/", emailTemplateH.Create)
 					etr.Post("/generate", emailTemplateH.Generate)
@@ -425,7 +435,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if contactH != nil {
 				protected.Route("/contacts", func(cr chi.Router) {
-					cr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
+					cr.Use(auth.RequirePermission(auth.PermContactsRead))
 					cr.Post("/", contactH.Create)
 					cr.Get("/", contactH.List)
 					cr.Get("/{id}", contactH.Get)
@@ -436,7 +446,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if companyH != nil {
 				protected.Route("/companies", func(cr chi.Router) {
-					cr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
+					cr.Use(auth.RequirePermission(auth.PermContactsRead))
 					cr.Post("/", companyH.Create)
 					cr.Get("/", companyH.List)
 					cr.Get("/{id}", companyH.Get)
@@ -447,20 +457,20 @@ func NewRouter(cfg Config) http.Handler {
 
 			if dealH != nil {
 				protected.Route("/deals", func(dr chi.Router) {
-					dr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
+					dr.Use(auth.RequirePermission(auth.PermDealsRead))
 					dr.Post("/", dealH.Create)
 					dr.Get("/", dealH.List)
 					dr.Get("/{id}", dealH.Get)
 					dr.Put("/{id}", dealH.Update)
-					dr.Delete("/{id}", dealH.Delete)
-					dr.With(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE")).Post("/{id}/revoke", dealH.Revoke)
+					dr.With(auth.RequirePermission(auth.PermDealsDelete)).Delete("/{id}", dealH.Delete)
+					dr.With(auth.RequirePermission(auth.PermDealsRevoke)).Post("/{id}/revoke", dealH.Revoke)
 					dr.Post("/{id}/solar-calculation", dealH.AttachSolarCalculation)
 				})
 			}
 
 			if todoH != nil {
 				protected.Route("/todos", func(tr chi.Router) {
-					tr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
+					tr.Use(auth.RequirePermission(auth.PermContactsRead))
 					tr.Post("/", todoH.Create)
 					tr.Get("/", todoH.List)
 					tr.Get("/{id}", todoH.Get)
@@ -471,7 +481,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if noteH != nil {
 				protected.Route("/notes", func(nr chi.Router) {
-					nr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
+					nr.Use(auth.RequirePermission(auth.PermContactsRead))
 					nr.Post("/", noteH.Create)
 					nr.Get("/", noteH.List)
 					nr.Get("/{id}", noteH.Get)
@@ -482,7 +492,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if emailH != nil {
 				protected.Route("/emails", func(er chi.Router) {
-					er.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
+					er.Use(auth.RequirePermission(auth.PermContactsRead))
 					er.Get("/messages", emailH.ListMessages)
 					er.Get("/threads/{threadID}", emailH.GetThread)
 					er.Post("/demo-ingest", emailH.IngestDemo)
@@ -499,11 +509,12 @@ func NewRouter(cfg Config) http.Handler {
 
 			if aiH != nil {
 				protected.Route("/ai", func(air chi.Router) {
+					air.Use(auth.RequirePermission(auth.PermAI))
 					air.Use(auth.RateLimitMiddleware(aiLimiter))
 					air.Post("/triage", aiH.TriageEmail)
 					air.Post("/chat", aiH.Chat)
 					air.Post("/research/company", aiH.ResearchCompany)
-					air.Get("/observability", aiH.GetObservability)
+					air.With(auth.RequirePermission(auth.PermAIObservability)).Get("/observability", aiH.GetObservability)
 					air.Post("/parse-bill", aiH.ParseBill)
 					air.Get("/kb/search", aiH.SearchKB)
 					air.Get("/kb", aiH.ListKB)
@@ -518,7 +529,7 @@ func NewRouter(cfg Config) http.Handler {
 			}
 
 			calcH := handlers.NewCalculatorHandler()
-			protected.Post("/calculator/solar", calcH.CalculateSolar)
+			protected.With(auth.RequirePermission(auth.PermDealsWrite)).Post("/calculator/solar", calcH.CalculateSolar)
 
 			appointmentSvc := appointment.NewService(cfg.DB, cfg.SSEHub)
 			telephonySvc := telephony.NewService(cfg.DB, cfg.SSEHub)
@@ -534,7 +545,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if appointmentH != nil {
 				protected.Route("/appointments", func(appr chi.Router) {
-					appr.Use(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE", "BENUTZER"))
+					appr.Use(auth.RequirePermission(auth.PermContactsRead))
 					appr.Get("/", appointmentH.List)
 					appr.Post("/", appointmentH.Create)
 					appr.Put("/{id}", appointmentH.Update)
@@ -545,29 +556,32 @@ func NewRouter(cfg Config) http.Handler {
 
 			if telephonyH != nil {
 				protected.Route("/telephony", func(telr chi.Router) {
+					telr.Use(auth.RequirePermission(auth.PermTelephony))
 					telr.Post("/calls", telephonyH.LogCall)
 				})
 			}
 
 			if reportsH != nil {
 				protected.Route("/reports", func(repr chi.Router) {
-					repr.Use(auth.RequireAnyRole("ADMIN", "BACKOFFICE"))
+					repr.Use(auth.RequirePermission(auth.PermReportsView))
 					repr.Get("/sales", reportsH.GetSalesReport)
 				})
 			}
 
 			if automationH != nil {
 				protected.Route("/automations", func(autr chi.Router) {
+					autr.Use(auth.RequirePermission(auth.PermAutomationsRead))
 					autr.Get("/", automationH.ListWorkflows)
 					autr.Get("/runs", automationH.ListRuns)
-					autr.With(auth.RequireRole("ADMIN")).Post("/", automationH.CreateWorkflow)
-					autr.With(auth.RequireRole("ADMIN")).Post("/{id}/test-run", automationH.TestRunWorkflow)
-					autr.With(auth.RequireRole("ADMIN")).Post("/runs/{id}/approve", automationH.ApproveStep)
+					autr.With(auth.RequirePermission(auth.PermAutomationsWrite)).Post("/", automationH.CreateWorkflow)
+					autr.With(auth.RequirePermission(auth.PermAutomationsRun)).Post("/{id}/test-run", automationH.TestRunWorkflow)
+					autr.With(auth.RequirePermission(auth.PermAutomationsRun)).Post("/runs/{id}/approve", automationH.ApproveStep)
 				})
 			}
 
 			if notificationH != nil {
 				protected.Route("/notifications", func(nr chi.Router) {
+					nr.Use(auth.RequirePermission(auth.PermContactsRead))
 					nr.Get("/unread", notificationH.ListUnread)
 					nr.Post("/{id}/read", notificationH.MarkRead)
 					nr.Post("/read-all", notificationH.MarkAllRead)
@@ -576,8 +590,8 @@ func NewRouter(cfg Config) http.Handler {
 
 			if exportH != nil {
 				protected.Group(func(exportRouter chi.Router) {
-					exportRouter.With(auth.RequireRole("ADMIN")).Get("/export/contacts.csv", exportH.ExportContactsCSV)
-					exportRouter.With(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE")).Post("/import/contacts", exportH.ImportContactsCSV)
+					exportRouter.With(auth.RequirePermission(auth.PermReportsExport)).Get("/export/contacts.csv", exportH.ExportContactsCSV)
+					exportRouter.With(auth.RequirePermission(auth.PermContactsImport)).Post("/import/contacts", exportH.ImportContactsCSV)
 				})
 			}
 		})

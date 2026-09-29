@@ -180,4 +180,8 @@ log "🧪 Running the invite statement test against a real pgvector database"
 TEST_DATABASE_URL="${TEST_DATABASE_URL}" go test ./internal/core/invite \
     -run 'TestInvite.*Postgres' -count=1 -v
 
-log "✅ Real PostgreSQL backup and invite statements verified"
+log "🧪 Running the ownership backfill and scope tests against a real pgvector database"
+TEST_DATABASE_URL="${TEST_DATABASE_URL}" go test ./internal/server/handlers \
+    -run 'TestOwnership.*Postgres' -count=1 -v
+
+log "✅ Real PostgreSQL backup, invite and ownership statements verified"

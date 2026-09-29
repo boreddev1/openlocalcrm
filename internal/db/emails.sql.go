@@ -365,11 +365,12 @@ func (q *Queries) GetEmailMessageByID(ctx context.Context, id pgtype.UUID) (Emai
 const listEmailAccounts = `-- name: ListEmailAccounts :many
 SELECT id, name, email_address, provider, imap_host, imap_port, smtp_host, smtp_port, username, password_encrypted, is_active, last_synced_at, created_at, updated_at, account_type, owner_user_id, last_sync_at, last_uid FROM email_accounts
 WHERE is_active = TRUE
+  AND ($1::uuid IS NULL OR owner_user_id = $1::uuid)
 ORDER BY name ASC
 `
 
-func (q *Queries) ListEmailAccounts(ctx context.Context) ([]EmailAccount, error) {
-	rows, err := q.db.Query(ctx, listEmailAccounts)
+func (q *Queries) ListEmailAccounts(ctx context.Context, ownerUserID pgtype.UUID) ([]EmailAccount, error) {
+	rows, err := q.db.Query(ctx, listEmailAccounts, ownerUserID)
 	if err != nil {
 		return nil, err
 	}

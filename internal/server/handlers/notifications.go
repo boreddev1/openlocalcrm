@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/notification"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
@@ -21,14 +20,13 @@ func NewNotificationHandler(service *notification.Service) *NotificationHandler 
 }
 
 func (h *NotificationHandler) ListUnread(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	var actorID *pgtype.UUID
-	if claims != nil {
-		var uid pgtype.UUID
-		if err := uid.Scan(claims.UserID.String()); err == nil {
-			actorID = &uid
-		}
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
 	}
+	uid := pgtype.UUID{Bytes: claims.UserID, Valid: true}
+	actorID := &uid
 
 	items, err := h.service.ListUnread(r.Context(), actorID, 20)
 	if err != nil {
@@ -44,14 +42,13 @@ func (h *NotificationHandler) ListUnread(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	var actorID *pgtype.UUID
-	if claims != nil && claims.Role != "ADMIN" {
-		var uid pgtype.UUID
-		if err := uid.Scan(claims.UserID.String()); err == nil {
-			actorID = &uid
-		}
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
 	}
+	uid := pgtype.UUID{Bytes: claims.UserID, Valid: true}
+	actorID := &uid
 
 	idStr := chi.URLParam(r, "id")
 	var id pgtype.UUID
@@ -74,14 +71,13 @@ func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NotificationHandler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	var actorID *pgtype.UUID
-	if claims != nil {
-		var uid pgtype.UUID
-		if err := uid.Scan(claims.UserID.String()); err == nil {
-			actorID = &uid
-		}
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
 	}
+	uid := pgtype.UUID{Bytes: claims.UserID, Valid: true}
+	actorID := &uid
 
 	if err := h.service.MarkAllAsRead(r.Context(), actorID); err != nil {
 		http.Error(w, `{"error":"failed to mark all as read"}`, http.StatusInternalServerError)

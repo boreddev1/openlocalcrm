@@ -25,10 +25,11 @@ func TestAppointmentHandler_Endpoints(t *testing.T) {
 	svc := appointment.NewService(querier, hub)
 	h := handlers.NewAppointmentHandler(svc)
 
-	ctx := context.Background()
+	claims := &auth.AccessClaims{UserID: uuid.New(), Email: "admin@example.de", Role: "ADMIN"}
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, claims)
 
 	// 1. List appointments
-	reqList := httptest.NewRequest("GET", "/api/v1/appointments", nil)
+	reqList := httptest.NewRequest("GET", "/api/v1/appointments", nil).WithContext(ctx)
 	recList := httptest.NewRecorder()
 	h.List(recList, reqList)
 	if recList.Code != http.StatusOK {
@@ -47,7 +48,7 @@ func TestAppointmentHandler_Endpoints(t *testing.T) {
 		"location":     "Frankfurt",
 		"notes":        "Leiter und Messwerkzeug mitbringen",
 	})
-	reqCreate := httptest.NewRequest("POST", "/api/v1/appointments", bytes.NewReader(createBody))
+	reqCreate := httptest.NewRequest("POST", "/api/v1/appointments", bytes.NewReader(createBody)).WithContext(ctx)
 	recCreate := httptest.NewRecorder()
 	h.Create(recCreate, reqCreate)
 	if recCreate.Code != http.StatusCreated {
@@ -100,7 +101,10 @@ func TestAppointmentHandler_DownloadICS_NotFoundReturns404(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/appointments/00000000-0000-0000-0000-000000000099/ics", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "00000000-0000-0000-0000-000000000099")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	claims := &auth.AccessClaims{UserID: uuid.New(), Email: "admin@example.de", Role: "ADMIN"}
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = context.WithValue(ctx, auth.UserContextKey, claims)
+	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 
 	h.DownloadICS(rec, req)

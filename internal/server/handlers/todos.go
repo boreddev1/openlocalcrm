@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/todo"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
@@ -29,11 +28,12 @@ type CreateTodoRequest struct {
 }
 
 func (h *TodoHandler) Create(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	var actorID pgtype.UUID
-	if claims != nil {
-		_ = actorID.Scan(claims.UserID.String())
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
 	}
+	actorID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
 
 	var req CreateTodoRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -63,13 +63,23 @@ func (h *TodoHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TodoHandler) List(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var assignedTo pgtype.UUID
+	if claims.Role == "BENUTZER" {
+		_ = assignedTo.Scan(claims.UserID.String())
+	}
+
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 
 	limit, _ := strconv.Atoi(limitStr)
 	offset, _ := strconv.Atoi(offsetStr)
 
-	todos, err := h.service.List(r.Context(), int32(limit), int32(offset))
+	todos, err := h.service.List(r.Context(), int32(limit), int32(offset), assignedTo)
 	if err != nil {
 		http.Error(w, `{"error":"failed to list todos"}`, http.StatusInternalServerError)
 		return
@@ -84,6 +94,12 @@ func (h *TodoHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TodoHandler) Get(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	idStr := chi.URLParam(r, "id")
 	var id pgtype.UUID
 	if err := id.Scan(idStr); err != nil {
@@ -94,6 +110,11 @@ func (h *TodoHandler) Get(w http.ResponseWriter, r *http.Request) {
 	todoItem, err := h.service.GetByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, `{"error":"todo_not_found"}`, http.StatusNotFound)
+		return
+	}
+
+	if !canRead(claims, todoItem.AssignedTo) {
+		http.Error(w, `{"error":"forbidden","message":"insufficient permissions to view todo"}`, http.StatusForbidden)
 		return
 	}
 
@@ -110,11 +131,12 @@ type UpdateTodoRequest struct {
 }
 
 func (h *TodoHandler) Update(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	var actorID pgtype.UUID
-	if claims != nil {
-		_ = actorID.Scan(claims.UserID.String())
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
 	}
+	actorID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
 
 	idStr := chi.URLParam(r, "id")
 	var todoID pgtype.UUID
@@ -135,11 +157,9 @@ func (h *TodoHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if claims != nil && claims.Role != "ADMIN" {
-		if !existing.AssignedTo.Valid || existing.AssignedTo.Bytes != claims.UserID {
-			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihnen zugewiesene Aufgaben bearbeiten"}`, http.StatusForbidden)
-			return
-		}
+	if !canModify(claims, existing.AssignedTo) {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "Keine Berechtigung für diesen Datensatz")
+		return
 	}
 
 	title := req.Title
@@ -189,9 +209,9 @@ func (h *TodoHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TodoHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	if claims == nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
 		return
 	}
 
@@ -202,20 +222,17 @@ func (h *TodoHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if claims.Role != "ADMIN" {
-		existing, err := h.service.GetByID(r.Context(), todoID)
-		if err != nil {
-			http.Error(w, `{"error":"todo_not_found"}`, http.StatusNotFound)
-			return
-		}
-		if !existing.AssignedTo.Valid || existing.AssignedTo.Bytes != claims.UserID {
-			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihnen zugewiesene Aufgaben löschen"}`, http.StatusForbidden)
-			return
-		}
+	existing, err := h.service.GetByID(r.Context(), todoID)
+	if err != nil {
+		http.Error(w, `{"error":"todo_not_found"}`, http.StatusNotFound)
+		return
+	}
+	if !canModify(claims, existing.AssignedTo) {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "Keine Berechtigung für diesen Datensatz")
+		return
 	}
 
-	var actorID pgtype.UUID
-	_ = actorID.Scan(claims.UserID.String())
+	actorID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
 
 	if err := h.service.Delete(r.Context(), actorID, todoID); err != nil {
 		http.Error(w, `{"error":"failed to delete todo"}`, http.StatusInternalServerError)
