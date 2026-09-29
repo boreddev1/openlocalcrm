@@ -16,6 +16,11 @@ export interface UserSession {
    * leave it unprotected.
    */
   totp_enabled?: boolean | null;
+  /**
+   * Set to true for initial bootstrap admin credentials until the password is changed.
+   * null means unknown, never treated as "no change needed".
+   */
+  must_change_password?: boolean | null;
 }
 
 export interface LoginResult {

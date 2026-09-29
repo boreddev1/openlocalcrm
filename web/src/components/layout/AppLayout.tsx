@@ -6,6 +6,7 @@ import { AIChatDrawer } from '../ai/AIChatDrawer';
 import { CommandPalette } from '../common/CommandPalette';
 import { SimulationWidget } from '../../simulation/SimulationWidget';
 import { DemoBanner } from '../common/DemoBanner';
+import { PasswordNagBanner } from '../common/PasswordNagBanner';
 
 export const AppLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -28,6 +29,7 @@ export const AppLayout: React.FC = () => {
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         <DemoBanner />
+        <PasswordNagBanner />
         <Header
           onMenuToggle={() => setSidebarOpen((prev) => !prev)}
           onOpenSearch={() => setCommandPaletteOpen(true)}

@@ -81,6 +81,7 @@ const DealColumn = ({ id, children }: { id: string; children: React.ReactNode })
   return (
     <div
       ref={setNodeRef}
+      id={id}
       className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex flex-col h-full"
     >
       {children}
@@ -101,6 +102,7 @@ const DraggableDealCard = ({ deal, children }: { deal: Deal; children: React.Rea
   return (
     <div
       ref={setNodeRef}
+      id={draggableId}
       style={
         transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined
       }

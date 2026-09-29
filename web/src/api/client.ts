@@ -25,6 +25,87 @@ export function getCookie(name: string): string | null {
   return match ? decodeURIComponent(match[3]) : null;
 }
 
+let refreshPromise: Promise<void> | null = null;
+let lastRefreshSuccess = 0;
+
+export async function withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
+  if (!refreshPromise) {
+    refreshPromise = (fn() as Promise<any>).finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise as unknown as T;
+}
+
+// Cross-tab coordination: two tabs have separate heaps, so a module promise is
+// not enough. The Web Lock makes one tab the refresher; the others wait and
+// then reuse the shared cookie jar.
+export async function withCrossTabLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks =
+    typeof navigator !== 'undefined'
+      ? (navigator as Navigator & { locks?: LockManager }).locks
+      : undefined;
+  if (!locks) return withRefreshLock(fn);
+  return locks.request('openlocalcrm-refresh', { mode: 'exclusive' }, () => withRefreshLock(fn));
+}
+
+export const UNAUTHORIZED_IS_NOT_SESSION_EXPIRY = new Set([
+  '/api/v1/auth/login',
+  '/api/v1/auth/totp/disable',
+]);
+
+const rawFetch = typeof window !== 'undefined' ? window.fetch.bind(window) : fetch;
+
+async function executeRefresh(): Promise<void> {
+  // If another tab or concurrent call refreshed very recently, the cookies are already fresh.
+  if (Date.now() - lastRefreshSuccess < 2000) {
+    return;
+  }
+  const headers = new Headers();
+  const csrf = getCookie('csrf_token');
+  if (csrf) headers.set('X-CSRF-Token', csrf);
+
+  const res = await rawFetch('/api/v1/auth/refresh', {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    throw new Error('Refresh failed');
+  }
+  lastRefreshSuccess = Date.now();
+}
+
+if (typeof window !== 'undefined' && !(window as any).__crmFetchIntercepted) {
+  (window as any).__crmFetchIntercepted = true;
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const urlStr =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as Request).url || '';
+
+    const res = await originalFetch(input, init);
+
+    const isNonExpiry =
+      Array.from(UNAUTHORIZED_IS_NOT_SESSION_EXPIRY).some((path) => urlStr.includes(path)) ||
+      urlStr.includes('/api/v1/auth/refresh');
+
+    if (res.status === 401 && !isNonExpiry) {
+      try {
+        await withCrossTabLock(executeRefresh);
+        return await originalFetch(input, init);
+      } catch {
+        window.dispatchEvent(new CustomEvent('auth:logout'));
+        return res;
+      }
+    }
+    return res;
+  };
+}
+
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
 
@@ -69,17 +150,6 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
       return text as unknown as T;
     }
   }
-
-  /**
-   * Endpoints where HTTP 401 is an application-level answer rather than an expired
-   * session. Logging in with wrong credentials and confirming a password before
-   * disabling 2FA both answer 401 while the session is perfectly valid; treating
-   * those as session expiry would log the user out for a typo.
-   */
-  const UNAUTHORIZED_IS_NOT_SESSION_EXPIRY = new Set([
-    '/api/v1/auth/login',
-    '/api/v1/auth/totp/disable',
-  ]);
 
   // Server responded with an HTTP error status (4xx / 5xx)
   let errorMessage = `HTTP ${res.status}: ${res.statusText}`;

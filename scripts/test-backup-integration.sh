@@ -184,4 +184,8 @@ log "🧪 Running the ownership backfill and scope tests against a real pgvector
 TEST_DATABASE_URL="${TEST_DATABASE_URL}" go test ./internal/server/handlers \
     -run 'TestOwnership.*Postgres' -count=1 -v
 
-log "✅ Real PostgreSQL backup, invite and ownership statements verified"
+log "🧪 Running the session rotation tests against a real pgvector database"
+TEST_DATABASE_URL="${TEST_DATABASE_URL}" go test ./internal/auth \
+    -run 'TestRefreshRotation.*Postgres' -count=1 -v
+
+log "✅ Real PostgreSQL backup, invite, ownership and session statements verified"

@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Authentication & Navigation Layout", () => {
+  test.describe.configure({ mode: "serial" });
+
   test("should display login page and allow login", async ({ page }) => {
     await page.goto("/login");
 
@@ -40,6 +42,20 @@ test.describe("Authentication & Navigation Layout", () => {
   test("should validate password policy rules and change own password successfully (§2.2 / §2.3)", async ({
     page,
   }) => {
+    let passwordChangeCalled = false;
+    await page.route("**/api/v1/auth/change-password", async (route) => {
+      passwordChangeCalled = true;
+      const req = route.request();
+      const postData = JSON.parse(req.postData() || "{}");
+      expect(postData.old_password).toBe("demo123");
+      expect(postData.new_password).toBe("Secure2026!Password");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
+    });
+
     await page.goto("/settings");
     await expect(
       page.getByText("Systemeinstellungen & Konfiguration"),
@@ -50,9 +66,7 @@ test.describe("Authentication & Navigation Layout", () => {
     await expect(page.getByText("Eigenes Passwort ändern")).toBeVisible();
 
     const currentPassInput = page.getByPlaceholder("••••••••");
-    const newPassInput = page.getByPlaceholder(
-      "Min. 8 Zeichen + Zahl + Sonderzeichen",
-    );
+    const newPassInput = page.getByPlaceholder("Mindestens 8 Zeichen");
     const confirmPassInput = page.getByPlaceholder("Wiederholung");
     const submitBtn = page.getByRole("button", { name: /Passwort speichern/i });
 
@@ -63,23 +77,15 @@ test.describe("Authentication & Navigation Layout", () => {
     ).toBeVisible();
 
     // 3. Test short password (< 8 chars)
-    await currentPassInput.fill("oldpassword123");
-    await newPassInput.fill("short1!");
-    await confirmPassInput.fill("short1!");
+    await currentPassInput.fill("demo123");
+    await newPassInput.fill("short");
+    await confirmPassInput.fill("short");
     await submitBtn.click();
     await expect(
       page.getByText("Das neue Passwort muss mindestens 8 Zeichen lang sein."),
     ).toBeVisible();
 
-    // 4. Test missing special character
-    await newPassInput.fill("password12345");
-    await confirmPassInput.fill("password12345");
-    await submitBtn.click();
-    await expect(
-      page.getByText(/mindestens eine Zahl und ein Sonderzeichen/i),
-    ).toBeVisible();
-
-    // 5. Test mismatching password confirmation
+    // 4. Test mismatching password confirmation
     await newPassInput.fill("Secure2026!Password");
     await confirmPassInput.fill("Mismatch2026!Password");
     await submitBtn.click();
@@ -87,12 +93,13 @@ test.describe("Authentication & Navigation Layout", () => {
       page.getByText("Die Passwörter stimmen nicht überein."),
     ).toBeVisible();
 
-    // 6. Test successful password change
+    // 5. Test successful password change
     await confirmPassInput.fill("Secure2026!Password");
     await submitBtn.click();
     await expect(
       page.getByText("Passwort erfolgreich aktualisiert!"),
     ).toBeVisible();
+    expect(passwordChangeCalled).toBe(true);
 
     // 2FA setup, verification and deactivation are covered by their own test
     // below. They cannot be asserted from here: this test stops at the
@@ -445,4 +452,229 @@ test.describe("Authentication & Navigation Layout", () => {
       ),
     ).toBeVisible();
   });
+
+  test("a 401 triggers exactly one refresh even with parallel requests", async ({
+    page,
+  }) => {
+    const refreshCalls: string[] = [];
+    let refreshInFlight = 0;
+    let maxConcurrent = 0;
+
+    let refreshed = false;
+    await page.route(/\/api\/v1\/(contacts|deals|todos)/, async (route) => {
+      if (refreshed) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: "[]",
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: '{"error":"unauthorized"}',
+      });
+    });
+
+    await page.route("**/api/v1/auth/refresh", async (route) => {
+      refreshCalls.push(Date.now().toString());
+      refreshInFlight++;
+      maxConcurrent = Math.max(maxConcurrent, refreshInFlight);
+      await new Promise((r) => setTimeout(r, 300));
+      refreshed = true;
+      refreshInFlight--;
+      await route.fulfill({
+        status: 200,
+        headers: { "Set-Cookie": "access_token=new; Path=/; HttpOnly" },
+        contentType: "application/json",
+        body: "{}",
+      });
+    });
+
+    await page.goto("/");
+    await expect(page.getByText("Vertriebs-Dashboard")).toBeVisible();
+
+    await Promise.all([
+      page.evaluate(() => fetch("/api/v1/contacts", { credentials: "include" })),
+      page.evaluate(() => fetch("/api/v1/deals", { credentials: "include" })),
+      page.evaluate(() => fetch("/api/v1/todos", { credentials: "include" })),
+    ]);
+
+    expect(refreshCalls).toHaveLength(1);
+    expect(maxConcurrent).toBe(1);
+  });
+
+  test("should display non-dismissable password change banner when must_change_password is true", async ({
+    page,
+  }) => {
+    await page.route("**/api/v1/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          user_id: "11111111-1111-1111-1111-111111111111",
+          email: "admin@openlocalcrm.local",
+          role: "ADMIN",
+          first_name: "Max",
+          last_name: "Vertriebsleiter",
+          totp_enabled: false,
+          must_change_password: true,
+        }),
+      });
+    });
+
+    await page.goto("/");
+    await expect(page.getByTestId("password-nag-banner")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Bitte ändern Sie Ihr initiales Passwort umgehend in den Systemeinstellungen",
+      ),
+    ).toBeVisible();
+
+    // Verify it links to /settings
+    await page.getByRole("link", { name: /Passwort jetzt ändern/i }).click();
+    await expect(page).toHaveURL("/settings");
+  });
+
+  test("route guard redirects unauthenticated users to /login and renders no protected layout", async ({
+    browser,
+    baseURL,
+  }) => {
+    const cleanContext = await browser.newContext({
+      storageState: { cookies: [], origins: [] },
+    });
+    const cleanPage = await cleanContext.newPage();
+
+    await cleanPage.goto(`${baseURL}/`);
+    await expect(cleanPage).toHaveURL(`${baseURL}/login`);
+    await expect(
+      cleanPage.getByText(
+        "Single-Tenant Anmeldebereich für Vertriebsteams",
+      ),
+    ).toBeVisible();
+    await expect(cleanPage.getByText("Vertriebs-Dashboard")).toHaveCount(0);
+
+    await cleanContext.close();
+  });
+
+  test("logout-all signs out a second session as well", async ({
+    browser,
+    baseURL,
+  }) => {
+    // 1. Session A
+    const contextA = await browser.newContext({
+      storageState: { cookies: [], origins: [] },
+      extraHTTPHeaders: { "X-Forwarded-For": "10.10.10.1" },
+    });
+    const pageA = await contextA.newPage();
+    await pageA.goto(`${baseURL}/login`);
+    await pageA
+      .getByPlaceholder("name@unternehmen.de")
+      .fill("vertrieb@openlocalcrm.local");
+    await pageA.getByPlaceholder("••••••••").fill("demo123");
+    await pageA.getByRole("button", { name: /Anmelden/i }).click();
+    await expect(pageA).toHaveURL(`${baseURL}/`);
+
+    // 2. Session B
+    const contextB = await browser.newContext({
+      storageState: { cookies: [], origins: [] },
+      extraHTTPHeaders: { "X-Forwarded-For": "10.10.10.2" },
+    });
+    const pageB = await contextB.newPage();
+    await pageB.goto(`${baseURL}/login`);
+    await pageB
+      .getByPlaceholder("name@unternehmen.de")
+      .fill("vertrieb@openlocalcrm.local");
+    await pageB.getByPlaceholder("••••••••").fill("demo123");
+    await pageB.getByRole("button", { name: /Anmelden/i }).click();
+    await expect(pageB).toHaveURL(`${baseURL}/`);
+
+    // 3. In Session A, call logout-all
+    const logoutAllResult = await pageA.evaluate(async () => {
+      const csrf = document.cookie.match(/(^|;\s*)csrf_token=([^;]*)/);
+      const res = await fetch("/api/v1/auth/logout-all", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          ...(csrf ? { "X-CSRF-Token": decodeURIComponent(csrf[2]) } : {}),
+        },
+      });
+      return { status: res.status };
+    });
+    expect(logoutAllResult.status).toBe(200);
+
+    // 4. Session B should now be invalid on its next request
+    const testResB = await pageB.evaluate(async () => {
+      const res = await fetch("/api/v1/contacts", { credentials: "include" });
+      return { status: res.status };
+    });
+    expect(testResB.status).toBe(401);
+
+    await contextA.close();
+    await contextB.close();
+  });
+
+  test("a BENUTZER session cannot edit a foreign record in the contacts list", async ({
+    page,
+  }) => {
+    const benutzerID = "22222222-2222-2222-2222-222222222222";
+    const foreignID = "33333333-3333-3333-3333-333333333333";
+
+    await page.route("**/api/v1/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          user_id: benutzerID,
+          email: "benutzer@openlocalcrm.local",
+          role: "BENUTZER",
+          first_name: "Bernd",
+          last_name: "Benutzer",
+        }),
+      });
+    });
+
+    await page.route("**/api/v1/contacts*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            id: "contact-1",
+            first_name: "Eigener",
+            last_name: "Kontakt",
+            email: "eigen@example.de",
+            owner_user_id: benutzerID,
+          },
+          {
+            id: "contact-2",
+            first_name: "Fremder",
+            last_name: "Kontakt",
+            email: "fremd@example.de",
+            owner_user_id: foreignID,
+          },
+        ]),
+      });
+    });
+
+    await page.goto("/contacts");
+    await expect(page.getByText("Eigener Kontakt")).toBeVisible();
+    await expect(page.getByText("Fremder Kontakt")).toBeVisible();
+
+    // The edit button for the foreign contact must be disabled with the permission tooltip
+    const fremderRow = page.locator('tr:has-text("Fremder Kontakt")');
+    const foreignEditBtn = fremderRow.locator('button[aria-label="Bearbeiten"]');
+    await expect(foreignEditBtn).toBeDisabled();
+    await expect(foreignEditBtn).toHaveAttribute(
+      "title",
+      /Keine Berechtigung: Nur der Eigentümer oder Administrator/i,
+    );
+
+    // The edit button for the own contact must be enabled
+    const eigenerRow = page.locator('tr:has-text("Eigener Kontakt")');
+    const ownEditBtn = eigenerRow.locator('button[aria-label="Bearbeiten"]');
+    await expect(ownEditBtn).toBeEnabled();
+  });
 });
+

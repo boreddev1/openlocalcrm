@@ -16,6 +16,8 @@ import {
   DollarSign,
   Calendar,
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { canModifyRecord } from '../common/OwnerSelect';
 
 interface ActivityLogDrawerProps {
   entityType: 'contact' | 'company';
@@ -30,6 +32,7 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
   entityName,
   onClose,
 }) => {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<string>('ALL');
   const [newNoteText, setNewNoteText] = useState('');
@@ -366,16 +369,42 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
                     </span>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
-                        onClick={() => setEditingNote({ ...note })}
-                        className="p-1 text-slate-400 hover:text-slate-200 rounded"
-                        title="Notiz bearbeiten"
+                        type="button"
+                        disabled={!canModifyRecord(user, note.user_id)}
+                        onClick={() => {
+                          if (!canModifyRecord(user, note.user_id)) return;
+                          setEditingNote({ ...note });
+                        }}
+                        className={`p-1 rounded ${
+                          canModifyRecord(user, note.user_id)
+                            ? 'text-slate-400 hover:text-slate-200'
+                            : 'text-slate-600 cursor-not-allowed opacity-50'
+                        }`}
+                        title={
+                          canModifyRecord(user, note.user_id)
+                            ? 'Notiz bearbeiten'
+                            : 'Keine Berechtigung: Nur der Eigentümer oder Administrator kann diese Notiz bearbeiten'
+                        }
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => deleteMutation.mutate(note.id)}
-                        className="p-1 text-rose-400 hover:text-rose-300 rounded"
-                        title="Notiz löschen"
+                        type="button"
+                        disabled={!canModifyRecord(user, note.user_id)}
+                        onClick={() => {
+                          if (!canModifyRecord(user, note.user_id)) return;
+                          deleteMutation.mutate(note.id);
+                        }}
+                        className={`p-1 rounded ${
+                          canModifyRecord(user, note.user_id)
+                            ? 'text-rose-400 hover:text-rose-300'
+                            : 'text-slate-600 cursor-not-allowed opacity-50'
+                        }`}
+                        title={
+                          canModifyRecord(user, note.user_id)
+                            ? 'Notiz löschen'
+                            : 'Keine Berechtigung: Nur der Eigentümer oder Administrator kann diese Notiz löschen'
+                        }
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>

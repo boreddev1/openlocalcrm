@@ -5,6 +5,28 @@ Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/) 
 
 ---
 
+## [1.0.7] - 2026-09-26
+
+### Behoben & Gehärtet (SP8a Auth, Sessions & RBAC)
+- **Sitzungen & Refresh-Token-Rotation:**
+  - Single-Use Refresh Token Rotation mit Erkennung von Replay-Angriffen und automatischer Revokation der gesamten Token-Familie.
+  - Refresh-Tokens werden ausschließlich über HttpOnly-Cookies übertragen (`refresh_token`).
+  - Cross-Tab-Safe Refresh-Mutex (`withCrossTabLock`) im Web-Frontend verhindert parallele 401-Kollisionen.
+- **Session-Invalidierung & Token-Versionierung:**
+  - `token_version`-Claim im Access-Token sorgt für sofortigen Widerruf aktiver Tokens bei Passwortänderung, 2FA-Änderung oder `POST /api/v1/auth/logout-all`.
+  - Neuer administrativer und benutzereigener Endpunkt `/api/v1/auth/logout-all` zur globalen Sitzungsabmeldung über alle Endgeräte.
+- **Passwort-Richtlinie & TOTP-Härtung:**
+  - Vereinheitlichte Passwort-Richtlinie (mindestens 8 Zeichen, keine erfundenen Sonderzeichenregeln).
+  - Persistentes `must_change_password`-Flag für den initialen Admin-Bootstrap mit nicht-schließbarem UI-Banner.
+  - RFC 6238 TOTP-Schritt-Tracking verhindert Wiederverwendung desselben Codes im selben Zeitfenster; Replay-Schutz und Ratenbegrenzung.
+- **Rollenmatrix & Datensatz-Eigentümerschaft:**
+  - Durchgängiges Eigentümerschaftsmodell mit `owner_user_id` für Kontakte, Firmen, Deals, Termine, Todos und Notizen.
+  - Strikte RBAC-Durchsetzung: Lese- und Schreib-Scoping für `BENUTZER`, `VERTRIEB` und `BACKOFFICE`.
+  - Neuer administrativer Neuzuweisungs-Endpunkt `/api/v1/admin/ownership/bulk-assign`.
+  - UI-Bedienelemente reflektieren Berechtigungen und Eigentümerschaft mit Tooltip-Begründungen.
+
+---
+
 ## [1.0.6] - 2026-09-21
 
 ### Behoben & Gehärtet (Security Review Round 3 Remediation)

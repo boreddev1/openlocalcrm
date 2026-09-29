@@ -16,6 +16,8 @@ import {
   User,
   Lock,
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { OwnerSelect, canModifyRecord, canReassignRecord } from '../components/common/OwnerSelect';
 
 const APPOINTMENT_TYPES = [
   {
@@ -48,6 +50,7 @@ const REMINDER_OPTIONS = [
 ];
 
 export const CalendarPage: React.FC = () => {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [filterAssignee, setFilterAssignee] = useState<'all' | 'mine'>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -133,7 +136,11 @@ export const CalendarPage: React.FC = () => {
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingApp) return;
-    updateMutation.mutate(editingApp);
+    const payload: any = { ...editingApp };
+    if (!canReassignRecord(user, editingApp.user_id)) {
+      delete payload.user_id;
+    }
+    updateMutation.mutate(payload);
   };
 
   const filteredAppointments = appointments.filter((app) => {
@@ -236,17 +243,43 @@ export const CalendarPage: React.FC = () => {
 
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
-                        onClick={() => setEditingApp({ ...app })}
-                        className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded"
-                        title="Termin bearbeiten"
+                        type="button"
+                        disabled={!canModifyRecord(user, app.user_id)}
+                        onClick={() => {
+                          if (!canModifyRecord(user, app.user_id)) return;
+                          setEditingApp({ ...app });
+                        }}
+                        className={`p-1 rounded ${
+                          canModifyRecord(user, app.user_id)
+                            ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                            : 'text-slate-600 cursor-not-allowed opacity-50'
+                        }`}
+                        title={
+                          canModifyRecord(user, app.user_id)
+                            ? 'Termin bearbeiten'
+                            : 'Keine Berechtigung: Nur der Eigentümer oder Administrator kann diesen Termin bearbeiten'
+                        }
                         aria-label="Bearbeiten"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => setDeletingApp(app)}
-                        className="p-1 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded"
-                        title="Termin löschen"
+                        type="button"
+                        disabled={!canModifyRecord(user, app.user_id)}
+                        onClick={() => {
+                          if (!canModifyRecord(user, app.user_id)) return;
+                          setDeletingApp(app);
+                        }}
+                        className={`p-1 rounded ${
+                          canModifyRecord(user, app.user_id)
+                            ? 'text-rose-400 hover:text-rose-300 hover:bg-rose-500/10'
+                            : 'text-slate-600 cursor-not-allowed opacity-50'
+                        }`}
+                        title={
+                          canModifyRecord(user, app.user_id)
+                            ? 'Termin löschen'
+                            : 'Keine Berechtigung: Nur der Eigentümer oder Administrator kann diesen Termin löschen'
+                        }
                         aria-label="Löschen"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -510,6 +543,13 @@ export const CalendarPage: React.FC = () => {
                   value={editingApp.notes || ''}
                   onChange={(e) => setEditingApp({ ...editingApp, notes: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500 resize-none"
+                />
+              </div>
+
+              <div className="pt-2">
+                <OwnerSelect
+                  value={editingApp.user_id}
+                  onChange={(ownerId) => setEditingApp({ ...editingApp, user_id: ownerId || null })}
                 />
               </div>
 

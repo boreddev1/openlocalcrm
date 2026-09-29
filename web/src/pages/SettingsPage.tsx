@@ -493,15 +493,6 @@ export const SettingsPage: React.FC = () => {
       });
       return;
     }
-    const hasNumber = /\d/.test(newPassword);
-    const hasSpecial = /[^A-Za-z0-9]/.test(newPassword);
-    if (!hasNumber || !hasSpecial) {
-      setPasswordStatus({
-        type: 'error',
-        message: 'Das neue Passwort muss mindestens eine Zahl und ein Sonderzeichen enthalten.',
-      });
-      return;
-    }
     if (newPassword !== confirmPassword) {
       setPasswordStatus({ type: 'error', message: 'Die Passwörter stimmen nicht überein.' });
       return;
@@ -519,6 +510,7 @@ export const SettingsPage: React.FC = () => {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      await refreshUser();
     } catch (err: any) {
       setPasswordStatus({
         type: 'error',
@@ -1709,9 +1701,7 @@ export const SettingsPage: React.FC = () => {
               <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 <Lock className="w-4 h-4 text-emerald-400" /> Eigenes Passwort ändern (§2.2)
               </h3>
-              <p className="text-xs text-slate-400">
-                Regeln: Mindestens 8 Zeichen, mindestens 1 Zahl und 1 Sonderzeichen
-              </p>
+              <p className="text-xs text-slate-400">Regeln: Mindestens 8 Zeichen</p>
             </div>
 
             {passwordStatus && (
@@ -1753,7 +1743,7 @@ export const SettingsPage: React.FC = () => {
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Min. 8 Zeichen + Zahl + Sonderzeichen"
+                  placeholder="Mindestens 8 Zeichen"
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                 />
               </div>
