@@ -1,10 +1,14 @@
 package auth
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -13,18 +17,81 @@ const (
 	CSRFHeaderName = "X-CSRF-Token"
 )
 
-// GenerateCSRFToken generates a cryptographically secure 32-byte hex token
-func GenerateCSRFToken() (string, error) {
+var (
+	csrfSecretOnce sync.Once
+	csrfSecret     []byte
+)
+
+func getCSRFSecret() []byte {
+	csrfSecretOnce.Do(func() {
+		csrfSecret = make([]byte, 32)
+		if _, err := rand.Read(csrfSecret); err != nil {
+			panic("failed to initialize CSRF secret: " + err.Error())
+		}
+	})
+	return csrfSecret
+}
+
+// SetCSRFSecret allows explicitly configuring the CSRF secret (e.g. for testing)
+func SetCSRFSecret(s []byte) {
+	csrfSecret = s
+}
+
+// GenerateBoundCSRFToken generates an HMAC-bound 32-byte hex nonce with HMAC hex
+func GenerateBoundCSRFToken(userID string) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(b), nil
+	nonceHex := hex.EncodeToString(b)
+	subject := "anonymous"
+	if userID != "" {
+		subject = userID
+	}
+	mac := hmac.New(sha256.New, getCSRFSecret())
+	mac.Write([]byte(nonceHex + ":" + subject))
+	hmacHex := hex.EncodeToString(mac.Sum(nil))
+	return nonceHex + "." + hmacHex, nil
+}
+
+// GenerateCSRFToken generates a cryptographically secure CSRF token
+func GenerateCSRFToken() (string, error) {
+	return GenerateBoundCSRFToken("")
+}
+
+// ValidateCSRFToken verifies that the token was signed with the server CSRF secret
+// and matches either the authenticated user ID or anonymous session
+func ValidateCSRFToken(token string, userID string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return false
+	}
+	nonceHex, hmacHex := parts[0], parts[1]
+	receivedHMAC, err := hex.DecodeString(hmacHex)
+	if err != nil {
+		return false
+	}
+
+	check := func(subject string) bool {
+		mac := hmac.New(sha256.New, getCSRFSecret())
+		mac.Write([]byte(nonceHex + ":" + subject))
+		expected := mac.Sum(nil)
+		return subtle.ConstantTimeCompare(receivedHMAC, expected) == 1
+	}
+
+	if userID != "" && check(userID) {
+		return true
+	}
+	return check("anonymous")
 }
 
 // SetCSRFCookie sets or refreshes the readable CSRF cookie for the client SPA
-func SetCSRFCookie(w http.ResponseWriter, secure bool) (string, error) {
-	token, err := GenerateCSRFToken()
+func SetCSRFCookie(w http.ResponseWriter, secure bool, userID ...string) (string, error) {
+	uID := ""
+	if len(userID) > 0 {
+		uID = userID[0]
+	}
+	token, err := GenerateBoundCSRFToken(uID)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error","message":"failed to generate CSRF token"}`, http.StatusInternalServerError)
 		return "", err
@@ -99,6 +166,15 @@ func CSRFProtectionMiddleware(next http.Handler) http.Handler {
 
 		if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(headerToken)) != 1 {
 			http.Error(w, `{"error":"csrf_token_mismatch","message":"Ungültiges CSRF-Token"}`, http.StatusForbidden)
+			return
+		}
+
+		var userIDStr string
+		if claims := GetUserClaims(r.Context()); claims != nil {
+			userIDStr = claims.UserID.String()
+		}
+		if !ValidateCSRFToken(headerToken, userIDStr) {
+			http.Error(w, `{"error":"csrf_token_invalid","message":"Ungültiges CSRF-Token"}`, http.StatusForbidden)
 			return
 		}
 

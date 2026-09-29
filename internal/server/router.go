@@ -100,28 +100,29 @@ func NewRouter(cfg Config) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// Defense-in-depth app layer security headers
+	// Defense-in-depth app layer security headers (F-37)
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("X-Frame-Options", "DENY")
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
+			if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+				w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			}
 			next.ServeHTTP(w, r)
 		})
 	})
 
-	// Public API health endpoint with demo_mode, go_version and AI config indicators
+	// Public API health endpoint with status and demo_mode (F-40: no internal AI config leaks)
 	r.Get("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"status":      "healthy",
-			"system":      "openlocalcrm-v3",
-			"version":     "3.0.0",
-			"go_version":  "1.26.0",
-			"demo_mode":   cfg.DemoMode,
-			"ai_provider": aiProvider,
-			"ai_model":    aiModel,
-			"ai_base_url": aiBaseURL,
+			"status":    "healthy",
+			"system":    "openlocalcrm-v3",
+			"version":   "3.0.0",
+			"demo_mode": cfg.DemoMode,
 		})
 	})
 

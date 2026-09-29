@@ -11,8 +11,8 @@ const (
 	CSRFHeaderName = auth.CSRFHeaderName
 )
 
-func SetCSRFCookie(w http.ResponseWriter, secure bool) (string, error) {
-	return auth.SetCSRFCookie(w, secure)
+func SetCSRFCookie(w http.ResponseWriter, secure bool, userID ...string) (string, error) {
+	return auth.SetCSRFCookie(w, secure, userID...)
 }
 
 func ClearCSRFCookie(w http.ResponseWriter, secure ...bool) {

@@ -37,9 +37,14 @@ func TestCSRFProtectionMiddleware(t *testing.T) {
 		t.Fatalf("expected verified Bearer POST to pass, got %d", rec.Code)
 	}
 
+	validToken, err := auth.GenerateCSRFToken()
+	if err != nil {
+		t.Fatalf("failed generating token: %v", err)
+	}
+
 	// 3. Mutating POST with cookie but without X-CSRF-Token header fails (403)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/contacts", nil)
-	req.AddCookie(&http.Cookie{Name: server.CSRFCookieName, Value: "secret-token-123"})
+	req.AddCookie(&http.Cookie{Name: server.CSRFCookieName, Value: validToken})
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
@@ -48,7 +53,7 @@ func TestCSRFProtectionMiddleware(t *testing.T) {
 
 	// 4. Mutating POST with mismatched X-CSRF-Token header fails (403)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/contacts", nil)
-	req.AddCookie(&http.Cookie{Name: server.CSRFCookieName, Value: "secret-token-123"})
+	req.AddCookie(&http.Cookie{Name: server.CSRFCookieName, Value: validToken})
 	req.Header.Set(server.CSRFHeaderName, "wrong-token-456")
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -58,8 +63,8 @@ func TestCSRFProtectionMiddleware(t *testing.T) {
 
 	// 5. Mutating POST with matching X-CSRF-Token header passes (200)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/contacts", nil)
-	req.AddCookie(&http.Cookie{Name: server.CSRFCookieName, Value: "secret-token-123"})
-	req.Header.Set(server.CSRFHeaderName, "secret-token-123")
+	req.AddCookie(&http.Cookie{Name: server.CSRFCookieName, Value: validToken})
+	req.Header.Set(server.CSRFHeaderName, validToken)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -81,9 +86,9 @@ func TestCSRF_InvalidBearerHeaderDoesNotBypassDoubleSubmit(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
 
-	// Mutating POST with cookie and Authorization: Bearer invalid (without valid context or CSRF header)
+	validToken, _ := auth.GenerateCSRFToken()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/contacts", nil)
-	req.AddCookie(&http.Cookie{Name: server.CSRFCookieName, Value: "secret-token-123"})
+	req.AddCookie(&http.Cookie{Name: server.CSRFCookieName, Value: validToken})
 	req.Header.Set("Authorization", "Bearer invalid-unauthenticated-token")
 	rec := httptest.NewRecorder()
 

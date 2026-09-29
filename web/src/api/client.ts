@@ -20,9 +20,19 @@ export class ApiError extends Error {
 }
 
 export function getCookie(name: string): string | null {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
-  return match ? decodeURIComponent(match[3]) : null;
+  if (typeof document === 'undefined' || !document.cookie) return null;
+  const cookies = document.cookie.split(';');
+  for (let i = 0; i < cookies.length; i++) {
+    const cookie = cookies[i].trim();
+    const eqIdx = cookie.indexOf('=');
+    if (eqIdx !== -1) {
+      const key = cookie.substring(0, eqIdx).trim();
+      if (key === name) {
+        return decodeURIComponent(cookie.substring(eqIdx + 1));
+      }
+    }
+  }
+  return null;
 }
 
 let refreshPromise: Promise<void> | null = null;

@@ -17,19 +17,13 @@ import (
 // maxUploadSize limits uploads to 50 MB.
 const maxUploadSize = 50 * 1024 * 1024
 
-// blockedMIMETypes are file types that must not be stored.
-var blockedMIMETypes = map[string]bool{
-	"application/x-executable":    true,
-	"application/x-mach-binary":   true,
-	"application/x-elf":           true,
-	"application/x-dosexec":       true,
-	"application/x-msdownload":    true,
-	"application/x-sharedlib":     true,
-	"application/javascript":      true,
-	"text/x-shellscript":          true,
-	"application/x-sh":            true,
-	"application/x-bat":           true,
-	"application/x-msdos-program": true,
+// allowedMIMETypes are the only file types permitted in storage.
+var allowedMIMETypes = map[string]bool{
+	"application/pdf": true,
+	"image/png":       true,
+	"image/jpeg":      true,
+	"text/plain":      true,
+	"text/csv":        true,
 }
 
 // LocalStorage implements StorageService using the local filesystem volume
@@ -86,6 +80,11 @@ func (s *LocalStorage) Save(ctx context.Context, filename string, r io.Reader) (
 		return "", fmt.Errorf("file exceeds maximum upload size of %d bytes", maxUploadSize)
 	}
 
+	// MIME-type validation via magic bytes MUST run before CAS dedup lookup to prevent cache poisoning
+	if err := s.validateMIME(tempFile.Name()); err != nil {
+		return "", err
+	}
+
 	hashStr := hex.EncodeToString(hasher.Sum(nil))[:16]
 	cleanName := filepath.Base(filename)
 	if cleanName == "" || cleanName == "." {
@@ -100,11 +99,6 @@ func (s *LocalStorage) Save(ctx context.Context, filename string, r io.Reader) (
 		return filepath.Join(relDir, finalName), nil
 	}
 
-	// MIME-type validation via magic bytes
-	if err := s.validateMIME(tempFile.Name()); err != nil {
-		return "", err
-	}
-
 	if err := os.Rename(tempFile.Name(), finalPath); err != nil {
 		return "", fmt.Errorf("failed committing uploaded file: %w", err)
 	}
@@ -112,7 +106,7 @@ func (s *LocalStorage) Save(ctx context.Context, filename string, r io.Reader) (
 	return filepath.Join(relDir, finalName), nil
 }
 
-// validateMIME reads the first 512 bytes of the file to detect MIME type and blocks dangerous types.
+// validateMIME reads the first 512 bytes of the file to detect MIME type and enforces the allowlist.
 func (s *LocalStorage) validateMIME(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -133,8 +127,15 @@ func (s *LocalStorage) validateMIME(path string) error {
 	}
 	mimeType = strings.TrimSpace(mimeType)
 
-	if blockedMIMETypes[mimeType] {
-		return fmt.Errorf("blocked file type: %s", mimeType)
+	// Block HTML/SVG/Script tags disguised as text
+	content := string(buf[:n])
+	lowerContent := strings.ToLower(content)
+	if strings.Contains(lowerContent, "<html") || strings.Contains(lowerContent, "<svg") || strings.Contains(lowerContent, "<script") {
+		return fmt.Errorf("disallowed HTML/script content signature in uploaded file")
+	}
+
+	if !allowedMIMETypes[mimeType] {
+		return fmt.Errorf("unsupported or disallowed file type: %s", mimeType)
 	}
 
 	return nil

@@ -112,7 +112,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Expires:  time.Now().Add(auth.AccessTokenDuration),
 		HttpOnly: true,
 		Secure:   isSecureRequest(r),
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 	})
 
 	if res.RefreshToken != "" {
@@ -127,7 +127,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if _, err := auth.SetCSRFCookie(w, isSecureRequest(r)); err != nil {
+	if _, err := auth.SetCSRFCookie(w, isSecureRequest(r), uuid.UUID(res.User.ID.Bytes).String()); err != nil {
 		return
 	}
 
@@ -165,7 +165,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		Expires:  time.Now().Add(auth.AccessTokenDuration),
 		HttpOnly: true,
 		Secure:   isSecureRequest(r),
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 	})
 
 	if newRefreshToken != "" {

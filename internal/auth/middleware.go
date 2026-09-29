@@ -28,6 +28,19 @@ func IsAuthViaBearer(ctx context.Context) bool {
 	return ok && v
 }
 
+// WithUserClaims attaches authenticated AccessClaims to the context
+func WithUserClaims(ctx context.Context, claims *AccessClaims) context.Context {
+	return context.WithValue(ctx, UserContextKey, claims)
+}
+
+// GetUserClaims extracts AccessClaims from the context if present
+func GetUserClaims(ctx context.Context) *AccessClaims {
+	if claims, ok := ctx.Value(UserContextKey).(*AccessClaims); ok {
+		return claims
+	}
+	return nil
+}
+
 // TokenVersionVerifier resolves the current token_version for a user.
 // *db.Queries and demo.InMemoryQuerier both satisfy it.
 type TokenVersionVerifier interface {
