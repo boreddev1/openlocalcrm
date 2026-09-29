@@ -37,29 +37,70 @@ type ResearchService struct {
 	obsSvc     *ObservabilityService
 }
 
-func isPrivateOrReservedIP(ip net.IP) bool {
+// IsPrivateOrReservedIP checks whether an IP address belongs to private, loopback, link-local,
+// carrier-grade NAT, multicast, reserved documentation, or cloud metadata ranges.
+func IsPrivateOrReservedIP(ip net.IP) bool {
 	if ip == nil {
 		return true
 	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
 	if ip4 := ip.To4(); ip4 != nil {
-		if ip4.IsLoopback() || ip4.IsPrivate() || ip4.IsLinkLocalUnicast() || ip4.IsLinkLocalMulticast() || ip4.IsUnspecified() {
-			return true
-		}
-		if ip4[0] == 169 && ip4[1] == 254 {
-			return true
-		}
+		// 0.0.0.0/8 (Current network)
 		if ip4[0] == 0 {
 			return true
 		}
+		// 100.64.0.0/10 (Carrier-Grade NAT)
 		if ip4[0] == 100 && (ip4[1]&0xc0) == 64 {
+			return true
+		}
+		// 169.254.0.0/16 (Link-Local & Cloud Metadata 169.254.169.254)
+		if ip4[0] == 169 && ip4[1] == 254 {
+			return true
+		}
+		// 192.0.0.0/24 (IETF Protocol Assignments)
+		if ip4[0] == 192 && ip4[1] == 0 && ip4[2] == 0 {
+			return true
+		}
+		// 192.0.2.0/24 (TEST-NET-1)
+		if ip4[0] == 192 && ip4[1] == 0 && ip4[2] == 2 {
+			return true
+		}
+		// 198.18.0.0/15 (Benchmarking)
+		if ip4[0] == 198 && (ip4[1]&0xfe) == 18 {
+			return true
+		}
+		// 198.51.100.0/24 (TEST-NET-2)
+		if ip4[0] == 198 && ip4[1] == 51 && ip4[2] == 100 {
+			return true
+		}
+		// 203.0.113.0/24 (TEST-NET-3)
+		if ip4[0] == 203 && ip4[1] == 0 && ip4[2] == 113 {
+			return true
+		}
+		// 224.0.0.0/4 (Multicast) & 240.0.0.0/4 (Reserved)
+		if ip4[0] >= 224 {
 			return true
 		}
 		return false
 	}
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+
+	// IPv6 specific checks
+	// 6to4 relay (2002::/16)
+	if ip[0] == 0x20 && ip[1] == 0x02 {
 		return true
 	}
+	// Teredo (2001:0000::/32)
+	if ip[0] == 0x20 && ip[1] == 0x01 && ip[2] == 0 && ip[3] == 0 {
+		return true
+	}
+
 	return false
+}
+
+func isPrivateOrReservedIP(ip net.IP) bool {
+	return IsPrivateOrReservedIP(ip)
 }
 
 func NewResearchService(gateway *Gateway, obsSvc *ObservabilityService) *ResearchService {

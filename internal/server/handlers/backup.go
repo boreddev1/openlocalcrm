@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
@@ -70,6 +71,9 @@ func (h *BackupHandler) Export(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotImplemented, "backup_unavailable", backupExportUnavailableMessage)
 		return
 	}
+
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="openlocalcrm-backup.json"`)

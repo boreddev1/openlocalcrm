@@ -235,7 +235,7 @@ func main() {
 		Addr:         ":" + port,
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 0, // Allow SSE streaming
+		WriteTimeout: 30 * time.Second,
 	}
 
 	go func() {

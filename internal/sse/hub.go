@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -38,6 +39,22 @@ func (h *Hub) Broadcast(evt Event) {
 		case ch <- evt:
 		default:
 			// Non-blocking drop if client is saturated
+		}
+	}
+}
+
+// SendToUser sends an event only to the clients registered with the given userID
+func (h *Hub) SendToUser(userID uuid.UUID, evt Event) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for ch, owner := range h.clients {
+		if owner == userID {
+			select {
+			case ch <- evt:
+			default:
+				// Non-blocking drop if client is saturated
+			}
 		}
 	}
 }
@@ -82,6 +99,10 @@ func (h *Hub) ServeHTTPFor(w http.ResponseWriter, r *http.Request, userID uuid.U
 		http.Error(w, `{"error":"Streaming unsupported"}`, http.StatusInternalServerError)
 		return
 	}
+
+	// Disable HTTP server write deadline for this long-lived SSE stream
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

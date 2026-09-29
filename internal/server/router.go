@@ -115,6 +115,22 @@ func NewRouter(cfg Config) http.Handler {
 		})
 	})
 
+	// Global request body size limit: 5MB default, 50MB for uploads/CSV, 100MB for backup restore
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+				var limit int64 = 5 * 1024 * 1024
+				if strings.HasPrefix(r.URL.Path, "/api/v1/backup/restore") {
+					limit = 100 * 1024 * 1024
+				} else if strings.HasPrefix(r.URL.Path, "/api/v1/storage") || strings.HasPrefix(r.URL.Path, "/api/v1/export/csv") {
+					limit = 50 * 1024 * 1024
+				}
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+
 	// Public API health endpoint with status and demo_mode (F-40: no internal AI config leaks)
 	r.Get("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -252,7 +268,7 @@ func NewRouter(cfg Config) http.Handler {
 		noteH = handlers.NewNoteHandler(noteSvc, aiGateway)
 		emailH = handlers.NewEmailHandler(emailSvc, cfg.DemoMode)
 		aiH = handlers.NewAIHandler(triageSvc, chatSvc, researchSvc, obsSvc, aiGateway, cfg.DB)
-		connectorH = handlers.NewConnectorHandler(connectorEngine)
+		connectorH = handlers.NewConnectorHandler(connectorEngine, auditSvc)
 		notificationH = handlers.NewNotificationHandler(notificationSvc)
 		exportH = handlers.NewExportHandler(exportSvc)
 		inviteH = handlers.NewInviteHandler(inviteSvc)
@@ -294,10 +310,14 @@ func NewRouter(cfg Config) http.Handler {
 	}
 
 	loginLimiter := auth.NewRateLimiter(5, time.Minute, 5*time.Minute)
+	connectorLimiter := auth.NewRateLimiter(60, time.Minute, 5*time.Minute)
+	heavyLimiter := auth.NewRateLimiter(10, time.Minute, 5*time.Minute)
 	if cfg.Context != nil {
 		go func() {
 			<-cfg.Context.Done()
 			loginLimiter.Stop()
+			connectorLimiter.Stop()
+			heavyLimiter.Stop()
 		}()
 	}
 
@@ -322,7 +342,7 @@ func NewRouter(cfg Config) http.Handler {
 
 		// Public Webhook intake (secured via Connector Bearer Token, outside CSRF group)
 		if connectorH != nil {
-			api.Post("/connectors/lead-intake", connectorH.LeadIntake)
+			api.With(auth.RateLimitMiddleware(connectorLimiter)).Post("/connectors/lead-intake", connectorH.LeadIntake)
 		}
 
 		// Protected routes (Always enforced JWT authentication, then CSRF protection)
@@ -397,6 +417,7 @@ func NewRouter(cfg Config) http.Handler {
 			if backupH != nil {
 				protected.Route("/backup", func(br chi.Router) {
 					br.Use(auth.RequirePermission(auth.PermBackup))
+					br.Use(auth.RateLimitMiddleware(heavyLimiter))
 					br.Post("/drill", backupH.Drill)
 					br.Get("/export", backupH.Export)
 					br.Post("/restore", backupH.Restore)
@@ -591,6 +612,7 @@ func NewRouter(cfg Config) http.Handler {
 
 			if exportH != nil {
 				protected.Group(func(exportRouter chi.Router) {
+					exportRouter.Use(auth.RateLimitMiddleware(heavyLimiter))
 					exportRouter.With(auth.RequirePermission(auth.PermReportsExport)).Get("/export/contacts.csv", exportH.ExportContactsCSV)
 					exportRouter.With(auth.RequirePermission(auth.PermContactsImport)).Post("/import/contacts", exportH.ImportContactsCSV)
 				})

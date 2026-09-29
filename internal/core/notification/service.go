@@ -48,7 +48,7 @@ func (s *Service) Create(ctx context.Context, input CreateNotificationInput) (db
 	}
 
 	if s.sseHub != nil {
-		s.sseHub.Broadcast(sse.Event{
+		evt := sse.Event{
 			Type: "notification_created",
 			Data: map[string]any{
 				"id":         n.ID,
@@ -58,7 +58,12 @@ func (s *Service) Create(ctx context.Context, input CreateNotificationInput) (db
 				"link":       n.Link.String,
 				"created_at": n.CreatedAt.Time,
 			},
-		})
+		}
+		if input.UserID != nil && input.UserID.Valid {
+			s.sseHub.SendToUser(input.UserID.Bytes, evt)
+		} else {
+			s.sseHub.Broadcast(evt)
+		}
 	}
 
 	return n, nil
