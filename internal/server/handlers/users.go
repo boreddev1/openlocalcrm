@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/invite"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
@@ -17,6 +18,7 @@ import (
 type UserHandler struct {
 	queries db.Querier
 	invites *invite.Service
+	audit   *audit.Service
 }
 
 // NewUserHandler builds the handler. invites may be nil, in which case
@@ -27,6 +29,11 @@ func NewUserHandler(queries db.Querier, invites *invite.Service) *UserHandler {
 		queries: queries,
 		invites: invites,
 	}
+}
+
+func (h *UserHandler) WithAudit(auditSvc *audit.Service) *UserHandler {
+	h.audit = auditSvc
+	return h
 }
 
 type UserResponse struct {
@@ -235,6 +242,15 @@ func (h *UserHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.audit != nil {
+		actingUserID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
+		_ = h.audit.LogDiff(r.Context(), actingUserID, "USER", targetID, "USER_ROLE_CHANGED",
+			audit.DiffMap{"role": targetUser.Role},
+			audit.DiffMap{"role": newRole},
+			auth.ClientIP(r), r.UserAgent(),
+		)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
@@ -298,6 +314,15 @@ func (h *UserHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, `{"error":"update_failed"}`, http.StatusInternalServerError)
 		return
+	}
+
+	if h.audit != nil {
+		actingUserID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
+		_ = h.audit.LogDiff(r.Context(), actingUserID, "USER", targetID, "USER_STATUS_CHANGED",
+			audit.DiffMap{"status": targetUser.Status},
+			audit.DiffMap{"status": newStatus},
+			auth.ClientIP(r), r.UserAgent(),
+		)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -2,11 +2,15 @@ package audit
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
@@ -143,6 +147,46 @@ func changedKeys(oldValues, newValues DiffMap) []string {
 	return result
 }
 
+const GenesisHash = "0000000000000000000000000000000000000000000000000000000000000000"
+
+// ComputeAuditHash computes a SHA-256 hash over all canonical audit entry fields.
+func ComputeAuditHash(prevHash string, userID pgtype.UUID, entityType string, entityID pgtype.UUID, action string, changes, oldVals, newVals []byte, ip, ua string) string {
+	h := sha256.New()
+	var userStr string
+	if userID.Valid {
+		userStr = uuid.UUID(userID.Bytes).String()
+	}
+	var entityStr string
+	if entityID.Valid {
+		entityStr = uuid.UUID(entityID.Bytes).String()
+	}
+	parts := []string{
+		prevHash,
+		userStr,
+		entityType,
+		entityStr,
+		action,
+		string(changes),
+		string(oldVals),
+		string(newVals),
+		ip,
+		ua,
+	}
+	h.Write([]byte(strings.Join(parts, "|")))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func (s *Service) getLatestHash(ctx context.Context) string {
+	if s.queries == nil {
+		return GenesisHash
+	}
+	latest, err := s.queries.GetLatestAuditLogHash(ctx)
+	if err == nil && latest.Valid && latest.String != "" {
+		return latest.String
+	}
+	return GenesisHash
+}
+
 func (s *Service) LogDiff(ctx context.Context, userID pgtype.UUID, entityType string, entityID pgtype.UUID, action string, oldValues, newValues DiffMap, ip, userAgent string) error {
 	sanitizedOld := sanitizeMap(oldValues)
 	sanitizedNew := sanitizeMap(newValues)
@@ -161,6 +205,9 @@ func (s *Service) LogDiff(ctx context.Context, userID pgtype.UUID, entityType st
 		"changed_keys": changedKeys(oldValues, newValues),
 	})
 
+	prevHash := s.getLatestHash(ctx)
+	entryHash := ComputeAuditHash(prevHash, userID, entityType, entityID, action, changesBytes, oldBytes, newBytes, ip, userAgent)
+
 	_, err = s.queries.CreateAuditLog(ctx, db.CreateAuditLogParams{
 		UserID:     userID,
 		EntityType: entityType,
@@ -171,6 +218,8 @@ func (s *Service) LogDiff(ctx context.Context, userID pgtype.UUID, entityType st
 		NewValues:  newBytes,
 		IpAddress:  pgtype.Text{String: ip, Valid: ip != ""},
 		UserAgent:  pgtype.Text{String: userAgent, Valid: userAgent != ""},
+		PrevHash:   pgtype.Text{String: prevHash, Valid: true},
+		Hash:       pgtype.Text{String: entryHash, Valid: true},
 	})
 	return err
 }
@@ -187,16 +236,81 @@ func (s *Service) Log(ctx context.Context, userID pgtype.UUID, entityType string
 		}
 	}
 
+	oldBytes := []byte("{}")
+	newBytes := []byte("{}")
+	prevHash := s.getLatestHash(ctx)
+	entryHash := ComputeAuditHash(prevHash, userID, entityType, entityID, action, changesBytes, oldBytes, newBytes, ip, userAgent)
+
 	_, err := s.queries.CreateAuditLog(ctx, db.CreateAuditLogParams{
 		UserID:     userID,
 		EntityType: entityType,
 		EntityID:   entityID,
 		Action:     action,
 		Changes:    changesBytes,
-		OldValues:  []byte("{}"),
-		NewValues:  []byte("{}"),
+		OldValues:  oldBytes,
+		NewValues:  newBytes,
 		IpAddress:  pgtype.Text{String: ip, Valid: ip != ""},
 		UserAgent:  pgtype.Text{String: userAgent, Valid: userAgent != ""},
+		PrevHash:   pgtype.Text{String: prevHash, Valid: true},
+		Hash:       pgtype.Text{String: entryHash, Valid: true},
 	})
 	return err
+}
+
+// VerifyAuditChain verifies the cryptographic integrity of all audit log rows in chronological order.
+// Returns (valid, verifiedCount, error). If tampering is detected, returns (false, invalidRowIndex, err).
+func (s *Service) VerifyAuditChain(ctx context.Context) (bool, int, error) {
+	if s.queries == nil {
+		return true, 0, nil
+	}
+	logs, err := s.queries.ListAuditLogsAsc(ctx)
+	if err != nil {
+		return false, 0, fmt.Errorf("failed fetching audit logs for verification: %w", err)
+	}
+
+	expectedPrev := GenesisHash
+	for i, l := range logs {
+		// If prev_hash is not set (e.g. legacy log from before migration 21), adopt its hash if valid
+		if !l.PrevHash.Valid || l.PrevHash.String == "" {
+			if l.Hash.Valid && l.Hash.String != "" {
+				expectedPrev = l.Hash.String
+			}
+			continue
+		}
+
+		if l.PrevHash.String != expectedPrev {
+			return false, i, fmt.Errorf("audit chain broken at row %d (ID %v): expected prev_hash %s, got %s",
+				i, l.ID, expectedPrev, l.PrevHash.String)
+		}
+
+		var ip, ua string
+		if l.IpAddress.Valid {
+			ip = l.IpAddress.String
+		}
+		if l.UserAgent.Valid {
+			ua = l.UserAgent.String
+		}
+
+		computed := ComputeAuditHash(
+			l.PrevHash.String,
+			l.UserID,
+			l.EntityType,
+			l.EntityID,
+			l.Action,
+			l.Changes,
+			l.OldValues,
+			l.NewValues,
+			ip,
+			ua,
+		)
+
+		if !l.Hash.Valid || l.Hash.String != computed {
+			return false, i, fmt.Errorf("audit hash mismatch at row %d (ID %v): expected %s, got %s",
+				i, l.ID, computed, l.Hash.String)
+		}
+
+		expectedPrev = l.Hash.String
+	}
+
+	return true, len(logs), nil
 }

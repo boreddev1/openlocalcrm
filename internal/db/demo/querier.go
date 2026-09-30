@@ -1484,10 +1484,36 @@ func (q *InMemoryQuerier) CreateAuditLog(ctx context.Context, arg db.CreateAudit
 		NewValues:  arg.NewValues,
 		IpAddress:  arg.IpAddress,
 		UserAgent:  arg.UserAgent,
+		PrevHash:   arg.PrevHash,
+		Hash:       arg.Hash,
 		CreatedAt:  nowTimestamptz(),
 	}
 	q.auditLogs = append([]db.AuditLog{log}, q.auditLogs...)
 	return log, nil
+}
+
+func (q *InMemoryQuerier) GetLatestAuditLogHash(ctx context.Context) (pgtype.Text, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	for _, l := range q.auditLogs {
+		if l.Hash.Valid && l.Hash.String != "" {
+			return l.Hash, nil
+		}
+	}
+	return pgtype.Text{Valid: false}, nil
+}
+
+func (q *InMemoryQuerier) ListAuditLogsAsc(ctx context.Context) ([]db.AuditLog, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	n := len(q.auditLogs)
+	list := make([]db.AuditLog, n)
+	for i, l := range q.auditLogs {
+		list[n-1-i] = l
+	}
+	return list, nil
 }
 
 func (q *InMemoryQuerier) ListAuditLogsByEntity(ctx context.Context, arg db.ListAuditLogsByEntityParams) ([]db.AuditLog, error) {

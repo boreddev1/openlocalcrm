@@ -126,11 +126,28 @@ func generateRefreshToken() (string, error) {
 }
 
 func (s *AuthService) RevokeRefreshToken(ctx context.Context, rawRefreshToken string) error {
+	return s.RevokeRefreshTokenWithAudit(ctx, rawRefreshToken, "", "")
+}
+
+func (s *AuthService) RevokeRefreshTokenWithAudit(ctx context.Context, rawRefreshToken, ip, userAgent string) error {
 	if rawRefreshToken == "" {
 		return nil
 	}
 	tokenHash := hashToken(rawRefreshToken)
+	if s.audit != nil {
+		if token, err := s.querier.GetRefreshTokenByHash(ctx, tokenHash); err == nil {
+			_ = s.audit.Log(ctx, token.UserID, "SESSION", pgtype.UUID{}, "LOGOUT", map[string]any{
+				"family_id": uuid.UUID(token.FamilyID.Bytes).String(),
+			}, ip, userAgent)
+		}
+	}
 	return s.querier.DeleteRefreshToken(ctx, tokenHash)
+}
+
+func (s *AuthService) AuditLogout(ctx context.Context, userID uuid.UUID, ip, ua string) {
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, pgtype.UUID{Bytes: userID, Valid: true}, "SESSION", pgtype.UUID{}, "LOGOUT", nil, ip, ua)
+	}
 }
 
 func (s *AuthService) RevokeAllSessions(ctx context.Context, userID pgtype.UUID) error {
@@ -180,11 +197,17 @@ type LoginResult struct {
 func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, userAgent string) (*LoginResult, error) {
 	email = strings.TrimSpace(strings.ToLower(email))
 	if email == "" || password == "" {
+		if s.audit != nil {
+			_ = s.audit.Log(ctx, pgtype.UUID{}, "AUTH", pgtype.UUID{}, "LOGIN_FAILED", map[string]any{"reason": "missing_credentials"}, ip, userAgent)
+		}
 		return nil, ErrInvalidCredentials
 	}
 
 	rateLimitKey := fmt.Sprintf("%s:%s", ip, email)
 	if locked, remaining := s.limiter.IsLocked(rateLimitKey); locked {
+		if s.audit != nil {
+			_ = s.audit.Log(ctx, pgtype.UUID{}, "AUTH", pgtype.UUID{}, "LOGIN_FAILED", map[string]any{"reason": "rate_limited", "email": email}, ip, userAgent)
+		}
 		return nil, fmt.Errorf("%w (gesperrt für noch %s)", ErrRateLimited, remaining.Round(time.Second))
 	}
 
@@ -196,6 +219,9 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 			releaseArgonSem()
 		}
 		s.limiter.RecordFailure(rateLimitKey)
+		if s.audit != nil {
+			_ = s.audit.Log(ctx, pgtype.UUID{}, "AUTH", pgtype.UUID{}, "LOGIN_FAILED", map[string]any{"reason": "user_not_found", "email": email}, ip, userAgent)
+		}
 		return nil, ErrInvalidCredentials
 	}
 
@@ -208,11 +234,17 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 
 	if !passwordMatches {
 		s.limiter.RecordFailure(rateLimitKey)
+		if s.audit != nil {
+			_ = s.audit.Log(ctx, user.ID, "USER", user.ID, "LOGIN_FAILED", map[string]any{"reason": "invalid_password"}, ip, userAgent)
+		}
 		return nil, ErrInvalidCredentials
 	}
 
 	if user.Status != "ACTIVE" {
 		s.limiter.RecordFailure(rateLimitKey)
+		if s.audit != nil {
+			_ = s.audit.Log(ctx, user.ID, "USER", user.ID, "LOGIN_FAILED", map[string]any{"reason": "user_not_active"}, ip, userAgent)
+		}
 		return nil, ErrInvalidCredentials
 	}
 
@@ -228,12 +260,18 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 		plainSecret, err := crypto.DecryptSecret(encryptedSecret)
 		if err != nil {
 			s.limiter.RecordFailure(rateLimitKey)
+			if s.audit != nil {
+				_ = s.audit.Log(ctx, user.ID, "USER", user.ID, "LOGIN_FAILED", map[string]any{"reason": "totp_decrypt_failed"}, ip, userAgent)
+			}
 			return nil, ErrInvalidTOTPCode
 		}
 
 		valid, usedStep := ValidateTOTPCodeWithStep(totpCode, plainSecret, user.TotpLastUsedStep)
 		if !valid {
 			s.limiter.RecordFailure(rateLimitKey)
+			if s.audit != nil {
+				_ = s.audit.Log(ctx, user.ID, "USER", user.ID, "LOGIN_FAILED", map[string]any{"reason": "invalid_totp_code"}, ip, userAgent)
+			}
 			return nil, ErrInvalidTOTPCode
 		}
 
@@ -280,6 +318,12 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 		FamilyID:  pgtype.UUID{Bytes: familyID, Valid: true},
 	}); err != nil {
 		return nil, fmt.Errorf("failed persisting refresh token: %w", err)
+	}
+
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, user.ID, "USER", user.ID, "LOGIN_SUCCESS", map[string]any{
+			"email": user.Email,
+		}, ip, userAgent)
 	}
 
 	return &LoginResult{
@@ -414,6 +458,12 @@ func (s *AuthService) SetupTOTP(ctx context.Context, userID uuid.UUID) (*TOTPSet
 		return nil, err
 	}
 
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, pgID, "USER", pgID, "TOTP_SETUP_INITIATED", map[string]any{
+			"user_id": userID.String(),
+		}, "", "")
+	}
+
 	return &TOTPSetupResult{
 		Secret: secret,
 		URL:    url,
@@ -445,6 +495,11 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, userID uuid.UUID, secret, 
 	})
 
 	_, _ = s.querier.IncrementUserTokenVersion(ctx, pgID)
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, pgID, "USER", pgID, "TOTP_ENABLED", map[string]any{
+			"user_id": userID.String(),
+		}, "", "")
+	}
 	return nil
 }
 
@@ -475,6 +530,11 @@ func (s *AuthService) DisableTOTP(ctx context.Context, userID uuid.UUID, current
 	}
 
 	_, _ = s.querier.IncrementUserTokenVersion(ctx, pgID)
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, pgID, "USER", pgID, "TOTP_DISABLED", map[string]any{
+			"user_id": userID.String(),
+		}, "", "")
+	}
 	return nil
 }
 
@@ -522,6 +582,12 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldP
 
 	if s.bootstrapSecretPath != "" {
 		_ = os.Remove(s.bootstrapSecretPath)
+	}
+
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, pgID, "USER", pgID, "PASSWORD_CHANGED", map[string]any{
+			"user_id": userID.String(),
+		}, "", "")
 	}
 
 	return nil

@@ -272,7 +272,7 @@ func NewRouter(cfg Config) http.Handler {
 		notificationH = handlers.NewNotificationHandler(notificationSvc)
 		exportH = handlers.NewExportHandler(exportSvc)
 		inviteH = handlers.NewInviteHandler(inviteSvc)
-		userH = handlers.NewUserHandler(cfg.DB, inviteSvc)
+		userH = handlers.NewUserHandler(cfg.DB, inviteSvc).WithAudit(auditSvc)
 		emailTemplateH = handlers.NewEmailTemplateHandler(emailTemplateSvc)
 		// Both *db.Queries and the demo querier implement the streaming row
 		// source, so the router never has to know which one it holds. A
@@ -284,7 +284,7 @@ func NewRouter(cfg Config) http.Handler {
 			rowSource = nil
 		}
 		backupH = handlers.NewBackupHandler(backup.NewService(rowSource, auditSvc, cfg.Pool, cfg.DB))
-		settingsH = handlers.NewSettingsHandler()
+		settingsH = handlers.NewSettingsHandler().WithAudit(auditSvc)
 		automationH = handlers.NewAutomationHandler(automationSvc)
 		sessionH = handlers.NewSessionHandler(authSvc, cfg.SSEHub)
 		ownershipAdminH = handlers.NewOwnershipAdminHandler(cfg.DB, auditSvc)

@@ -111,6 +111,7 @@ type AiAuditLog struct {
 	PiiRedactionsCount int32              `json:"pii_redactions_count"`
 	HumanApproved      pgtype.Bool        `json:"human_approved"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UserID             pgtype.UUID        `json:"user_id"`
 }
 
 type AiResearchJob struct {
@@ -158,6 +159,8 @@ type AuditLog struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	OldValues  []byte             `json:"old_values"`
 	NewValues  []byte             `json:"new_values"`
+	PrevHash   pgtype.Text        `json:"prev_hash"`
+	Hash       pgtype.Text        `json:"hash"`
 }
 
 type CallActivity struct {

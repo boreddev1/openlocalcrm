@@ -571,3 +571,59 @@ func TestSetupTOTPStoresNothing(t *testing.T) {
 	require.True(t, user.TotpEnabled)
 	require.True(t, user.TotpSecretEncrypted.Valid)
 }
+
+type captureAuditLogger struct {
+	actions []string
+}
+
+func (c *captureAuditLogger) Log(ctx context.Context, userID pgtype.UUID, entityType string, entityID pgtype.UUID, action string, changes any, ip, userAgent string) error {
+	c.actions = append(c.actions, action)
+	return nil
+}
+
+func TestAuthService_SecurityEventAuditing(t *testing.T) {
+	svc, q, _ := setupTestAuthService(t)
+	capturer := &captureAuditLogger{}
+	svc = svc.WithAuditLogger(capturer)
+	ctx := context.Background()
+
+	// 1. Login failed
+	_, err := svc.Login(ctx, "admin@openlocalcrm.local", "wrong-pw", "", "127.0.0.1", "TestAgent")
+	require.Error(t, err)
+	require.Contains(t, capturer.actions, "LOGIN_FAILED")
+
+	// 2. Login success
+	res, err := svc.Login(ctx, "admin@openlocalcrm.local", "demo123", "", "127.0.0.1", "TestAgent")
+	require.NoError(t, err)
+	require.Contains(t, capturer.actions, "LOGIN_SUCCESS")
+
+	// 3. Logout via refresh token
+	err = svc.RevokeRefreshTokenWithAudit(ctx, res.RefreshToken, "127.0.0.1", "TestAgent")
+	require.NoError(t, err)
+	require.Contains(t, capturer.actions, "LOGOUT")
+
+	// 4. AuditLogout helper
+	adminUser, err := q.GetUserByEmail(ctx, "admin@openlocalcrm.local")
+	require.NoError(t, err)
+	adminUUID := uuid.UUID(adminUser.ID.Bytes)
+	svc.AuditLogout(ctx, adminUUID, "127.0.0.1", "TestAgent")
+
+	// 5. TOTP setup, verify, disable
+	totpRes, err := svc.SetupTOTP(ctx, adminUUID)
+	require.NoError(t, err)
+	require.Contains(t, capturer.actions, "TOTP_SETUP_INITIATED")
+
+	code := codeFor(t, totpRes.Secret)
+	err = svc.VerifyTOTP(ctx, adminUUID, totpRes.Secret, code)
+	require.NoError(t, err)
+	require.Contains(t, capturer.actions, "TOTP_ENABLED")
+
+	err = svc.DisableTOTP(ctx, adminUUID, "demo123")
+	require.NoError(t, err)
+	require.Contains(t, capturer.actions, "TOTP_DISABLED")
+
+	// 6. Change password
+	err = svc.ChangePassword(ctx, adminUUID, "demo123", "new-strong-password-123")
+	require.NoError(t, err)
+	require.Contains(t, capturer.actions, "PASSWORD_CHANGED")
+}

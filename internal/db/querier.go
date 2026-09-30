@@ -135,6 +135,7 @@ type Querier interface {
 	GetEmailMessageByID(ctx context.Context, id pgtype.UUID) (EmailMessage, error)
 	GetEmailTemplateByKey(ctx context.Context, key string) (EmailTemplate, error)
 	GetKBArticleByID(ctx context.Context, id pgtype.UUID) (GetKBArticleByIDRow, error)
+	GetLatestAuditLogHash(ctx context.Context) (pgtype.Text, error)
 	GetNoteByID(ctx context.Context, id pgtype.UUID) (Note, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error)
 	// Deliberately ignores expiry and used_at: the replay path needs to see a spent
@@ -151,6 +152,7 @@ type Querier interface {
 	ListAIResearchJobs(ctx context.Context) ([]AiResearchJob, error)
 	ListAllNotifications(ctx context.Context, arg ListAllNotificationsParams) ([]Notification, error)
 	ListAppointments(ctx context.Context, userID pgtype.UUID) ([]Appointment, error)
+	ListAuditLogsAsc(ctx context.Context) ([]AuditLog, error)
 	ListAuditLogsByEntity(ctx context.Context, arg ListAuditLogsByEntityParams) ([]AuditLog, error)
 	ListCallActivitiesByContact(ctx context.Context, contactID pgtype.UUID) ([]CallActivity, error)
 	ListCompanies(ctx context.Context, arg ListCompaniesParams) ([]Company, error)

@@ -195,8 +195,14 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
 		refreshToken = cookie.Value
 	}
+	ip := auth.ClientIP(r)
+	ua := r.UserAgent()
 	if refreshToken != "" {
-		_ = h.service.RevokeRefreshToken(r.Context(), refreshToken)
+		_ = h.service.RevokeRefreshTokenWithAudit(r.Context(), refreshToken, ip, ua)
+	} else if claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims); ok && claims != nil {
+		if h.service != nil {
+			h.service.AuditLogout(r.Context(), claims.UserID, ip, ua)
+		}
 	}
 
 	ClearAuthCookies(w, r)

@@ -8,12 +8,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/launcher"
 )
 
 type SettingsHandler struct {
 	baseDir string
+	audit   *audit.Service
 }
 
 func NewSettingsHandler(baseDir ...string) *SettingsHandler {
@@ -22,6 +25,11 @@ func NewSettingsHandler(baseDir ...string) *SettingsHandler {
 		dir = baseDir[0]
 	}
 	return &SettingsHandler{baseDir: dir}
+}
+
+func (h *SettingsHandler) WithAudit(auditSvc *audit.Service) *SettingsHandler {
+	h.audit = auditSvc
+	return h
 }
 
 // ExportSettings exports current system configuration (AI settings, Admin, Port, Connector token) without full database dump.
@@ -88,6 +96,13 @@ func (h *SettingsHandler) ExportSettings(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	if h.audit != nil {
+		actingUserID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
+		_ = h.audit.Log(r.Context(), actingUserID, "SYSTEM", pgtype.UUID{}, "SETTINGS_EXPORTED", map[string]any{
+			"action": "export",
+		}, auth.ClientIP(r), r.UserAgent())
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="openlocalcrm-settings.json"`)
 	_ = json.NewEncoder(w).Encode(exported.RedactSecrets())
@@ -129,6 +144,13 @@ func (h *SettingsHandler) ImportSettings(w http.ResponseWriter, r *http.Request)
 		}
 		writeJSONError(w, http.StatusInternalServerError, "import_failed", "Einstellungen konnten nicht importiert werden")
 		return
+	}
+
+	if h.audit != nil {
+		actingUserID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
+		_ = h.audit.Log(r.Context(), actingUserID, "SYSTEM", pgtype.UUID{}, "SETTINGS_IMPORTED", map[string]any{
+			"action": "import",
+		}, auth.ClientIP(r), r.UserAgent())
 	}
 
 	w.Header().Set("Content-Type", "application/json")

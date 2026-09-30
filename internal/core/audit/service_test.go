@@ -169,3 +169,111 @@ func containsAny(value string, candidates ...string) bool {
 	}
 	return false
 }
+
+type tamperedQuerier struct {
+	*demo.InMemoryQuerier
+	tamperFunc func([]db.AuditLog) []db.AuditLog
+}
+
+func (t *tamperedQuerier) ListAuditLogsAsc(ctx context.Context) ([]db.AuditLog, error) {
+	logs, err := t.InMemoryQuerier.ListAuditLogsAsc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if t.tamperFunc != nil {
+		return t.tamperFunc(logs), nil
+	}
+	return logs, nil
+}
+
+func TestAuditService_HashChain_Verification(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	svc := audit.NewService(querier)
+
+	userID := pgtype.UUID{Bytes: [16]byte{1, 1, 1}, Valid: true}
+	contactID := pgtype.UUID{Bytes: [16]byte{2, 2, 2}, Valid: true}
+
+	// 1. Log multiple events
+	err := svc.Log(ctx, userID, "CONTACT", contactID, "CREATE", map[string]string{"name": "Alice"}, "127.0.0.1", "Agent1")
+	if err != nil {
+		t.Fatalf("Log 1 failed: %v", err)
+	}
+
+	err = svc.LogDiff(ctx, userID, "CONTACT", contactID, "UPDATE",
+		audit.DiffMap{"name": "Alice"},
+		audit.DiffMap{"name": "Alice Smith"},
+		"127.0.0.1", "Agent1",
+	)
+	if err != nil {
+		t.Fatalf("LogDiff 2 failed: %v", err)
+	}
+
+	err = svc.Log(ctx, userID, "DEAL", contactID, "WON", map[string]int{"volume": 5000}, "127.0.0.1", "Agent1")
+	if err != nil {
+		t.Fatalf("Log 3 failed: %v", err)
+	}
+
+	// 2. Verify hash chain
+	valid, count, err := svc.VerifyAuditChain(ctx)
+	if err != nil {
+		t.Fatalf("VerifyAuditChain failed: %v", err)
+	}
+	if !valid {
+		t.Fatalf("expected audit chain to be valid, got false")
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 verified logs, got %d", count)
+	}
+}
+
+func TestAuditService_HashChain_TamperingDetected(t *testing.T) {
+	ctx := context.Background()
+	memQ := demo.NewInMemoryQuerier()
+	svc := audit.NewService(memQ)
+
+	userID := pgtype.UUID{Bytes: [16]byte{1, 1, 1}, Valid: true}
+	contactID := pgtype.UUID{Bytes: [16]byte{2, 2, 2}, Valid: true}
+
+	_ = svc.Log(ctx, userID, "CONTACT", contactID, "CREATE", map[string]string{"name": "Alice"}, "127.0.0.1", "Agent1")
+	_ = svc.Log(ctx, userID, "CONTACT", contactID, "UPDATE", map[string]string{"name": "Bob"}, "127.0.0.1", "Agent1")
+	_ = svc.Log(ctx, userID, "CONTACT", contactID, "DELETE", nil, "127.0.0.1", "Agent1")
+
+	// Case 1: Tamper with action on second record
+	tqTamperedContent := &tamperedQuerier{
+		InMemoryQuerier: memQ,
+		tamperFunc: func(logs []db.AuditLog) []db.AuditLog {
+			tampered := make([]db.AuditLog, len(logs))
+			copy(tampered, logs)
+			tampered[1].Action = "MODIFIED_ACTION"
+			return tampered
+		},
+	}
+	svcTampered := audit.NewService(tqTamperedContent)
+	valid, idx, err := svcTampered.VerifyAuditChain(ctx)
+	if valid || err == nil {
+		t.Fatalf("expected tampering detection for content change, got valid=%v, err=%v", valid, err)
+	}
+	if idx != 1 {
+		t.Errorf("expected mismatch at index 1, got %d", idx)
+	}
+
+	// Case 2: Tamper with prev_hash chain link
+	tqTamperedLink := &tamperedQuerier{
+		InMemoryQuerier: memQ,
+		tamperFunc: func(logs []db.AuditLog) []db.AuditLog {
+			tampered := make([]db.AuditLog, len(logs))
+			copy(tampered, logs)
+			tampered[2].PrevHash = pgtype.Text{String: "corrupted_prev_hash", Valid: true}
+			return tampered
+		},
+	}
+	svcTamperedLink := audit.NewService(tqTamperedLink)
+	valid, idx, err = svcTamperedLink.VerifyAuditChain(ctx)
+	if valid || err == nil {
+		t.Fatalf("expected tampering detection for prev_hash link, got valid=%v, err=%v", valid, err)
+	}
+	if idx != 2 {
+		t.Errorf("expected broken chain at index 2, got %d", idx)
+	}
+}
