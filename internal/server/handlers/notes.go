@@ -117,7 +117,7 @@ func (h *NoteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		UserID:     authorID,
 	})
 	if err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "create_note_failed", "Notiz konnte nicht erstellt werden")
 		return
 	}
 

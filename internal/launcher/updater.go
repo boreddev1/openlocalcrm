@@ -3,6 +3,8 @@ package launcher
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -348,6 +350,52 @@ func (u *Updater) ApplyStagedFiles(stagingDir string, logChan chan<- string) err
 	return err
 }
 
+// VerifyBinaryChecksum verifies the SHA-256 hash of a binary file against a SHA256SUMS file if present.
+func VerifyBinaryChecksum(binaryPath, sumsPath string) error {
+	sumsData, err := os.ReadFile(sumsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed reading checksum file: %w", err)
+	}
+
+	binFile, err := os.Open(binaryPath)
+	if err != nil {
+		return fmt.Errorf("failed opening binary for checksum: %w", err)
+	}
+	defer binFile.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, binFile); err != nil {
+		return fmt.Errorf("failed hashing binary: %w", err)
+	}
+	actualHash := hex.EncodeToString(h.Sum(nil))
+
+	baseName := filepath.Base(binaryPath)
+	lines := strings.Split(string(sumsData), "\n")
+	var expectedHash string
+	for _, l := range lines {
+		fields := strings.Fields(strings.TrimSpace(l))
+		if len(fields) >= 2 {
+			fileName := filepath.Base(fields[1])
+			if fileName == baseName {
+				expectedHash = strings.ToLower(fields[0])
+				break
+			}
+		}
+	}
+
+	if expectedHash == "" {
+		return nil
+	}
+
+	if !strings.EqualFold(actualHash, expectedHash) {
+		return fmt.Errorf("prüfsummenfehler für %s: erwartet %s, erhalten %s", baseName, expectedHash, actualHash)
+	}
+	return nil
+}
+
 func (u *Updater) HotSwapExecutable(stagingDir string, logChan chan<- string) (string, error) {
 	currentExe, err := os.Executable()
 	if err != nil {
@@ -382,6 +430,25 @@ func (u *Updater) HotSwapExecutable(stagingDir string, logChan chan<- string) (s
 
 	if sourceBinary == "" {
 		return "", fmt.Errorf("no replacement binary found in staging for %s (searched: %v)", exeName, candidates)
+	}
+
+	// Verify SHA-256 checksum if SHA256SUMS file exists
+	sumsCandidates := []string{
+		filepath.Join(filepath.Dir(sourceBinary), "SHA256SUMS"),
+		filepath.Join(filepath.Dir(sourceBinary), "SHA256SUMS.txt"),
+		filepath.Join(stagingDir, "SHA256SUMS"),
+		filepath.Join(stagingDir, "SHA256SUMS.txt"),
+	}
+	for _, sc := range sumsCandidates {
+		if _, statErr := os.Stat(sc); statErr == nil {
+			if verifyErr := VerifyBinaryChecksum(sourceBinary, sc); verifyErr != nil {
+				return "", fmt.Errorf("sicherheitsprüfung fehlgeschlagen: %w", verifyErr)
+			}
+			if logChan != nil {
+				logChan <- fmt.Sprintf("[Update] SHA-256 Prüfsumme für %s erfolgreich verifiziert.", filepath.Base(sourceBinary))
+			}
+			break
+		}
 	}
 
 	if logChan != nil {

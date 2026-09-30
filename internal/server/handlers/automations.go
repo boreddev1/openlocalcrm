@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -21,36 +20,36 @@ func NewAutomationHandler(service *automation.Service) *AutomationHandler {
 func (h *AutomationHandler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 	workflows, err := h.service.ListDefaultWorkflows(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "workflow_list_failed", "Workflows konnten nicht geladen werden")
 		return
 	}
 	if workflows == nil {
 		workflows = []automation.Workflow{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(workflows)
+	_ = json.NewEncoder(w).Encode(workflows)
 }
 
 func (h *AutomationHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	var wf automation.Workflow
 	if err := json.NewDecoder(r.Body).Decode(&wf); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request_body", "Ungültiger Anfrageinhalt")
 		return
 	}
 	created, err := h.service.CreateWorkflow(r.Context(), wf)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "workflow_create_failed", "Workflow konnte nicht erstellt werden")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(created)
+	_ = json.NewEncoder(w).Encode(created)
 }
 
 func (h *AutomationHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	runs, err := h.service.ListRuns(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "run_list_failed", "Workflow-Ausführungen konnten nicht geladen werden")
 		return
 	}
 	if runs == nil {
@@ -65,18 +64,18 @@ func (h *AutomationHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 func (h *AutomationHandler) ApproveStep(w http.ResponseWriter, r *http.Request) {
 	runID := chi.URLParam(r, "id")
 	if runID == "" {
-		http.Error(w, "run id is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "run_id_required", "Workflow-Run-ID ist erforderlich")
 		return
 	}
 
 	run, err := h.service.ApproveStep(r.Context(), runID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "approve_step_failed", "Schritt konnte nicht genehmigt werden")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(run)
+	_ = json.NewEncoder(w).Encode(run)
 }
 
 // TestRunWorkflow handles POST /automations/{id}/test-run
@@ -84,27 +83,27 @@ func (h *AutomationHandler) ApproveStep(w http.ResponseWriter, r *http.Request) 
 func (h *AutomationHandler) TestRunWorkflow(w http.ResponseWriter, r *http.Request) {
 	wfID := chi.URLParam(r, "id")
 	if wfID == "" {
-		http.Error(w, `{"error":"workflow_id_required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "workflow_id_required", "Workflow-ID ist erforderlich")
 		return
 	}
 
 	var req automation.TargetInput
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid_request_body"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request_body", "Ungültiger Anfrageinhalt")
 		return
 	}
 	if strings.TrimSpace(req.TargetID) == "" || strings.TrimSpace(req.TargetType) == "" {
-		http.Error(w, `{"error":"missing_target","message":"target_id and target_type are required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing_target", "target_id und target_type sind erforderlich")
 		return
 	}
 
 	run, err := h.service.TestRunWorkflow(r.Context(), wfID, req)
 	if err != nil {
 		if strings.Contains(err.Error(), "nicht gefunden") {
-			http.Error(w, fmt.Sprintf(`{"error":"not_found","message":%q}`, err.Error()), http.StatusNotFound)
+			writeJSONError(w, http.StatusNotFound, "not_found", "Zielobjekt nicht gefunden")
 			return
 		}
-		http.Error(w, fmt.Sprintf(`{"error":"test_run_failed","message":%q}`, err.Error()), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "test_run_failed", "Test-Ausführung fehlgeschlagen")
 		return
 	}
 

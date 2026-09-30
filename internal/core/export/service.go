@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -120,20 +121,56 @@ func (s *Service) ExportContactsCSV(ctx context.Context) ([]byte, error) {
 // ImportContactsCSV imports contacts from a CSV file using streaming line-by-line reading
 func (s *Service) ImportContactsCSV(ctx context.Context, actorID pgtype.UUID, r io.Reader) (int, error) {
 	reader := csv.NewReader(r)
+	reader.TrimLeadingSpace = true
 
-	// Read and discard header row
-	_, err := reader.Read()
+	// Read and parse header row
+	headers, err := reader.Read()
 	if err != nil {
 		if err == io.EOF {
 			return 0, nil
 		}
-		return 0, err
+		return 0, fmt.Errorf("ungültige CSV-Kopfzeile: %w", err)
 	}
+
+	colMap := make(map[string]int)
+	for i, h := range headers {
+		norm := strings.ToLower(strings.TrimSpace(h))
+		norm = strings.ReplaceAll(norm, "-", "")
+		norm = strings.ReplaceAll(norm, "_", "")
+		norm = strings.ReplaceAll(norm, " ", "")
+		colMap[norm] = i
+	}
+
+	resolveCol := func(names ...string) (int, bool) {
+		for _, name := range names {
+			norm := strings.ToLower(strings.TrimSpace(name))
+			norm = strings.ReplaceAll(norm, "-", "")
+			norm = strings.ReplaceAll(norm, "_", "")
+			norm = strings.ReplaceAll(norm, " ", "")
+			if idx, ok := colMap[norm]; ok {
+				return idx, true
+			}
+		}
+		return -1, false
+	}
+
+	lastNameIdx, hasLastName := resolveCol("nachname", "lastname", "last_name", "name")
+	if !hasLastName {
+		return 0, errors.New("erforderliche Spalte 'Nachname' fehlt in CSV")
+	}
+
+	firstNameIdx, _ := resolveCol("vorname", "firstname", "first_name", "first")
+	emailIdx, _ := resolveCol("email", "e-mail", "mail")
+	phoneIdx, _ := resolveCol("phone", "telefon", "telefonnummer", "fon", "tel", "mobile")
+	posIdx, _ := resolveCol("position", "funktion", "titel")
+	streetIdx, _ := resolveCol("strasse", "straße", "street", "address_street", "adresse")
+	zipIdx, _ := resolveCol("plz", "postleitzahl", "zip", "zipcode", "address_zip")
+	cityIdx, _ := resolveCol("stadt", "ort", "city", "address_city")
 
 	count := 0
 	const maxRows = 5000
 
-	for {
+	for line := 2; ; line++ {
 		row, err := reader.Read()
 		if err != nil {
 			if err == io.EOF {
@@ -143,25 +180,47 @@ func (s *Service) ImportContactsCSV(ctx context.Context, actorID pgtype.UUID, r 
 			continue
 		}
 
-		if len(row) < 2 {
+		if len(row) <= lastNameIdx {
 			continue
 		}
 
-		firstName := strings.TrimSpace(row[0])
-		lastName := strings.TrimSpace(row[1])
-		email := ""
-		if len(row) > 2 {
-			email = strings.TrimSpace(row[2])
-		}
-
+		lastName := strings.TrimSpace(row[lastNameIdx])
 		if lastName == "" {
 			continue
 		}
 
+		var firstName, email, phone, pos, street, zip, city string
+		if firstNameIdx >= 0 && firstNameIdx < len(row) {
+			firstName = strings.TrimSpace(row[firstNameIdx])
+		}
+		if emailIdx >= 0 && emailIdx < len(row) {
+			email = strings.TrimSpace(row[emailIdx])
+		}
+		if phoneIdx >= 0 && phoneIdx < len(row) {
+			phone = strings.TrimSpace(row[phoneIdx])
+		}
+		if posIdx >= 0 && posIdx < len(row) {
+			pos = strings.TrimSpace(row[posIdx])
+		}
+		if streetIdx >= 0 && streetIdx < len(row) {
+			street = strings.TrimSpace(row[streetIdx])
+		}
+		if zipIdx >= 0 && zipIdx < len(row) {
+			zip = strings.TrimSpace(row[zipIdx])
+		}
+		if cityIdx >= 0 && cityIdx < len(row) {
+			city = strings.TrimSpace(row[cityIdx])
+		}
+
 		_, err = s.contactSvc.Create(ctx, actorID, contact.CreateContactInput{
-			FirstName: firstName,
-			LastName:  lastName,
-			Email:     email,
+			FirstName:     firstName,
+			LastName:      lastName,
+			Email:         email,
+			Phone:         phone,
+			Position:      pos,
+			AddressStreet: street,
+			AddressZip:    zip,
+			AddressCity:   city,
 		})
 		if err == nil {
 			count++

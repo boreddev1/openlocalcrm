@@ -241,7 +241,7 @@ func (h *AIHandler) ListKB(w http.ResponseWriter, r *http.Request) {
 	if h.querier != nil {
 		dbArticles, err := h.querier.ListKBArticles(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "kb_list_failed", "Wissensdatenbank-Artikel konnten nicht geladen werden")
 			return
 		}
 		res := make([]KBArticle, len(dbArticles))
@@ -418,7 +418,7 @@ func (h *AIHandler) DeleteKB(w http.ResponseWriter, r *http.Request) {
 
 	if h.querier != nil {
 		if err := h.querier.DeleteKBArticle(r.Context(), pgtype.UUID{Bytes: u, Valid: true}); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "delete_failed", err.Error())
+			writeJSONError(w, http.StatusInternalServerError, "delete_failed", "KB-Artikel konnte nicht gelöscht werden")
 			return
 		}
 	}
@@ -442,7 +442,7 @@ func (h *AIHandler) ListResearchJobs(w http.ResponseWriter, r *http.Request) {
 	if h.querier != nil {
 		dbJobs, err := h.querier.ListAIResearchJobs(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "jobs_list_failed", "Recherche-Aufträge konnten nicht geladen werden")
 			return
 		}
 		res := make([]ResearchJob, len(dbJobs))

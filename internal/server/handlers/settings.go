@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -108,27 +107,27 @@ func (h *SettingsHandler) ImportSettings(w http.ResponseWriter, r *http.Request)
 	if strings.Contains(contentType, "multipart/form-data") {
 		file, _, err := r.FormFile("settings")
 		if err != nil {
-			http.Error(w, `{"error":"missing_file","message":"Einstellungsdatei erforderlich"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "missing_file", "Einstellungsdatei erforderlich")
 			return
 		}
 		defer file.Close()
 		if err := json.NewDecoder(file).Decode(&settings); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"invalid_json","message":"%s"}`, err.Error()), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "invalid_json", "Ungültiges JSON-Format")
 			return
 		}
 	} else {
 		if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"invalid_body","message":"%s"}`, err.Error()), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "invalid_body", "Ungültiger Anfrageinhalt")
 			return
 		}
 	}
 
 	if err := launcher.ImportSettingsToEnv(h.baseDir, &settings, true); err != nil {
 		if strings.Contains(err.Error(), "invalid control characters") || strings.Contains(err.Error(), "cannot be nil") {
-			http.Error(w, fmt.Sprintf(`{"error":"bad_request","message":"%s"}`, err.Error()), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "bad_request", err.Error())
 			return
 		}
-		http.Error(w, fmt.Sprintf(`{"error":"import_failed","message":"%s"}`, err.Error()), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "import_failed", "Einstellungen konnten nicht importiert werden")
 		return
 	}
 

@@ -40,20 +40,20 @@ func (h *ExportHandler) ImportContactsCSV(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10 MB limit
-		http.Error(w, `{"error":"file too large or invalid form"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "file_too_large", "Datei zu groß oder ungültiges Formular")
 		return
 	}
 
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, `{"error":"missing file field"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing_file", "Dateifeld 'file' fehlt")
 		return
 	}
 	defer file.Close()
 
 	importedCount, err := h.service.ImportContactsCSV(r.Context(), actorID, file)
 	if err != nil {
-		http.Error(w, `{"error":"failed to import csv: `+err.Error()+`"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "import_failed", "CSV-Import fehlgeschlagen: "+err.Error())
 		return
 	}
 

@@ -207,7 +207,11 @@ func (h *CompanyHandler) Update(w http.ResponseWriter, r *http.Request) {
 		AddressCountry: req.AddressCountry,
 	})
 	if err != nil {
-		http.Error(w, `{"error":"failed to update company: `+err.Error()+`"}`, http.StatusInternalServerError)
+		if db.IsUniqueViolation(err) {
+			writeJSONError(w, http.StatusConflict, "company_conflict", "Ein Unternehmen mit diesen Daten existiert bereits")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "update_failed", "Unternehmen konnte nicht aktualisiert werden")
 		return
 	}
 

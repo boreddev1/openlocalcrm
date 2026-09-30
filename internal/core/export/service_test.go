@@ -165,3 +165,61 @@ func TestExportContactsCSV_EnergyConversionErrorIsReturned(t *testing.T) {
 		t.Fatal("expected energy conversion error")
 	}
 }
+
+func TestImportContactsCSV_DynamicHeadersAndValidation(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	auditSvc := audit.NewService(querier)
+	contactSvc := contact.NewService(querier, auditSvc)
+	exportSvc := export.NewService(querier, contactSvc)
+
+	var actorID pgtype.UUID
+	_ = actorID.Scan("11111111-1111-1111-1111-111111111111")
+
+	t.Run("Reordered headers with English/German mixed", func(t *testing.T) {
+		csvData := "Email,Last_Name,first-name,Telefon,Stadt\nclara@test.de,Schmidt,Clara,+491234567,Berlin\n"
+		imported, err := exportSvc.ImportContactsCSV(ctx, actorID, strings.NewReader(csvData))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if imported != 1 {
+			t.Fatalf("expected 1 imported, got %d", imported)
+		}
+
+		contacts, err := contactSvc.List(ctx, 50, 0, actorID)
+		if err != nil || len(contacts) == 0 {
+			t.Fatalf("failed listing contacts: %v", err)
+		}
+		found := false
+		for _, c := range contacts {
+			if c.LastName == "Schmidt" && c.FirstName == "Clara" && c.Email.String == "clara@test.de" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("imported contact Schmidt not found with correct mapped fields")
+		}
+	})
+
+	t.Run("Missing required lastName header returns error", func(t *testing.T) {
+		csvData := "Vorname,Email,Telefon\nMax,max@test.de,+49111\n"
+		_, err := exportSvc.ImportContactsCSV(ctx, actorID, strings.NewReader(csvData))
+		if err == nil {
+			t.Fatal("expected error for missing lastName header, got nil")
+		}
+		if !strings.Contains(err.Error(), "Nachname") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("Empty CSV returns zero count", func(t *testing.T) {
+		imported, err := exportSvc.ImportContactsCSV(ctx, actorID, strings.NewReader(""))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if imported != 0 {
+			t.Fatalf("expected 0 imported, got %d", imported)
+		}
+	})
+}

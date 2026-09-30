@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -275,4 +277,50 @@ func TestEnsureProjectFilesForVersion_SkipIfExists(t *testing.T) {
 	if len(logs) == 0 || !strings.Contains(logs[0], "bereits lokal vorhanden") {
 		t.Errorf("expected log that files already exist, got %v", logs)
 	}
+}
+
+func TestVerifyBinaryChecksum(t *testing.T) {
+	tmp := t.TempDir()
+	binPath := filepath.Join(tmp, "openlocalcrm-setup")
+	_ = os.WriteFile(binPath, []byte("fake-binary-content-12345"), 0755)
+
+	// SHA-256 of "fake-binary-content-12345":
+	// echo -n "fake-binary-content-12345" | shasum -a 256
+	// 5d8481498ec517865239dfa4b14e3ecb9e735496ee837267104f69e6b3602166 (example)
+	h := sha256.New()
+	h.Write([]byte("fake-binary-content-12345"))
+	validHash := hex.EncodeToString(h.Sum(nil))
+
+	sumsPath := filepath.Join(tmp, "SHA256SUMS")
+	sumsContent := validHash + "  openlocalcrm-setup\n"
+	_ = os.WriteFile(sumsPath, []byte(sumsContent), 0644)
+
+	t.Run("Valid checksum matches", func(t *testing.T) {
+		err := VerifyBinaryChecksum(binPath, sumsPath)
+		if err != nil {
+			t.Fatalf("expected valid checksum verification, got: %v", err)
+		}
+	})
+
+	t.Run("Mismatch detected", func(t *testing.T) {
+		tamperedBin := filepath.Join(tmp, "openlocalcrm-setup-tampered")
+		_ = os.WriteFile(tamperedBin, []byte("tampered-content"), 0755)
+		badSums := filepath.Join(tmp, "SHA256SUMS-tampered")
+		_ = os.WriteFile(badSums, []byte(validHash+"  openlocalcrm-setup-tampered\n"), 0644)
+
+		err := VerifyBinaryChecksum(tamperedBin, badSums)
+		if err == nil {
+			t.Fatal("expected checksum mismatch error, got nil")
+		}
+		if !strings.Contains(err.Error(), "prüfsummenfehler") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("Missing sums file returns nil (optional verification)", func(t *testing.T) {
+		err := VerifyBinaryChecksum(binPath, filepath.Join(tmp, "NONEXISTENT_SUMS"))
+		if err != nil {
+			t.Fatalf("expected nil for nonexistent sums file, got: %v", err)
+		}
+	})
 }

@@ -154,7 +154,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	newToken, newRefreshToken, err := h.service.RefreshToken(r.Context(), token, auth.ClientIP(r), r.UserAgent())
 	if err != nil {
-		http.Error(w, `{"error":"invalid_token","message":"`+err.Error()+`"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, "invalid_token", "Ungültiger oder abgelaufener Refresh-Token")
 		return
 	}
 
@@ -254,7 +254,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		if err == auth.ErrInvalidOldPassword {
 			status = http.StatusUnauthorized
 		}
-		http.Error(w, `{"error":"password_change_failed","message":"`+err.Error()+`"}`, status)
+		writeJSONError(w, status, "password_change_failed", "Passwortänderung fehlgeschlagen")
 		return
 	}
 
@@ -265,13 +265,13 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) SetupTOTP(w http.ResponseWriter, r *http.Request) {
 	claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 	if !ok || claims == nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
 		return
 	}
 
 	res, err := h.service.SetupTOTP(r.Context(), claims.UserID)
 	if err != nil {
-		http.Error(w, `{"error":"totp_setup_failed","message":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "totp_setup_failed", "Zwei-Faktor-Authentifizierung konnte nicht initialisiert werden")
 		return
 	}
 
@@ -287,19 +287,19 @@ type VerifyTOTPRequest struct {
 func (h *AuthHandler) VerifyTOTP(w http.ResponseWriter, r *http.Request) {
 	claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 	if !ok || claims == nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
 		return
 	}
 
 	var req VerifyTOTPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" || req.Secret == "" {
-		http.Error(w, `{"error":"invalid_request","message":"code and secret are required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "code and secret are required")
 		return
 	}
 
 	err := h.service.VerifyTOTP(r.Context(), claims.UserID, req.Secret, req.Code)
 	if err != nil {
-		http.Error(w, `{"error":"totp_verification_failed","message":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "totp_verification_failed", "Ungültiger Bestätigungscode")
 		return
 	}
 
@@ -314,19 +314,19 @@ type DisableTOTPRequest struct {
 func (h *AuthHandler) DisableTOTP(w http.ResponseWriter, r *http.Request) {
 	claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 	if !ok || claims == nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
 		return
 	}
 
 	var req DisableTOTPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" {
-		http.Error(w, `{"error":"invalid_request","message":"password is required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "password is required")
 		return
 	}
 
 	err := h.service.DisableTOTP(r.Context(), claims.UserID, req.Password)
 	if err != nil {
-		http.Error(w, `{"error":"totp_disable_failed","message":"`+err.Error()+`"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, "totp_disable_failed", "Deaktivierung fehlgeschlagen: falsches Passwort")
 		return
 	}
 

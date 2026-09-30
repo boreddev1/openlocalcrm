@@ -200,7 +200,7 @@ func (h *TodoHandler) Update(w http.ResponseWriter, r *http.Request) {
 		DueDate:     dueDatePtr,
 	})
 	if err != nil {
-		http.Error(w, `{"error":"failed to update todo: `+err.Error()+`"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "update_todo_failed", "Aufgabe konnte nicht aktualisiert werden")
 		return
 	}
 
