@@ -131,7 +131,7 @@ export const SimulationWidget: React.FC = () => {
           if (triageRes.summary) {
             aiSummary = triageRes.summary;
           }
-          aiModelName = 'gemma4:12b (AI Gateway)';
+          aiModelName = 'gemma2:12b (AI Gateway)';
         } catch {
           aiSummary = 'Kundenanfrage für 30 kWp PV-Anlage erfasst (PII maskiert).';
         }

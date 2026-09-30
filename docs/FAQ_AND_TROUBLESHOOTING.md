@@ -39,7 +39,7 @@ Ein kleiner VPS mit 2–4 GB RAM reicht für 1–10 gleichzeitige Benutzer vollk
 ## 2. KI-Copilot & LLM-Inferenz (Gemma 12B)
 
 ### Q: Werden meine Kundendaten an externe Server (OpenAI, Google) gesendet?
-**A:** **Nein.** Standardmäßig nutzt OpenLocalCRM eine lokale Inferenz über **Ollama (`gemma4:12b`)**, die direkt auf Ihrem Server läuft. Kein Byte an Kunden- oder Gesprächsdaten verlässt Ihre Infrastruktur.
+**A:** **Nein.** Standardmäßig nutzt OpenLocalCRM eine lokale Inferenz über **Ollama (`gemma2:12b`)**, die direkt auf Ihrem Server läuft. Kein Byte an Kunden- oder Gesprächsdaten verlässt Ihre Infrastruktur.
 
 ### Q: Wie funktioniert der DSGVO-Datenschutzfilter (PII-Maskierung)?
 **A:** Bevor ein Text an das Sprachmodell übergeben wird, maskiert der integrierte Prompt-Guard (`internal/ai/guard.go`) automatisch:
@@ -49,7 +49,7 @@ Ein kleiner VPS mit 2–4 GB RAM reicht für 1–10 gleichzeitige Benutzer vollk
 - **Steuer-IDs** ➔ `[REDACTED_TAXID]`
 
 ### Q: Kann ich auch andere Modelle als Gemma 12B verwenden?
-**A:** Ja. Über die Umgebungsvariable `OLLAMA_MODEL` können Sie jedes in Ollama verfügbare Modell definieren (z. B. `gemma4:12b-mlx`, `qwen3:8b`, `mistral:7b`).
+**A:** Ja. Über die Umgebungsvariable `OLLAMA_MODEL` können Sie jedes in Ollama verfügbare Modell definieren (z. B. `gemma2:12b`, `qwen2.5:7b`, `mistral:7b`).
 
 ---
 

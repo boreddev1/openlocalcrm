@@ -113,7 +113,7 @@ func ExportSettingsFromEnv(baseDir string) (*ExportedSettings, error) {
 
 	aiModel := envMap["OLLAMA_MODEL"]
 	if aiModel == "" {
-		aiModel = "gemma4:12b"
+		aiModel = "gemma2:12b"
 	}
 
 	adminEmail := envMap["INITIAL_ADMIN_EMAIL"]
@@ -263,7 +263,7 @@ func ImportSettingsToEnv(baseDir string, s *ExportedSettings, keepExistingSecret
 		cfg.AIBaseURL = "http://host.docker.internal:11434"
 	}
 	if cfg.AIModel == "" {
-		cfg.AIModel = "gemma4:12b"
+		cfg.AIModel = "gemma2:12b"
 	}
 	if cfg.Version == "" {
 		cfg.Version = DefaultVersion

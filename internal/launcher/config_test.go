@@ -36,7 +36,7 @@ func TestGenerateEnvContent(t *testing.T) {
 
 func TestGenerateEnvContent_EmbeddingModelProviderScoped(t *testing.T) {
 	// Ollama: Formularwert gewinnt
-	cfg := SetupConfig{AIProvider: "ollama", AIModel: "gemma4:12b", AIEmbeddingModel: "qwen3-embedding:0.6b"}
+	cfg := SetupConfig{AIProvider: "ollama", AIModel: "gemma2:12b", AIEmbeddingModel: "qwen3-embedding:0.6b"}
 	content, err := GenerateEnvContent(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestGenerateEnvContent_EmbeddingModelProviderScoped(t *testing.T) {
 	}
 
 	// Bestandsinstallation: nur OLLAMA_EMBEDDING_MODEL gesetzt (Rewrite erhält Alias)
-	cfg = SetupConfig{AIProvider: "ollama", AIModel: "gemma4:12b"}
+	cfg = SetupConfig{AIProvider: "ollama", AIModel: "gemma2:12b"}
 	content, err = GenerateEnvContentWithExisting(cfg, map[string]string{"OLLAMA_EMBEDDING_MODEL": "qwen3-embedding:0.6b"})
 	if err != nil {
 		t.Fatal(err)

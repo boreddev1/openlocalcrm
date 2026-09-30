@@ -24,7 +24,7 @@ func TestSettingsHandler_ExportImport(t *testing.T) {
 	envContent := `PORT=8080
 INITIAL_ADMIN_EMAIL=admin@system.de
 AI_PROVIDER=ollama
-OLLAMA_MODEL=gemma4:12b
+OLLAMA_MODEL=gemma2:12b
 `
 	_ = os.WriteFile(filepath.Join(tmp, ".env"), []byte(envContent), 0600)
 
@@ -58,7 +58,7 @@ OLLAMA_MODEL=gemma4:12b
 		err := json.NewDecoder(rec.Body).Decode(&exported)
 		require.NoError(t, err)
 		require.Equal(t, "ollama", exported.AI.Provider)
-		require.Equal(t, "gemma4:12b", exported.AI.Model)
+		require.Equal(t, "gemma2:12b", exported.AI.Model)
 		require.Equal(t, "admin@system.de", exported.Admin.Email)
 		require.Equal(t, 8080, exported.System.Port)
 	})
@@ -113,7 +113,7 @@ OLLAMA_MODEL=gemma4:12b
 			AI: launcher.AISettings{
 				Provider: "ollama",
 				BaseURL:  "http://host.docker.internal:11434",
-				Model:    "gemma4:12b",
+				Model:    "gemma2:12b",
 			},
 			Admin: launcher.AdminSettings{
 				Email: "multipart-admin@solar.de",

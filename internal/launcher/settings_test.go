@@ -18,7 +18,7 @@ INITIAL_ADMIN_FIRST_NAME=Klaus
 INITIAL_ADMIN_LAST_NAME=Sonne
 AI_PROVIDER=ollama
 OLLAMA_BASE_URL=http://host.docker.internal:11434
-OLLAMA_MODEL=gemma4:12b
+OLLAMA_MODEL=gemma2:12b
 AI_API_KEY=test-api-key
 CONNECTOR_API_TOKEN=custom-token-xyz
 DEMO_MODE=false
@@ -37,8 +37,8 @@ OPENLOCALCRM_VERSION=v1.0.2
 	if exported.AI.Provider != "ollama" {
 		t.Errorf("expected AI provider ollama, got %s", exported.AI.Provider)
 	}
-	if exported.AI.Model != "gemma4:12b" {
-		t.Errorf("expected AI model gemma4:12b, got %s", exported.AI.Model)
+	if exported.AI.Model != "gemma2:12b" {
+		t.Errorf("expected AI model gemma2:12b, got %s", exported.AI.Model)
 	}
 	if exported.Admin.Email != "chef@solarbetrieb.de" {
 		t.Errorf("expected Admin email chef@solarbetrieb.de, got %s", exported.Admin.Email)
@@ -109,8 +109,8 @@ CONNECTOR_API_TOKEN=custom-token-xyz
 	if !strings.Contains(content, "AI_PROVIDER=ollama") {
 		t.Errorf("expected AI_PROVIDER=ollama in rebuilt .env")
 	}
-	if !strings.Contains(content, "OLLAMA_MODEL=gemma4:12b") {
-		t.Errorf("expected OLLAMA_MODEL=gemma4:12b in rebuilt .env")
+	if !strings.Contains(content, "OLLAMA_MODEL=gemma2:12b") {
+		t.Errorf("expected OLLAMA_MODEL=gemma2:12b in rebuilt .env")
 	}
 }
 
@@ -158,7 +158,7 @@ PORT=80
 
 func TestSettingsExportImportEmbeddingModel(t *testing.T) {
 	dir := t.TempDir()
-	env := "AI_PROVIDER=ollama\nAI_MODEL=gemma4:12b\nOLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b\n"
+	env := "AI_PROVIDER=ollama\nAI_MODEL=gemma2:12b\nOLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b\n"
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestSettingsExportImportEmbeddingModel(t *testing.T) {
 		t.Fatalf("expected alias-resolved export value, got %q", exported.AI.EmbeddingModel)
 	}
 
-	imported := &ExportedSettings{AI: AISettings{Provider: "ollama", Model: "gemma4:12b", EmbeddingModel: "mistral-embed"}}
+	imported := &ExportedSettings{AI: AISettings{Provider: "ollama", Model: "gemma2:12b", EmbeddingModel: "mistral-embed"}}
 	if err := ValidateSettingsValues(imported); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}

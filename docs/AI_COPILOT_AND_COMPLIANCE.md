@@ -22,7 +22,7 @@ flowchart TD
     end
 
     subgraph LLM_Inference ["🚀 On-Premise KI-Inferenz"]
-        OllamaLocal["Ollama Daemon (http://localhost:11434)<br/>Modell: gemma4:12b / gemma4:12b-mlx<br/>100% On-Premise • Kein Datenabfluss"]
+        OllamaLocal["Ollama Daemon (http://localhost:11434)<br/>Modell: gemma2:12b<br/>100% On-Premise • Kein Datenabfluss"]
     end
 
     subgraph Observability_Layer ["📊 EU AI Act Audit-Ledger (§5.5 / §20)"]

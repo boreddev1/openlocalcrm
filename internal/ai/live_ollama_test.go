@@ -32,7 +32,7 @@ func TestLiveOllamaIntegrationWithPromptGuard(t *testing.T) {
 	gw := ai.NewGateway(ai.GatewayConfig{
 		DefaultProvider: ai.ProviderOllama,
 		OllamaBaseURL:   "http://localhost:11434",
-		OllamaModel:     "gemma4:12b",
+		OllamaModel:     "gemma2:12b",
 	})
 	triageSvc := ai.NewTriageService(gw)
 
@@ -49,7 +49,7 @@ func TestLiveOllamaIntegrationWithPromptGuard(t *testing.T) {
 		t.Fatalf("Live Ollama inference failed: %v", err)
 	}
 
-	t.Logf("=== LIVE OLLAMA (gemma4:12b) RESPONSE ===")
+	t.Logf("=== LIVE OLLAMA (gemma2:12b) RESPONSE ===")
 	t.Logf("Category:    %s", res.Category)
 	t.Logf("Priority:    %s", res.Priority)
 	t.Logf("Sentiment:   %s", res.Sentiment)

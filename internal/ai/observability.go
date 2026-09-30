@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
 
@@ -172,12 +173,25 @@ func (s *ObservabilityService) GetStats() ObservabilityStats {
 		avgLatency = float64(totalLatency) / float64(total)
 	}
 
+	activeModel := os.Getenv("OLLAMA_MODEL")
+	if activeModel == "" {
+		activeModel = os.Getenv("AI_MODEL")
+	}
+	if activeModel == "" {
+		activeModel = "gemma2:12b"
+	}
+
+	provider := os.Getenv("AI_PROVIDER")
+	if provider == "" {
+		provider = "Ollama (Local On-Premise)"
+	}
+
 	return ObservabilityStats{
 		TotalInteractions:  total,
 		TotalPIIBlocked:    piiCount,
 		AverageLatencyMs:   avgLatency,
 		ComplianceStandard: "EU AI Act konform (Art. 50/52 Transparenz & Auditierbarkeit)",
-		ActiveModel:        "gemma4:12b",
-		Provider:           "Ollama (Local On-Premise)",
+		ActiveModel:        activeModel,
+		Provider:           provider,
 	}
 }

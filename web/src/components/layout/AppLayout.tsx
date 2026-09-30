@@ -4,13 +4,28 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { AIChatDrawer } from '../ai/AIChatDrawer';
 import { CommandPalette } from '../common/CommandPalette';
-import { SimulationWidget } from '../../simulation/SimulationWidget';
 import { DemoBanner } from '../common/DemoBanner';
 import { PasswordNagBanner } from '../common/PasswordNagBanner';
+import { apiFetch } from '../../api/client';
+
+const SimulationWidget = React.lazy(() =>
+  import('../../simulation/SimulationWidget').then((m) => ({ default: m.SimulationWidget })),
+);
 
 export const AppLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
+
+  useEffect(() => {
+    apiFetch<{ demo_mode?: boolean }>('/api/v1/health')
+      .then((res) => {
+        if (res && res.demo_mode) {
+          setIsDemo(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -42,8 +57,12 @@ export const AppLayout: React.FC = () => {
         {/* Global Floating AI Assistant Chat Window */}
         <AIChatDrawer />
 
-        {/* Global 10-Minute Live Simulation Widget */}
-        <SimulationWidget />
+        {/* Global 10-Minute Live Simulation Widget (isolated to DEMO_MODE only) */}
+        {isDemo && (
+          <React.Suspense fallback={null}>
+            <SimulationWidget />
+          </React.Suspense>
+        )}
 
         {/* Global Cmd+K Quick-Switcher Command Palette (§3.7) */}
         <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />

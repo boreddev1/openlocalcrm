@@ -112,7 +112,7 @@ func NewGateway(cfg GatewayConfig) *Gateway {
 		if envModel := os.Getenv("OLLAMA_MODEL"); envModel != "" {
 			cfg.OllamaModel = envModel
 		} else {
-			cfg.OllamaModel = "gemma4:12b"
+			cfg.OllamaModel = "gemma2:12b"
 		}
 	}
 	if cfg.EmbeddingModel == "" && !cfg.DisableEnvFallback {
@@ -184,7 +184,7 @@ func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstructi
 		model = aiModel
 	} else if openAIModel := os.Getenv("OPENAI_MODEL"); openAIModel != "" {
 		model = openAIModel
-	} else if model == "" || model == "gemma4:12b" {
+	} else if model == "" || model == "gemma2:12b" {
 		model = "gpt-4o-mini"
 	}
 

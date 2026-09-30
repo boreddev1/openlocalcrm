@@ -70,7 +70,7 @@ func (h *SettingsHandler) ExportSettings(w http.ResponseWriter, r *http.Request)
 
 		aiModel := os.Getenv("OLLAMA_MODEL")
 		if aiModel == "" {
-			aiModel = "gemma4:12b"
+			aiModel = "gemma2:12b"
 		}
 
 		exported = &launcher.ExportedSettings{

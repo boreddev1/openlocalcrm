@@ -248,7 +248,7 @@ export const AIAssistantPage: React.FC = () => {
     total_pii_blocked: 0,
     average_latency_ms: 0,
     compliance_standard: 'EU AI Act konform (Art. 50/52 Transparenz & Auditierbarkeit)',
-    active_model: 'gemma4:12b (Ollama On-Premise)',
+    active_model: 'gemma2:12b (Ollama On-Premise)',
     provider: 'Ollama Local / Isolated Single-Tenant',
   };
 
