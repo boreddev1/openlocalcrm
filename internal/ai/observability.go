@@ -7,11 +7,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 type AIAuditLog struct {
 	ID                 string    `json:"id"`
+	UserID             *string   `json:"user_id,omitempty"`
 	InteractionType    string    `json:"interaction_type"` // TRIAGE, RESEARCH, CHAT_COPILOT, DRAFT_REPLY
 	ModelName          string    `json:"model_name"`
 	Provider           string    `json:"provider"`
@@ -56,23 +58,35 @@ func (s *ObservabilityService) Record(ctx context.Context, log AIAuditLog) {
 	if log.ID == "" {
 		log.ID = uuid.New().String()
 	}
+	if log.UserID == nil && ctx != nil {
+		if claims, ok := ctx.Value(auth.UserContextKey).(*auth.AccessClaims); ok && claims != nil {
+			uStr := claims.UserID.String()
+			log.UserID = &uStr
+		}
+	}
 
-	// Finding #3: Persist to Postgres ai_audit_logs if DB connection is available
+	// Finding #3 / F-35: Persist to Postgres ai_audit_logs if DB connection is available
 	if s.dbtx != nil {
 		idUUID, err := uuid.Parse(log.ID)
 		if err != nil {
 			idUUID = uuid.New()
 			log.ID = idUUID.String()
 		}
+		var userUUID *uuid.UUID
+		if log.UserID != nil && *log.UserID != "" {
+			if u, err := uuid.Parse(*log.UserID); err == nil {
+				userUUID = &u
+			}
+		}
 		query := `INSERT INTO ai_audit_logs (
 			id, interaction_type, model_name, provider,
 			prompt_tokens, completion_tokens, latency_ms,
-			pii_filter_triggered, pii_redactions_count, human_approved, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+			pii_filter_triggered, pii_redactions_count, human_approved, user_id, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 		_, _ = s.dbtx.Exec(ctx, query,
 			idUUID, log.InteractionType, log.ModelName, log.Provider,
 			log.PromptTokens, log.CompletionTokens, log.LatencyMs,
-			log.PIIFilterTriggered, log.PIIRedactionsCount, log.HumanApproved, log.CreatedAt,
+			log.PIIFilterTriggered, log.PIIRedactionsCount, log.HumanApproved, userUUID, log.CreatedAt,
 		)
 	}
 
@@ -95,7 +109,7 @@ func (s *ObservabilityService) GetRecentLogs(limit int) []AIAuditLog {
 	if s.dbtx != nil {
 		query := `SELECT id, interaction_type, model_name, provider,
 		                 prompt_tokens, completion_tokens, latency_ms,
-		                 pii_filter_triggered, pii_redactions_count, human_approved, created_at
+		                 pii_filter_triggered, pii_redactions_count, human_approved, user_id, created_at
 		          FROM ai_audit_logs
 		          ORDER BY created_at DESC
 		          LIMIT $1`
@@ -107,13 +121,18 @@ func (s *ObservabilityService) GetRecentLogs(limit int) []AIAuditLog {
 				var l AIAuditLog
 				var idUUID pgtype.UUID
 				var humanApproved *bool
+				var userUUID pgtype.UUID
 				if scanErr := rows.Scan(
 					&idUUID, &l.InteractionType, &l.ModelName, &l.Provider,
 					&l.PromptTokens, &l.CompletionTokens, &l.LatencyMs,
-					&l.PIIFilterTriggered, &l.PIIRedactionsCount, &humanApproved, &l.CreatedAt,
+					&l.PIIFilterTriggered, &l.PIIRedactionsCount, &humanApproved, &userUUID, &l.CreatedAt,
 				); scanErr == nil {
 					l.ID = uuid.UUID(idUUID.Bytes).String()
 					l.HumanApproved = humanApproved
+					if userUUID.Valid {
+						uStr := uuid.UUID(userUUID.Bytes).String()
+						l.UserID = &uStr
+					}
 					dbLogs = append(dbLogs, l)
 				}
 			}

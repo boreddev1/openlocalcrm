@@ -240,7 +240,7 @@ func (h *NoteHandler) Synthesize(w http.ResponseWriter, r *http.Request) {
 		builder.WriteString(fmt.Sprintf("- [%s] %s: %s\n", n.Type, n.Author, n.Content))
 	}
 
-	safeNotes := strings.ReplaceAll(builder.String(), "</untrusted_note_content>", "")
+	safeNotes := ai.SanitizeRoleMarkers(builder.String())
 	prompt := fmt.Sprintf(`Analysiere die folgenden Kundennotizen und erstelle eine strukturierte Vertriebsauswertung.
 Antworte ausschließlich mit gültigem JSON in exakt diesem Schema:
 {
