@@ -676,5 +676,47 @@ test.describe("Authentication & Navigation Layout", () => {
     const ownEditBtn = eigenerRow.locator('button[aria-label="Bearbeiten"]');
     await expect(ownEditBtn).toBeEnabled();
   });
-});
 
+  test("should resend a retried mutation with the rotated CSRF token after refresh (R-08)", async ({
+    page,
+    context,
+  }) => {
+    await page.goto("/");
+    await expect(page.getByText("Vertriebs-Dashboard")).toBeVisible();
+
+    await context.addCookies([
+      { name: "csrf_token", value: "old-token", url: "http://localhost:5173" },
+    ]);
+
+    const seenTokens: (string | undefined)[] = [];
+    let calls = 0;
+    await page.route("**/api/v1/e2e-csrf-probe", async (route) => {
+      calls++;
+      seenTokens.push(route.request().headers()["x-csrf-token"]);
+      if (calls === 1) {
+        await route.fulfill({ status: 401, body: "{}" });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+    await page.route("**/api/v1/auth/refresh", async (route) => {
+      // The refresh rotates the csrf_token cookie, like the real backend does.
+      await context.addCookies([
+        { name: "csrf_token", value: "new-token", url: "http://localhost:5173" },
+      ]);
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    const status = await page.evaluate(async () => {
+      const res = await fetch("/api/v1/e2e-csrf-probe", {
+        method: "POST",
+        headers: { "X-CSRF-Token": "old-token" },
+        credentials: "include",
+      });
+      return res.status;
+    });
+
+    expect(status).toBe(200);
+    expect(seenTokens).toEqual(["old-token", "new-token"]);
+  });
+});

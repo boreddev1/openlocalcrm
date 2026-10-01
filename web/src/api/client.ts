@@ -86,6 +86,22 @@ async function executeRefresh(): Promise<void> {
   lastRefreshSuccess = Date.now();
 }
 
+// The refresh rotates the csrf_token cookie. A retried mutating request must carry the new
+// value, not the header captured before the refresh.
+function withFreshCsrf(init?: RequestInit): RequestInit | undefined {
+  const method = (init?.method || 'GET').toUpperCase();
+  if (!init || !['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+    return init;
+  }
+  const fresh = getCookie('csrf_token');
+  if (!fresh) {
+    return init;
+  }
+  const headers = new Headers(init.headers || {});
+  headers.set('X-CSRF-Token', fresh);
+  return { ...init, headers };
+}
+
 if (typeof window !== 'undefined' && !(window as any).__crmFetchIntercepted) {
   (window as any).__crmFetchIntercepted = true;
   const originalFetch = window.fetch.bind(window);
@@ -106,7 +122,7 @@ if (typeof window !== 'undefined' && !(window as any).__crmFetchIntercepted) {
     if (res.status === 401 && !isNonExpiry) {
       try {
         await withCrossTabLock(executeRefresh);
-        return await originalFetch(input, init);
+        return await originalFetch(input, withFreshCsrf(init));
       } catch {
         window.dispatchEvent(new CustomEvent('auth:logout'));
         return res;
