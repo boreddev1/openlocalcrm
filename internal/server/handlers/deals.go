@@ -54,10 +54,48 @@ func writeDealError(w http.ResponseWriter, err error, action string) {
 }
 
 type CreateDealRequest struct {
-	Title       string `json:"title"`
-	Stage       string `json:"stage"`
-	Currency    string `json:"currency"`
-	Probability int32  `json:"probability"`
+	Title       string  `json:"title"`
+	Stage       string  `json:"stage"`
+	Currency    string  `json:"currency"`
+	Probability int32   `json:"probability"`
+	Value       any     `json:"value"`
+	CompanyID   *string `json:"company_id"`
+	ContactID   *string `json:"contact_id"`
+}
+
+// parseDealValue converts a JSON number or numeric string into a NUMERIC.
+// A missing value is stored as 0.00 because deals.value is NOT NULL.
+func parseDealValue(raw any) (pgtype.Numeric, error) {
+	var n pgtype.Numeric
+	switch v := raw.(type) {
+	case nil:
+		err := n.Scan("0.00")
+		return n, err
+	case string:
+		if strings.TrimSpace(v) == "" {
+			err := n.Scan("0.00")
+			return n, err
+		}
+		err := n.Scan(strings.TrimSpace(v))
+		return n, err
+	case float64:
+		err := n.Scan(strconv.FormatFloat(v, 'f', 2, 64))
+		return n, err
+	default:
+		return n, fmt.Errorf("unsupported value type %T", raw)
+	}
+}
+
+// parseOptionalUUID returns nil for a missing or empty id and an error for a malformed one.
+func parseOptionalUUID(s *string) (*pgtype.UUID, error) {
+	if s == nil || strings.TrimSpace(*s) == "" {
+		return nil, nil
+	}
+	var id pgtype.UUID
+	if err := id.Scan(strings.TrimSpace(*s)); err != nil {
+		return nil, err
+	}
+	return &id, nil
 }
 
 type RevokeDealRequest struct {
@@ -84,11 +122,31 @@ func (h *DealHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	value, err := parseDealValue(req.Value)
+	if err != nil {
+		http.Error(w, `{"error":"invalid_value","message":"Ungültiges Zahlenformat für Deal-Volumen"}`, http.StatusBadRequest)
+		return
+	}
+	companyID, err := parseOptionalUUID(req.CompanyID)
+	if err != nil {
+		http.Error(w, `{"error":"invalid_id","message":"Ungültige company_id"}`, http.StatusBadRequest)
+		return
+	}
+	contactID, err := parseOptionalUUID(req.ContactID)
+	if err != nil {
+		http.Error(w, `{"error":"invalid_id","message":"Ungültige contact_id"}`, http.StatusBadRequest)
+		return
+	}
+
 	newDeal, err := h.service.Create(r.Context(), actorID, deal.CreateDealInput{
 		Title:       req.Title,
 		Stage:       req.Stage,
 		Currency:    req.Currency,
 		Probability: req.Probability,
+		Value:       value,
+		CompanyID:   companyID,
+		ContactID:   contactID,
+		AssignedTo:  &actorID,
 	})
 
 	if err != nil {
@@ -245,10 +303,12 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	val := existing.Value
 	if req.Value != nil {
-		if err := val.Scan(req.Value); err != nil {
+		parsed, perr := parseDealValue(req.Value)
+		if perr != nil {
 			http.Error(w, `{"error":"invalid_value","message":"Ungültiges Zahlenformat für Deal-Volumen"}`, http.StatusBadRequest)
 			return
 		}
+		val = parsed
 	}
 
 	updated, err := h.service.Update(r.Context(), actorID, deal.UpdateDealInput{

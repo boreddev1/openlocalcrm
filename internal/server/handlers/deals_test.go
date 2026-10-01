@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -402,4 +404,103 @@ func TestDealHandler_RevokedDealsReturnConflict(t *testing.T) {
 			require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
 		})
 	}
+}
+
+func newDealTestHandler(t *testing.T) (*handlers.DealHandler, context.Context, uuid.UUID) {
+	t.Helper()
+	querier := demo.NewInMemoryQuerier()
+	svc := deal.NewService(querier, audit.NewService(querier))
+	h := handlers.NewDealHandler(svc)
+	actor := uuid.New()
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: actor,
+		Role:   "VERTRIEB",
+	})
+	return h, ctx, actor
+}
+
+func TestDealHandler_Create_PersistsValueLinksAndOwner(t *testing.T) {
+	h, ctx, actor := newDealTestHandler(t)
+	companyID, contactID := uuid.New(), uuid.New()
+
+	for name, value := range map[string]string{
+		"string": `"5000.50"`,
+		"number": `5000.5`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"title":"PV","stage":"LEAD","currency":"EUR","probability":10,"value":%s,"company_id":%q,"contact_id":%q}`,
+				value, companyID, contactID)
+			req := httptest.NewRequest("POST", "/api/v1/deals", strings.NewReader(body)).WithContext(ctx)
+			rec := httptest.NewRecorder()
+			h.Create(rec, req)
+			require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+			var created db.Deal
+			require.NoError(t, json.NewDecoder(rec.Body).Decode(&created))
+			require.True(t, created.Value.Valid, "value must be stored, not NULL")
+			f, err := created.Value.Float64Value()
+			require.NoError(t, err)
+			require.InDelta(t, 5000.5, f.Float64, 0.001)
+			require.Equal(t, companyID, uuid.UUID(created.CompanyID.Bytes))
+			require.Equal(t, contactID, uuid.UUID(created.ContactID.Bytes))
+			require.True(t, created.AssignedTo.Valid, "new deal must be owned by its creator")
+			require.Equal(t, actor, uuid.UUID(created.AssignedTo.Bytes))
+		})
+	}
+}
+
+func TestDealHandler_Create_MissingValueDefaultsToZero(t *testing.T) {
+	h, ctx, _ := newDealTestHandler(t)
+	req := httptest.NewRequest("POST", "/api/v1/deals",
+		strings.NewReader(`{"title":"Ohne Volumen","stage":"LEAD","currency":"EUR","probability":10}`)).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.Create(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+	var created db.Deal
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&created))
+	require.True(t, created.Value.Valid)
+	f, err := created.Value.Float64Value()
+	require.NoError(t, err)
+	require.InDelta(t, 0.0, f.Float64, 0.001)
+}
+
+func TestDealHandler_Create_RejectsInvalidValueAndIDs(t *testing.T) {
+	h, ctx, _ := newDealTestHandler(t)
+	for name, body := range map[string]string{
+		"text value":     `{"title":"x","value":"abc"}`,
+		"bad company id": `{"title":"x","company_id":"nope"}`,
+		"bad contact id": `{"title":"x","contact_id":"nope"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/v1/deals", strings.NewReader(body)).WithContext(ctx)
+			rec := httptest.NewRecorder()
+			h.Create(rec, req)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+func TestDealHandler_Update_AcceptsNumericValue(t *testing.T) {
+	h, ctx, _ := newDealTestHandler(t)
+	create := httptest.NewRecorder()
+	h.Create(create, httptest.NewRequest("POST", "/api/v1/deals",
+		strings.NewReader(`{"title":"PV","stage":"LEAD","currency":"EUR","probability":10,"value":"1000"}`)).WithContext(ctx))
+	require.Equal(t, http.StatusCreated, create.Code, create.Body.String())
+	var created db.Deal
+	require.NoError(t, json.NewDecoder(create.Body).Decode(&created))
+
+	r := chi.NewRouter()
+	r.Put("/api/v1/deals/{id}", h.Update)
+	req := httptest.NewRequest("PUT", "/api/v1/deals/"+uuid.UUID(created.ID.Bytes).String(),
+		strings.NewReader(`{"title":"PV","stage":"LEAD","currency":"EUR","probability":10,"value":6000}`)).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var updated db.Deal
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&updated))
+	f, err := updated.Value.Float64Value()
+	require.NoError(t, err)
+	require.InDelta(t, 6000.0, f.Float64, 0.001)
 }

@@ -2,7 +2,10 @@ package handlers_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -11,6 +14,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/deal"
+	"github.com/openlocalcrm/openlocalcrm/internal/db"
+	"github.com/openlocalcrm/openlocalcrm/internal/server/handlers"
 	"github.com/stretchr/testify/require"
 )
 
@@ -110,4 +118,42 @@ func TestOwnershipBackfillAndScopesAgainstRealPostgres(t *testing.T) {
 	var orphanOwner pgtype.UUID
 	require.NoError(t, pool.QueryRow(ctx, "SELECT user_id FROM notes WHERE id = $1", orphanNoteID).Scan(&orphanOwner))
 	require.False(t, orphanOwner.Valid, "an unmatched author stays NULL, which is ADMIN-only for writes")
+}
+
+func TestDealCreateAgainstRealPostgres(t *testing.T) {
+	url := postgresURL(t)
+	pool, err := pgxpool.New(context.Background(), url)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	userID := uuid.New()
+	_, err = pool.Exec(context.Background(), `
+		INSERT INTO users (id, email, password_hash, first_name, last_name, role, status)
+		VALUES ($1, $2, 'hash', 'Deal', 'Tester', 'ADMIN', 'ACTIVE')
+	`, userID, fmt.Sprintf("deal-create-%d@example.de", time.Now().UnixNano()))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM users WHERE id = $1", userID)
+	})
+
+	querier := db.New(pool)
+	svc := deal.NewService(querier, audit.NewService(querier))
+	h := handlers.NewDealHandler(svc)
+
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: userID, Role: "ADMIN",
+	})
+	req := httptest.NewRequest("POST", "/api/v1/deals",
+		strings.NewReader(`{"title":"Postgres-Deal","stage":"LEAD","currency":"EUR","probability":10}`)).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.Create(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+	var created db.Deal
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&created))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM deals WHERE id = $1", created.ID)
+	})
+	require.True(t, created.Value.Valid)
+	require.True(t, created.AssignedTo.Valid)
 }
