@@ -378,7 +378,7 @@ var refreshTokenColumns = []string{
 
 var auditLogColumns = []string{
 	"id", "user_id", "entity_type", "entity_id", "action", "changes", "ip_address",
-	"user_agent", "created_at", "old_values", "new_values",
+	"user_agent", "created_at", "old_values", "new_values", "prev_hash", "hash",
 }
 
 var notificationColumns = []string{

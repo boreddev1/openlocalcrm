@@ -277,12 +277,14 @@ SELECT row_to_json(t) FROM audit_logs t ORDER BY t.id;
 
 -- name: UpsertAuditLogsRow :exec
 INSERT INTO audit_logs (id, user_id, entity_type, entity_id, action, changes, ip_address,
-                        user_agent, created_at, old_values, new_values)
+                        user_agent, created_at, old_values, new_values, prev_hash, hash)
 SELECT r.id::uuid, r.user_id::uuid, r.entity_type, r.entity_id::uuid, r.action, r.changes,
-       r.ip_address, r.user_agent, r.created_at::timestamptz, r.old_values, r.new_values
+       r.ip_address, r.user_agent, r.created_at::timestamptz, r.old_values, r.new_values,
+       r.prev_hash, r.hash
 FROM jsonb_to_record(sqlc.arg(row)::jsonb) AS r(
     id text, user_id text, entity_type text, entity_id text, action text, changes jsonb,
-    ip_address text, user_agent text, created_at text, old_values jsonb, new_values jsonb)
+    ip_address text, user_agent text, created_at text, old_values jsonb, new_values jsonb,
+    prev_hash text, hash text)
 ON CONFLICT (id) DO UPDATE SET
     user_id = EXCLUDED.user_id,
     entity_type = EXCLUDED.entity_type,
@@ -293,7 +295,9 @@ ON CONFLICT (id) DO UPDATE SET
     user_agent = EXCLUDED.user_agent,
     created_at = EXCLUDED.created_at,
     old_values = EXCLUDED.old_values,
-    new_values = EXCLUDED.new_values;
+    new_values = EXCLUDED.new_values,
+    prev_hash = EXCLUDED.prev_hash,
+    hash = EXCLUDED.hash;
 
 -- name: ExportNotificationsRows :many
 SELECT row_to_json(t) FROM notifications t ORDER BY t.id;

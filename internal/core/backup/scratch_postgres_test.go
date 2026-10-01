@@ -345,3 +345,95 @@ func TestScratchDrillRowToJsonIsNotBase64(t *testing.T) {
 	require.JSONEq(t, `{"consent": true}`, string(decoded["custom_fields"]))
 	require.NotContains(t, string(rows[0]), "custom_fields\":\"")
 }
+
+func auditEnvelope(t *testing.T, row map[string]any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"format":      "openlocalcrm-backup",
+		"version":     1,
+		"exported_at": "2026-09-26T10:00:00Z",
+		"tables":      map[string]any{"audit_logs": []any{row}},
+	})
+	require.NoError(t, err)
+	return raw
+}
+
+func auditRow(id uuid.UUID) map[string]any {
+	return map[string]any{
+		"id":          id.String(),
+		"user_id":     nil,
+		"entity_type": "contact",
+		"entity_id":   uuid.New().String(),
+		"action":      "UPDATE",
+		"changes":     map[string]any{"k": "v"},
+		"ip_address":  "127.0.0.1",
+		"user_agent":  "restore-test",
+		"created_at":  "2026-09-26T10:00:00+00:00",
+		"old_values":  nil,
+		"new_values":  nil,
+	}
+}
+
+func TestRestoreStoresAuditHashChainColumnsExactly(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	svc := newDrillServiceForPool(pool, &recordingAudit{})
+	id := uuid.New()
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM audit_logs WHERE id = $1`, id) })
+
+	row := auditRow(id)
+	row["prev_hash"] = strings.Repeat("a", 64)
+	row["hash"] = strings.Repeat("b", 64)
+
+	_, err := svc.Restore(ctx, strings.NewReader(string(auditEnvelope(t, row))), RestoreModeMerge, RequestMeta{})
+	require.NoError(t, err)
+	var prev, hash *string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT prev_hash, hash FROM audit_logs WHERE id = $1`, id).Scan(&prev, &hash))
+	require.NotNil(t, prev)
+	require.NotNil(t, hash)
+	require.Equal(t, strings.Repeat("a", 64), *prev)
+	require.Equal(t, strings.Repeat("b", 64), *hash)
+
+	// Re-restoring with changed hashes must update them (ON CONFLICT path).
+	row["hash"] = strings.Repeat("c", 64)
+	_, err = svc.Restore(ctx, strings.NewReader(string(auditEnvelope(t, row))), RestoreModeMerge, RequestMeta{})
+	require.NoError(t, err)
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT hash FROM audit_logs WHERE id = $1`, id).Scan(&hash))
+	require.Equal(t, strings.Repeat("c", 64), *hash)
+}
+
+func TestRestoreAcceptsAuditRowsFromBeforeTheHashChain(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	svc := newDrillServiceForPool(pool, &recordingAudit{})
+	id := uuid.New()
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM audit_logs WHERE id = $1`, id) })
+
+	_, err := svc.Restore(ctx, strings.NewReader(string(auditEnvelope(t, auditRow(id)))),
+		RestoreModeMerge, RequestMeta{})
+	require.NoError(t, err, "an old backup without prev_hash/hash must still restore")
+	var prev, hash *string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT prev_hash, hash FROM audit_logs WHERE id = $1`, id).Scan(&prev, &hash))
+	require.Nil(t, prev)
+	require.Nil(t, hash)
+}
+
+func TestScratchDrillSurvivesHashedAuditRows(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	seedFixture(t, ctx, pool)
+	id := uuid.New()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO audit_logs (id, entity_type, entity_id, action, prev_hash, hash)
+		VALUES ($1, 'contact', $2, 'CREATE', $3, $4)`,
+		id, uuid.New(), strings.Repeat("a", 64), strings.Repeat("b", 64))
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM audit_logs WHERE id = $1`, id) })
+
+	result, err := newDrillServiceForPool(pool, &recordingAudit{}).Drill(ctx, RequestMeta{})
+	require.NoError(t, err)
+	require.True(t, result.Passed)
+}
