@@ -504,3 +504,106 @@ func TestDealHandler_Update_AcceptsNumericValue(t *testing.T) {
 	require.NoError(t, err)
 	require.InDelta(t, 6000.0, f.Float64, 0.001)
 }
+
+func dealValueOf(t *testing.T, body *bytes.Buffer) float64 {
+	t.Helper()
+	var d db.Deal
+	require.NoError(t, json.NewDecoder(body).Decode(&d))
+	require.True(t, d.Value.Valid)
+	f, err := d.Value.Float64Value()
+	require.NoError(t, err)
+	return f.Float64
+}
+
+func TestDealHandler_ValueBounds_CreateAndUpdate(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		ok    bool
+		want  float64
+	}{
+		{"NaN", `"NaN"`, false, 0},
+		{"Infinity", `"Infinity"`, false, 0},
+		{"-Infinity", `"-Infinity"`, false, 0},
+		{"negative string", `"-5000"`, false, 0},
+		{"negative number", `-3.5`, false, 0},
+		{"1e13 string", `"10000000000000"`, false, 0},
+		{"rounds up to 1e13", `"9999999999999.999"`, false, 0},
+		{"1e15 number", `1e15`, false, 0},
+		{"zero string", `"0"`, true, 0},
+		{"max string", `"9999999999999.99"`, true, 9999999999999.99},
+		{"number 5000.5", `5000.5`, true, 5000.5},
+	}
+	for _, tc := range cases {
+		t.Run("create/"+tc.name, func(t *testing.T) {
+			h, ctx, _ := newDealTestHandler(t)
+			body := `{"title":"x","stage":"LEAD","currency":"EUR","probability":10,"value":` + tc.value + `}`
+			rec := httptest.NewRecorder()
+			h.Create(rec, httptest.NewRequest("POST", "/api/v1/deals", strings.NewReader(body)).WithContext(ctx))
+			if !tc.ok {
+				require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+				require.Contains(t, rec.Body.String(), "invalid_value")
+				return
+			}
+			require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+			require.InDelta(t, tc.want, dealValueOf(t, rec.Body), 0.001)
+		})
+		t.Run("update/"+tc.name, func(t *testing.T) {
+			h, ctx, _ := newDealTestHandler(t)
+			create := httptest.NewRecorder()
+			h.Create(create, httptest.NewRequest("POST", "/api/v1/deals",
+				strings.NewReader(`{"title":"x","stage":"LEAD","currency":"EUR","probability":10,"value":"1000"}`)).WithContext(ctx))
+			require.Equal(t, http.StatusCreated, create.Code, create.Body.String())
+			var created db.Deal
+			require.NoError(t, json.NewDecoder(create.Body).Decode(&created))
+
+			r := chi.NewRouter()
+			r.Put("/api/v1/deals/{id}", h.Update)
+			body := `{"title":"x","stage":"LEAD","probability":10,"value":` + tc.value + `}`
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, httptest.NewRequest("PUT", "/api/v1/deals/"+uuid.UUID(created.ID.Bytes).String(),
+				strings.NewReader(body)).WithContext(ctx))
+			if !tc.ok {
+				require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+				require.Contains(t, rec.Body.String(), "invalid_value")
+				return
+			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.InDelta(t, tc.want, dealValueOf(t, rec.Body), 0.001)
+		})
+	}
+}
+
+func TestDealHandler_Update_EmptyValueKeepsExisting(t *testing.T) {
+	for _, empty := range []string{`""`, `"   "`} {
+		h, ctx, _ := newDealTestHandler(t)
+		create := httptest.NewRecorder()
+		h.Create(create, httptest.NewRequest("POST", "/api/v1/deals",
+			strings.NewReader(`{"title":"x","stage":"LEAD","currency":"EUR","probability":10,"value":"1234.50"}`)).WithContext(ctx))
+		require.Equal(t, http.StatusCreated, create.Code, create.Body.String())
+		var created db.Deal
+		require.NoError(t, json.NewDecoder(create.Body).Decode(&created))
+
+		r := chi.NewRouter()
+		r.Put("/api/v1/deals/{id}", h.Update)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest("PUT", "/api/v1/deals/"+uuid.UUID(created.ID.Bytes).String(),
+			strings.NewReader(`{"title":"y","stage":"LEAD","probability":10,"value":`+empty+`}`)).WithContext(ctx))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.InDelta(t, 1234.5, dealValueOf(t, rec.Body), 0.001)
+	}
+}
+
+func TestDealHandler_Create_NumberAndStringStoreSameValue(t *testing.T) {
+	h, ctx, _ := newDealTestHandler(t)
+	var got []float64
+	for _, v := range []string{`5000.5`, `"5000.50"`, `0.1`, `"0.10"`} {
+		rec := httptest.NewRecorder()
+		h.Create(rec, httptest.NewRequest("POST", "/api/v1/deals",
+			strings.NewReader(`{"title":"x","stage":"LEAD","currency":"EUR","probability":10,"value":`+v+`}`)).WithContext(ctx))
+		require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+		got = append(got, dealValueOf(t, rec.Body))
+	}
+	require.Equal(t, got[0], got[1])
+	require.Equal(t, got[2], got[3])
+}

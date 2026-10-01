@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -63,27 +65,86 @@ type CreateDealRequest struct {
 	ContactID   *string `json:"contact_id"`
 }
 
+// dealValueLimit is the smallest value that no longer fits NUMERIC(15,2) after
+// rounding to two decimals (9999999999999.995 -> 10000000000000.00).
+var dealValueLimit = big.NewRat(9999999999999995, 1000)
+
 // parseDealValue converts a JSON number or numeric string into a NUMERIC.
 // A missing value is stored as 0.00 because deals.value is NOT NULL.
+// NaN, infinite, negative and out-of-range values are rejected.
 func parseDealValue(raw any) (pgtype.Numeric, error) {
 	var n pgtype.Numeric
+	var err error
 	switch v := raw.(type) {
 	case nil:
-		err := n.Scan("0.00")
-		return n, err
+		err = n.Scan("0.00")
 	case string:
-		if strings.TrimSpace(v) == "" {
-			err := n.Scan("0.00")
-			return n, err
+		if t := strings.TrimSpace(v); t == "" {
+			err = n.Scan("0.00")
+		} else {
+			err = n.Scan(t)
 		}
-		err := n.Scan(strings.TrimSpace(v))
-		return n, err
+	case json.Number:
+		err = n.Scan(v.String())
 	case float64:
-		err := n.Scan(strconv.FormatFloat(v, 'f', 2, 64))
-		return n, err
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return n, errors.New("non-finite deal value")
+		}
+		err = n.Scan(strconv.FormatFloat(v, 'f', 2, 64))
 	default:
 		return n, fmt.Errorf("unsupported value type %T", raw)
 	}
+	if err != nil {
+		return n, err
+	}
+	if err := validateDealNumeric(n); err != nil {
+		return pgtype.Numeric{}, err
+	}
+	return n, nil
+}
+
+// validateDealNumeric enforces finite, non-negative values that fit NUMERIC(15,2).
+func validateDealNumeric(n pgtype.Numeric) error {
+	if !n.Valid {
+		return errors.New("deal value is NULL")
+	}
+	if n.NaN || n.InfinityModifier != pgtype.Finite {
+		return errors.New("non-finite deal value")
+	}
+	if n.Int == nil || n.Int.Sign() == 0 {
+		return nil
+	}
+	if n.Int.Sign() < 0 {
+		return errors.New("negative deal value")
+	}
+	if n.Exp > 20 || n.Exp < -1000 {
+		return errors.New("deal value out of range")
+	}
+	exp := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(absInt32(n.Exp))), nil)
+	r := new(big.Rat).SetInt(n.Int)
+	if n.Exp >= 0 {
+		r.Mul(r, new(big.Rat).SetInt(exp))
+	} else {
+		r.Quo(r, new(big.Rat).SetInt(exp))
+	}
+	if r.Cmp(dealValueLimit) >= 0 {
+		return errors.New("deal value out of range")
+	}
+	return nil
+}
+
+func absInt32(x int32) int32 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// decodeJSONNumbers decodes a request body keeping numbers exact (no float64 rounding).
+func decodeJSONNumbers(r *http.Request, dst any) error {
+	dec := json.NewDecoder(r.Body)
+	dec.UseNumber()
+	return dec.Decode(dst)
 }
 
 // parseOptionalUUID returns nil for a missing or empty id and an error for a malformed one.
@@ -112,7 +173,7 @@ func (h *DealHandler) Create(w http.ResponseWriter, r *http.Request) {
 	actorID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
 
 	var req CreateDealRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONNumbers(r, &req); err != nil {
 		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
 		return
 	}
@@ -255,7 +316,7 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req UpdateDealRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONNumbers(r, &req); err != nil {
 		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
 		return
 	}
@@ -302,7 +363,7 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	val := existing.Value
-	if req.Value != nil {
+	if blank, isStr := req.Value.(string); req.Value != nil && !(isStr && strings.TrimSpace(blank) == "") {
 		parsed, perr := parseDealValue(req.Value)
 		if perr != nil {
 			http.Error(w, `{"error":"invalid_value","message":"Ungültiges Zahlenformat für Deal-Volumen"}`, http.StatusBadRequest)
