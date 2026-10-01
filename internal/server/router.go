@@ -326,8 +326,8 @@ func NewRouter(cfg Config) http.Handler {
 		// Public Auth routes
 		if authH != nil {
 			api.With(auth.RateLimitMiddleware(loginLimiter)).Post("/auth/login", authH.Login)
-			api.With(CSRFProtectionMiddleware, auth.RateLimitMiddleware(authLimiter)).Post("/auth/refresh", authH.Refresh)
-			api.With(CSRFProtectionMiddleware).Post("/auth/logout", authH.Logout)
+			api.With(CSRFDoubleSubmitMiddleware, auth.RateLimitMiddleware(authLimiter)).Post("/auth/refresh", authH.Refresh)
+			api.With(CSRFDoubleSubmitMiddleware).Post("/auth/logout", authH.Logout)
 		}
 
 		// Public invite acceptance, registered next to login and before the

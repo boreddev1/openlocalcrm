@@ -200,3 +200,51 @@ func TestClearCSRFCookie_SetsSecure(t *testing.T) {
 		t.Errorf("expected ClearCSRFCookie to set MaxAge=-1, got %d", csrfCookie.MaxAge)
 	}
 }
+
+func TestCSRFDoubleSubmit_AcceptsUserBoundTokenWithoutClaims(t *testing.T) {
+	handler := auth.CSRFDoubleSubmitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Login issues a token bound to the user id; refresh/logout arrive without claims.
+	token, err := auth.GenerateBoundCSRFToken(uuid.New().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: token})
+	req.Header.Set(auth.CSRFHeaderName, token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCSRFDoubleSubmit_RejectsMissingOrMismatchedPair(t *testing.T) {
+	handler := auth.CSRFDoubleSubmitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	token, _ := auth.GenerateBoundCSRFToken("")
+	other, _ := auth.GenerateBoundCSRFToken("")
+
+	cases := map[string]func(*http.Request){
+		"no cookie": func(r *http.Request) { r.Header.Set(auth.CSRFHeaderName, token) },
+		"no header": func(r *http.Request) { r.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: token}) },
+		"mismatch": func(r *http.Request) {
+			r.AddCookie(&http.Cookie{Name: auth.CSRFCookieName, Value: token})
+			r.Header.Set(auth.CSRFHeaderName, other)
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+			mutate(req)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d", rec.Code)
+			}
+		})
+	}
+}

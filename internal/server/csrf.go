@@ -22,3 +22,8 @@ func ClearCSRFCookie(w http.ResponseWriter, secure ...bool) {
 func CSRFProtectionMiddleware(next http.Handler) http.Handler {
 	return auth.CSRFProtectionMiddleware(next)
 }
+
+// CSRFDoubleSubmitMiddleware guards the claim-less session routes (refresh, logout).
+func CSRFDoubleSubmitMiddleware(next http.Handler) http.Handler {
+	return auth.CSRFDoubleSubmitMiddleware(next)
+}

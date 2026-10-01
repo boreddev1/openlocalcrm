@@ -181,3 +181,28 @@ func CSRFProtectionMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// CSRFDoubleSubmitMiddleware protects /auth/refresh and /auth/logout. Those routes are
+// authenticated by the HttpOnly SameSite=Strict refresh cookie, which browsers never send
+// cross-site, and they run without an access token (it expires after 30 minutes and its
+// cookie is then dropped). The user-bound HMAC check of CSRFProtectionMiddleware therefore
+// cannot apply; the cookie/header equality check remains as defence in depth.
+func CSRFDoubleSubmitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie(CSRFCookieName)
+		if err != nil || cookie.Value == "" {
+			http.Error(w, `{"error":"csrf_token_missing","message":"CSRF-Cookie fehlt"}`, http.StatusForbidden)
+			return
+		}
+		header := r.Header.Get(CSRFHeaderName)
+		if header == "" {
+			http.Error(w, `{"error":"csrf_token_missing","message":"X-CSRF-Token Header fehlt"}`, http.StatusForbidden)
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(header)) != 1 {
+			http.Error(w, `{"error":"csrf_token_mismatch","message":"Ungültiges CSRF-Token"}`, http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
