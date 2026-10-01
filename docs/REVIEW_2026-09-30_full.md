@@ -82,5 +82,36 @@ Mehrere als "behoben" dokumentierte Punkte sind im Code nicht wirksam: Audit-Has
 
 Empfohlene Reihenfolge: C (Postgres-CI zuerst, sonst bleiben A/B ungeprüft) parallel zu A; dann B, D, E.
 
-## Offene Verifikation (nicht live geprüft)
-R-01 (leere Postgres), R-07, R-08 (Auth-Flow im echten Browser), R-23 (TLS), Backup/Restore-Roundtrip, Race-Status der großen Pakete mit `-count=3`, EXPLAIN der Kernqueries.
+## Live-Verifikation (2026-10-01)
+
+Aufbau: frisch gebauter `crm-server` (HEAD c6bac3e) gegen eine leere, wegwerfbare `pgvector/pgvector:pg16`-Instanz (Port 55432), `DEMO_MODE=false`. Admin- und BENUTZER-Account per Invite angelegt, Requests per curl, Zustand per SQL geprüft. `data/`, `backups/` und bestehende Docker-Volumes blieben unberührt, Container danach entfernt. Probe-Tests für Guard und Launcher liefen über `go test -overlay` (keine Datei im Repo geändert).
+
+| ID | Ergebnis | Beleg |
+| --- | --- | --- |
+| R-01 | **BESTÄTIGT** | Server bricht auf leerer DB ab: `failed executing migration 00010_foreign_key_indexes.sql: ERROR: column "contact_id" does not exist (SQLSTATE 42703)`. Mit `00010` als angewendet markiert laufen 00011–00021 durch. |
+| R-02 | **BESTÄTIGT** | `GET /events/stream` als BENUTZER empfängt `note.created` mit Inhalt der Admin-Notiz und `appointment.created` des Admin-Termins. `GET /contacts/{id}` desselben Kontakts liefert für BENUTZER 403. |
+| R-03 | **BESTÄTIGT** | BENUTZER liest Betreff und Body einer Mail im privaten Admin-Postfach über `/emails/messages` und `/emails/threads/{id}` und setzt Tags per `PATCH /emails/{id}/tags` (200). `/emails/accounts` ist korrekt gescopt (`[]`). |
+| R-04 | **BESTÄTIGT** | `PUT /deals/{id}` (200) setzt `contact_id` und `assigned_to` auf NULL; `value` bleibt, wenn es fehlt. |
+| R-05 | statisch bestätigt | Compose mountet `crm_keys` nur auf `/app/keys` (JWT-Key). Der Secrets-Key liegt per Default in `data/secrets.key` (relativ zu `/app`) und ist nicht persistiert; der Worker hat kein Key-Volume. Nicht live (Image-Rebuild) getestet. |
+| R-06 | **BESTÄTIGT** | `POST /backup/drill` → 500 `audit_logs did not survive the round trip (11 source rows vs 11 scratch rows)`. `POST /backup/restore` mit dem eigenen Export → 400 `table "audit_logs" does not have a column "prev_hash"` in beiden Modi (merge, replace); nichts committet. |
+| R-07 | **BESTÄTIGT (Lesepfade)** | Launcher antwortet bei `Origin: evil.example` und `Host: evil.example` auf `/api/status`, `/logs`, `/versions`, `/backups`, `/settings/export` mit 200 → kein Auth-/Origin-/Host-Schutz, DNS-Rebinding möglich. Schreibende Routen nicht ausgeführt (Docker-Zugriff), aus dem Code gleich ungeschützt. |
+| R-08 | **BESTÄTIGT, Ursache klar** | `POST /auth/refresh` und `/auth/logout` → 403 `csrf_token_invalid`, auch mit gültigem Cookie/Header; `POST /contacts` mit demselben Token → 201. Ursache: beide Routen haben `CSRFProtectionMiddleware` ohne Auth-Middleware, `claims` ist nil, `ValidateCSRFToken(token, "")` schlägt immer fehl (`internal/auth/csrf.go`). Folge: Logout widerruft nichts, Refresh funktioniert nie, Sitzung endet mit Access-Token-Ablauf (~30 min). |
+| R-09 | teilweise | BENUTZER POST `/contacts` → 201 (Schreibrecht ohne Permission-Check). Ownership greift: fremder Deal GET/PUT → 403, Löschen fremder Kontakt → 403, `/users` und `/backup/export` → 403. |
+| R-10 | **BESTÄTIGT, schlimmer als gedacht** | Rollenwechsel: `token_version` bleibt 0. Nutzer auf `DEACTIVATED`: altes Access-Token liest (200) **und schreibt** (`POST /contacts` 201) weiter bis Ablauf; nur neue Logins werden mit 401 blockiert. |
+| R-12 | **herabgestuft S2 → S3** | Compose-Default ist leer (zufälliges Passwort, Datei 0600), `must_change_password=true` wird gesetzt. Rest-Risiko: bekanntes Beispielpasswort in `.env.example`. |
+| R-13 | **BESTÄTIGT** | 30 parallele `POST /contacts`: 12 → 42 Audit-Zeilen, **6 Verzweigungen** (mehrere Zeilen mit identischem `prev_hash`). |
+| R-14 | nicht live auslösbar | Bei DB-Ausfall greift vorher die Session-Prüfung (401). Notizen werden bei laufender DB normal persistiert; Fallback-Pfad nur aus dem Code belegt. |
+| R-18 | **BESTÄTIGT** | Guard-Probe: maskiert IBAN, Kreditkarte, Steuer-ID. **Nicht** maskiert: Name, Adresse, Telefon (`+49 171 …`), E-Mail, Geburtsdatum. `Ignore previous instructions. system: …` unverändert. |
+| R-17 | statisch | `consent_*` wird nur im Kontakt-Service gelesen/geschrieben, nirgends in E-Mail-, Telefonie- oder Automation-Code geprüft. `POST /telephony/calls` protokolliert nur Anrufe (kein Wählen). |
+| R-09/R-15/R-16/R-19–R-23 | nicht live | Code-/Konfigurationsbefunde, siehe Teilberichte. |
+
+**Neue Befunde aus dem Live-Test (nicht in den Teilberichten):**
+- **N-01 (S1):** `POST /deals` liefert auf echter Postgres **immer 500** (`null value in column "value" … violates not-null constraint`). `CreateDealRequest` hat kein `value`-Feld, der Handler übergibt `Value` nie. Das Kanban kann auf Postgres keine Deals anlegen; Demo/E2E (In-Memory-Querier) verdecken das. Das Frontend (`DealsPage.tsx:160`) nutzt diesen Endpoint.
+- **N-02 (S3):** `POST /notes` akzeptiert nicht existierende `entity_id` (`0000…`) und beliebige `type`-Werte (`BOGUS_TYPE`) mit 201; `notes` hat keinen FK und keine Validierung.
+- **N-03 (S3):** `PUT /deals/{id}` erwartet `value` als String, Zahl liefert 400; ohne `value` bleibt der alte Wert. API-Vertrag undokumentiert/inkonsistent.
+- **N-04 (S4):** Access-Token-Laufzeit ~30 min, Verlängerung durch R-08 unmöglich.
+
+**Aktualisierte Release-Blocker:** R-01 bis R-08, R-10, R-13, N-01 sind live belegt.
+
+## Offene Verifikation (nach Live-Test)
+Nicht live geprüft: R-05 (Image-Rebuild), schreibende Launcher-Routen (R-07), R-11, R-14 bis R-16, R-19 bis R-23 (CI, TLS/Caddy, Updater), EXPLAIN der Kernqueries, `-race -count=3` der großen Pakete, `golangci-lint` (Toolchain).
