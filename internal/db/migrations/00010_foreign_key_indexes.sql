@@ -13,8 +13,20 @@ CREATE INDEX IF NOT EXISTS idx_deals_assigned_to ON deals (assigned_to) WHERE as
 -- Todos → Users
 CREATE INDEX IF NOT EXISTS idx_todos_assigned_to ON todos (assigned_to) WHERE assigned_to IS NOT NULL;
 
--- Notes → Contacts
-CREATE INDEX IF NOT EXISTS idx_notes_contact_id ON notes (contact_id) WHERE contact_id IS NOT NULL;
+-- Notes → Contacts (notes.contact_id exists only on legacy installations;
+-- fresh schemas link notes via entity_type/entity_id, see idx_notes_entity)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'notes'
+          AND column_name = 'contact_id'
+    ) THEN
+        CREATE INDEX IF NOT EXISTS idx_notes_contact_id ON notes (contact_id) WHERE contact_id IS NOT NULL;
+    END IF;
+END
+$$;
 
 -- Appointments → Contacts, Companies, Deals
 CREATE INDEX IF NOT EXISTS idx_appointments_contact_id ON appointments (contact_id) WHERE contact_id IS NOT NULL;

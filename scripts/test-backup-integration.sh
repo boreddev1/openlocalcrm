@@ -13,9 +13,7 @@
 # This script owns that evidence:
 #
 #   * By default it starts a disposable pgvector/pgvector:pg16 container, applies
-#     migrations 00001-00009, records 00010_foreign_key_indexes.sql in
-#     schema_migrations as already applied, applies 00011 onward, runs the tests
-#     and removes the container.
+#     all migrations in order, runs the tests and removes the container.
 #   * It honours an exported TEST_DATABASE_URL, but only with
 #     TEST_DATABASE_URL_ALLOW_EXISTING=1. The live tests write to their target
 #     (they create users and invites, accept invites, and delete the rows they
@@ -25,11 +23,6 @@
 # Two groups of tests run against it: the backup scratch-drill round trip and the
 # invite statements (issuance CTE plus the FOR UPDATE acceptance).
 #
-# 00010 is NOT executed and NOT edited. It indexes notes(contact_id), a column
-# that no migration ever creates, so replaying the historical migration set from
-# an empty database cannot work. Recording it as pre-applied reproduces the
-# schema a live installation actually has. The only thing the fixture omits is
-# that migration's performance indexes, not any application column.
 # ==============================================================================
 
 set -euo pipefail
@@ -39,7 +32,6 @@ cd "${REPO_ROOT}"
 
 IMAGE="${BACKUP_TEST_IMAGE:-pgvector/pgvector:pg16}"
 CONTAINER_NAME="${BACKUP_TEST_CONTAINER:-openlocalcrm-backup-it-$$}"
-SKIP_MIGRATION="00010_foreign_key_indexes.sql"
 CONTAINER_STARTED=""
 
 MIGRATION_DIR="internal/db/migrations"
@@ -95,15 +87,7 @@ migrations_up_to() {
         local name
         name="$(basename "${file}")"
         [[ "${name}" == "${prefix}"* ]] || continue
-        if [[ "${name}" == "${SKIP_MIGRATION}" ]]; then
-            log "  → recording ${name} as already applied (never executed, never edited)"
-            # </dev/null matters: docker exec -i would otherwise swallow the
-            # remaining file list from the loop's own stdin.
-            psql_in_container -c "INSERT INTO schema_migrations (version, applied_at)
-                VALUES ('${name}', NOW()) ON CONFLICT DO NOTHING;" </dev/null >/dev/null
-        else
-            apply_migration "${file}"
-        fi
+        apply_migration "${file}"
         found=1
     done < <(find "${MIGRATION_DIR}" -maxdepth 1 -name '*.sql' | sort)
     [[ "${found}" -eq 1 ]] || fail "no migrations found in ${MIGRATION_DIR}"
