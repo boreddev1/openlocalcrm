@@ -9,6 +9,7 @@ import (
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/todo"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTodoService_Lifecycle(t *testing.T) {
@@ -71,4 +72,26 @@ func TestTodoService_Lifecycle(t *testing.T) {
 	if err := svc.Delete(ctx, actorID, created.ID); err != nil {
 		t.Fatalf("failed to delete todo: %v", err)
 	}
+}
+
+func TestTodoService_UpdateKeepsLinksWhenOmitted(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	svc := todo.NewService(querier, audit.NewService(querier))
+	actor := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	contact := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+	dealID := pgtype.UUID{Bytes: [16]byte{4}, Valid: true}
+
+	created, err := svc.Create(ctx, actor, todo.CreateTodoInput{
+		Title: "Nachfassen", AssignedTo: &actor, ContactID: &contact, DealID: &dealID,
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.Update(ctx, actor, todo.UpdateTodoInput{
+		ID: created.ID, Title: "Nachfassen (erledigt)", Status: "DONE", Priority: "MEDIUM",
+	})
+	require.NoError(t, err)
+	require.Equal(t, actor, updated.AssignedTo)
+	require.Equal(t, contact, updated.ContactID)
+	require.Equal(t, dealID, updated.DealID)
 }

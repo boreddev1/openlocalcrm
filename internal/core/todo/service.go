@@ -148,7 +148,13 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateT
 		return db.Todo{}, ErrInvalidTodo
 	}
 
-	var assignID, contID, dealID pgtype.UUID
+	existing, err := s.queries.GetTodoByID(ctx, input.ID)
+	if err != nil {
+		return db.Todo{}, err
+	}
+
+	// nil means "unchanged": a partial update must never wipe links or ownership.
+	assignID, contID, dealID := existing.AssignedTo, existing.ContactID, existing.DealID
 	if input.AssignedTo != nil {
 		assignID = *input.AssignedTo
 	}

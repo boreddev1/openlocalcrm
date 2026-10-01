@@ -308,3 +308,47 @@ func TestDealService_StageAndRevokeAuditContainRealDiffs(t *testing.T) {
 		require.Contains(t, newValues, "stage")
 	}
 }
+
+func TestDealService_UpdateKeepsLinksAndOwnerWhenOmitted(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	svc := deal.NewService(querier, audit.NewService(querier))
+	actor := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	company := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	contact := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+
+	created, err := svc.Create(ctx, actor, deal.CreateDealInput{
+		Title: "PV", Stage: "LEAD", Currency: "EUR", Probability: 10,
+		CompanyID: &company, ContactID: &contact, AssignedTo: &actor,
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.Update(ctx, actor, deal.UpdateDealInput{
+		ID: created.ID, Title: "PV umbenannt", Stage: "QUALIFIED",
+		Probability: 40, Currency: "EUR", Value: created.Value,
+	})
+	require.NoError(t, err)
+	require.Equal(t, company, updated.CompanyID)
+	require.Equal(t, contact, updated.ContactID)
+	require.Equal(t, actor, updated.AssignedTo)
+}
+
+func TestDealService_UpdateOverridesLinksWhenGiven(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	svc := deal.NewService(querier, audit.NewService(querier))
+	actor := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	other := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
+
+	created, err := svc.Create(ctx, actor, deal.CreateDealInput{
+		Title: "PV", Stage: "LEAD", Currency: "EUR", AssignedTo: &actor,
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.Update(ctx, actor, deal.UpdateDealInput{
+		ID: created.ID, Title: "PV", Stage: "LEAD", Currency: "EUR",
+		Value: created.Value, AssignedTo: &other,
+	})
+	require.NoError(t, err)
+	require.Equal(t, other, updated.AssignedTo)
+}

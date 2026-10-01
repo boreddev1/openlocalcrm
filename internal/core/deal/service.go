@@ -273,7 +273,8 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateD
 		return db.Deal{}, ErrDirectRevocation
 	}
 
-	var compID, contID, assignID pgtype.UUID
+	// nil means "unchanged": a partial update must never wipe links or ownership.
+	compID, contID, assignID := existing.CompanyID, existing.ContactID, existing.AssignedTo
 	if input.CompanyID != nil {
 		compID = *input.CompanyID
 	}
