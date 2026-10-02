@@ -107,7 +107,7 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (ChatResponse, 
 	var conv strings.Builder
 	for _, m := range req.Messages {
 		sanitizedContent := SanitizeRoleMarkers(m.Content)
-		conv.WriteString(fmt.Sprintf("%s: %s\n", strings.ToUpper(m.Role), sanitizedContent))
+		fmt.Fprintf(&conv, "%s: %s\n", strings.ToUpper(m.Role), sanitizedContent)
 		if strings.ToLower(m.Role) == "user" {
 			lastUserMsg = strings.TrimSpace(m.Content)
 		}

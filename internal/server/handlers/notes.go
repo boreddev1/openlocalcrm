@@ -237,7 +237,7 @@ func (h *NoteHandler) Synthesize(w http.ResponseWriter, r *http.Request) {
 
 	var builder strings.Builder
 	for _, n := range notes {
-		builder.WriteString(fmt.Sprintf("- [%s] %s: %s\n", n.Type, n.Author, n.Content))
+		fmt.Fprintf(&builder, "- [%s] %s: %s\n", n.Type, n.Author, n.Content)
 	}
 
 	safeNotes := ai.SanitizeRoleMarkers(builder.String())

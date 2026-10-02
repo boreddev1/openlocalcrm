@@ -68,11 +68,12 @@ func ExtractEnvFromInspect(items []DockerInspectItem) map[string]string {
 				parts := strings.SplitN(line, "=", 2)
 				if len(parts) == 2 {
 					k, v := parts[0], parts[1]
-					if k == "POSTGRES_PASSWORD" {
+					switch k {
+					case "POSTGRES_PASSWORD":
 						env["DB_PASSWORD"] = v
-					} else if k == "POSTGRES_USER" {
+					case "POSTGRES_USER":
 						env["DB_USER"] = v
-					} else if k == "POSTGRES_DB" {
+					case "POSTGRES_DB":
 						env["DB_NAME"] = v
 					}
 				}
@@ -801,7 +802,7 @@ func (e *Engine) ResetAdminPassword(ctx context.Context, email, newPassword stri
 		return fmt.Errorf("E-Mail-Adresse darf nicht leer sein")
 	}
 	if len(newPassword) < 6 {
-		return fmt.Errorf("Passwort muss mindestens 6 Zeichen lang sein")
+		return fmt.Errorf("Passwort muss mindestens 6 Zeichen lang sein") //nolint:staticcheck // user-facing German message; capitalized noun is correct
 	}
 
 	hash, err := auth.HashPassword(newPassword)

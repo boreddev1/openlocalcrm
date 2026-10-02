@@ -90,9 +90,10 @@ func performJSON(t *testing.T, h *handlers.AuthHandler, method, path string, bod
 	req := httptest.NewRequest(method, path, bodyReader)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	if path == "/api/v1/auth/login" {
+	switch path {
+	case "/api/v1/auth/login":
 		h.Login(rec, req)
-	} else if path == "/api/v1/auth/refresh" {
+	case "/api/v1/auth/refresh":
 		h.Refresh(rec, req)
 	}
 	return rec

@@ -363,7 +363,7 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	val := existing.Value
-	if blank, isStr := req.Value.(string); req.Value != nil && !(isStr && strings.TrimSpace(blank) == "") {
+	if blank, isStr := req.Value.(string); req.Value != nil && (!isStr || strings.TrimSpace(blank) != "") {
 		parsed, perr := parseDealValue(req.Value)
 		if perr != nil {
 			http.Error(w, `{"error":"invalid_value","message":"Ungültiges Zahlenformat für Deal-Volumen"}`, http.StatusBadRequest)

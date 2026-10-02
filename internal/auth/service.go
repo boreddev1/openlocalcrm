@@ -24,7 +24,7 @@ var (
 	ErrInvalidCredentials  = errors.New("ungültige E-Mail-Adresse oder Passwort")
 	ErrRateLimited         = errors.New("zu viele fehlgeschlagene Versuche. Bitte warten Sie 5 Minuten")
 	ErrUserNotActive       = errors.New("dieses Benutzerkonto ist nicht aktiv")
-	ErrInvalidTOTPCode     = errors.New("Ungültiger Authenticator-Code")
+	ErrInvalidTOTPCode     = errors.New("Ungültiger Authenticator-Code") //nolint:staticcheck // user-facing German message; capitalized noun is correct
 	ErrTOTPRequired        = errors.New("totp_code_required")
 	ErrPasswordTooShort    = errors.New("das Passwort muss mindestens 8 Zeichen lang sein")
 	ErrInvalidOldPassword  = errors.New("das aktuelle Passwort ist ungültig")

@@ -58,5 +58,5 @@ func (h *ExportHandler) ImportContactsCSV(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"success","imported_count":%d}`, importedCount)))
+	_, _ = fmt.Fprintf(w, `{"status":"success","imported_count":%d}`, importedCount)
 }

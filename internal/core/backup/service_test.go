@@ -422,40 +422,47 @@ func TestTextPrimaryKeyTablesAreNotCastToUUID(t *testing.T) {
 
 func TestBackupPackageNeverCallsAccumulatorHelpers(t *testing.T) {
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(info os.FileInfo) bool {
-		return !strings.HasSuffix(info.Name(), "_test.go")
-	}, 0)
+	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
-	require.NotEmpty(t, pkgs, "the backup package must contain non-test Go sources")
-
-	for pkgName, pkg := range pkgs {
-		for path, file := range pkg.Files {
-			ast.Inspect(file, func(n ast.Node) bool {
-				sel, ok := n.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				recv, ok := sel.X.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				ident, ok := recv.X.(*ast.Ident)
-				if !ok || ident.Name != "s" {
-					return true
-				}
-				if recv.Sel.Name != "queries" && recv.Sel.Name != "source" {
-					return true
-				}
-				if strings.HasPrefix(sel.Sel.Name, "List") {
-					t.Errorf("%s: %s.%s.%s calls an accumulator helper; RowSource is the only read boundary",
-						filepath.Base(path), pkgName, recv.Sel.Name, sel.Sel.Name)
-				}
-				if strings.HasPrefix(sel.Sel.Name, "Export") && strings.HasSuffix(sel.Sel.Name, "Rows") {
-					t.Errorf("%s: %s.%s.%s materializes [][]byte; use the handwritten scanner",
-						filepath.Base(path), pkgName, recv.Sel.Name, sel.Sel.Name)
-				}
-				return true
-			})
+	files := map[string]*ast.File{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
 		}
+		file, parseErr := parser.ParseFile(fset, name, nil, 0)
+		require.NoError(t, parseErr)
+		files[name] = file
+	}
+	require.NotEmpty(t, files, "the backup package must contain non-test Go sources")
+
+	for path, file := range files {
+		pkgName := file.Name.Name
+		ast.Inspect(file, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			recv, ok := sel.X.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, ok := recv.X.(*ast.Ident)
+			if !ok || ident.Name != "s" {
+				return true
+			}
+			if recv.Sel.Name != "queries" && recv.Sel.Name != "source" {
+				return true
+			}
+			if strings.HasPrefix(sel.Sel.Name, "List") {
+				t.Errorf("%s: %s.%s.%s calls an accumulator helper; RowSource is the only read boundary",
+					filepath.Base(path), pkgName, recv.Sel.Name, sel.Sel.Name)
+			}
+			if strings.HasPrefix(sel.Sel.Name, "Export") && strings.HasSuffix(sel.Sel.Name, "Rows") {
+				t.Errorf("%s: %s.%s.%s materializes [][]byte; use the handwritten scanner",
+					filepath.Base(path), pkgName, recv.Sel.Name, sel.Sel.Name)
+			}
+			return true
+		})
 	}
 }

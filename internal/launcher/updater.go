@@ -209,9 +209,7 @@ func (u *Updater) IsProtectedPath(relPath string) bool {
 	if clean == "." || clean == "/" {
 		return false
 	}
-	if strings.HasPrefix(clean, "./") {
-		clean = strings.TrimPrefix(clean, "./")
-	}
+	clean = strings.TrimPrefix(clean, "./")
 
 	if strings.HasSuffix(clean, ".old") {
 		return true

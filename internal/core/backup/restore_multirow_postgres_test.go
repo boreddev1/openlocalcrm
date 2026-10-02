@@ -25,7 +25,7 @@ func seedMultiRow(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (userEm
 		_, _ = pool.Exec(bg, `DELETE FROM audit_logs WHERE prev_hash = $1 AND entity_type = 'contact' AND action = 'CREATE'`,
 			strings.Repeat("a", 64))
 	})
-	var userIDs, companyIDs, contactIDs, auditIDs []uuid.UUID
+	var userIDs, companyIDs, contactIDs []uuid.UUID
 	for i := 0; i < 3; i++ {
 		id := uuid.New()
 		userIDs = append(userIDs, id)
@@ -58,7 +58,6 @@ func seedMultiRow(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (userEm
 	}
 	for i := 0; i < 3; i++ {
 		id := uuid.New()
-		auditIDs = append(auditIDs, id)
 		_, err := pool.Exec(ctx, `
 			INSERT INTO audit_logs (id, entity_type, entity_id, action, prev_hash, hash)
 			VALUES ($1, 'contact', $2, 'CREATE', $3, $4)`,

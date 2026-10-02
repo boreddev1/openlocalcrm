@@ -96,7 +96,7 @@ func TriggerWSLInstall(ctx context.Context) error {
 
 func TriggerDockerInstall(ctx context.Context) error {
 	if runtime.GOOS != "windows" {
-		return fmt.Errorf("Docker Desktop installation via winget is only supported on Windows")
+		return fmt.Errorf("Docker Desktop installation via winget is only supported on Windows") //nolint:staticcheck // starts with the proper noun "Docker Desktop"
 	}
 	cmd := execCommand(ctx, "powershell.exe", "-NoProfile", "-Command", "Start-Process winget -ArgumentList 'install -e --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements' -Verb RunAs")
 	return cmd.Run()
@@ -113,7 +113,7 @@ func TriggerDockerStart(ctx context.Context) error {
 		cmd := execCommand(ctx, "powershell.exe", "-NoProfile", "-Command", fmt.Sprintf("Start-Process '%s'", standardPath))
 		return cmd.Run()
 	default:
-		return fmt.Errorf("Docker Desktop auto-start is not supported on %s", runtime.GOOS)
+		return fmt.Errorf("Docker Desktop auto-start is not supported on %s", runtime.GOOS) //nolint:staticcheck // starts with the proper noun "Docker Desktop"
 	}
 }
 

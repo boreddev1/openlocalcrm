@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -421,8 +422,8 @@ func TestInviteAuditRowsCarryTheRealRequestIdentity(t *testing.T) {
 		if entry.userAgent != wantAgent {
 			t.Fatalf("user_agent = %q, want %q", entry.userAgent, wantAgent)
 		}
-		blob, _ := json.Marshal(entry)
-		if strings.Contains(string(blob), issued.RawToken) || strings.Contains(string(blob), issued.Invite.TokenHash) {
+		blob := fmt.Sprintf("%+v", entry)
+		if strings.Contains(blob, issued.RawToken) || strings.Contains(blob, issued.Invite.TokenHash) {
 			t.Fatalf("the audit row must never carry the token: %s", blob)
 		}
 	})
@@ -450,8 +451,8 @@ func TestInviteAuditRowsCarryTheRealRequestIdentity(t *testing.T) {
 		if entry.userAgent != wantAgent {
 			t.Fatalf("user_agent = %q, want %q", entry.userAgent, wantAgent)
 		}
-		blob, _ := json.Marshal(entry)
-		if strings.Contains(string(blob), bogus) {
+		blob := fmt.Sprintf("%+v", entry)
+		if strings.Contains(blob, bogus) {
 			t.Fatalf("the audit row must never carry the token: %s", blob)
 		}
 	})

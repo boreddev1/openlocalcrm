@@ -127,6 +127,7 @@ func TestCheckForUpdate_SimulatedAPI(t *testing.T) {
 	}
 	if calls != 1 {
 		// Because cache TTL is active, second call within TTL should return cached without even contacting server
+		t.Errorf("expected the second call to be served from cache (1 server call), got %d", calls)
 	}
 }
 
