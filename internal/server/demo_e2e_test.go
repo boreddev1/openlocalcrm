@@ -42,6 +42,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("health check failed: %v, code: %d", err, res.StatusCode)
 	}
+	defer res.Body.Close()
 	var health map[string]any
 	_ = json.NewDecoder(res.Body).Decode(&health)
 	if health["demo_mode"] != true {
@@ -53,6 +54,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stream request failed: %v", err)
 	}
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for unauthenticated SSE stream, got %d", res.StatusCode)
 	}
@@ -63,6 +65,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for wrong password, got %d", res.StatusCode)
 	}
+	defer res.Body.Close()
 
 	// 4. Login as Admin succeeds with demo123
 	adminLoginPayload := []byte(`{"email":"admin@openlocalcrm.local","password":"demo123"}`)
@@ -70,6 +73,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for admin login, got %d", res.StatusCode)
 	}
+	defer res.Body.Close()
 	var loginData struct {
 		User struct {
 			Email string `json:"email"`
@@ -97,6 +101,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil || legacyRes.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for legacy admin@mavalio.local login, got %d", legacyRes.StatusCode)
 	}
+	defer legacyRes.Body.Close()
 
 	// 5. Authenticated SSE stream succeeds with Bearer token
 	streamReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/events/stream", nil)
@@ -122,6 +127,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for sales login, got %d", res.StatusCode)
 	}
+	defer res.Body.Close()
 	var salesToken string
 	for _, c := range res.Cookies() {
 		if c.Name == "access_token" {
@@ -140,6 +146,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil || delRes.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden for sales user deleting contact, got %d", delRes.StatusCode)
 	}
+	defer delRes.Body.Close()
 
 	// 8. Admin deletes contact -> 200 OK
 	adminDelReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/contacts/44444444-4444-4444-4444-444444444441", nil)
@@ -148,6 +155,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil || adminDelRes.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK for admin deleting contact, got %d", adminDelRes.StatusCode)
 	}
+	defer adminDelRes.Body.Close()
 
 	// 9. Backup drill as admin: demo mode has no PostgreSQL pool, so a real
 	// scratch-schema round trip is impossible. The endpoint must say so (501)
@@ -158,6 +166,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("backup drill request failed: %v", err)
 	}
+	defer drillRes.Body.Close()
 	if drillRes.StatusCode != http.StatusNotImplemented {
 		t.Fatalf("expected 501 for a demo-mode backup drill, got %d", drillRes.StatusCode)
 	}
@@ -174,6 +183,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil || exportRes.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK for backup export, got %d", exportRes.StatusCode)
 	}
+	defer exportRes.Body.Close()
 	var envelope struct {
 		Format string                       `json:"format"`
 		Tables map[string][]json.RawMessage `json:"tables"`
@@ -194,6 +204,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("backup restore request failed: %v", err)
 	}
+	defer restoreRes.Body.Close()
 	if restoreRes.StatusCode == http.StatusOK {
 		t.Fatalf("demo restore must never report success")
 	}
