@@ -168,11 +168,11 @@ func (h *TodoHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	status := req.Status
 	if status == "" {
-		status = string(existing.Status)
+		status = existing.Status
 	}
 	priority := req.Priority
 	if priority == "" {
-		priority = string(existing.Priority)
+		priority = existing.Priority
 	}
 	desc := req.Description
 	if desc == "" && existing.Description.Valid {
