@@ -36,7 +36,7 @@ func (h *EmailHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(limitStr)
 	offset, _ := strconv.Atoi(offsetStr)
 
-	messages, err := h.service.ListMessages(r.Context(), int32(limit), int32(offset))
+	messages, err := h.service.ListMessages(r.Context(), clampInt32(limit), clampInt32(offset))
 	if err != nil {
 		http.Error(w, `{"error":"failed to list email messages"}`, http.StatusInternalServerError)
 		return

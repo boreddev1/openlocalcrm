@@ -233,7 +233,7 @@ func (s *Service) TriggerEvent(ctx context.Context, triggerType, targetID, targe
 				TargetType:   run.TargetType,
 				TargetName:   run.TargetName,
 				Status:       run.Status,
-				CurrentStep:  int32(run.CurrentStep),
+				CurrentStep:  int32(run.CurrentStep), //nolint:gosec // G115: value is bounded by its source (DB column or workflow definition), conversion cannot overflow in practice
 				SnapshotJson: snapBytes,
 			})
 			if dbErr != nil {
@@ -333,7 +333,7 @@ func (s *Service) ApproveStep(ctx context.Context, runID string) (*WorkflowRun, 
 		if _, err := s.querier.UpdateWorkflowRunStatus(ctx, db.UpdateWorkflowRunStatusParams{
 			ID:           runID,
 			Status:       run.Status,
-			CurrentStep:  int32(run.CurrentStep),
+			CurrentStep:  int32(run.CurrentStep), //nolint:gosec // G115: value is bounded by its source (DB column or workflow definition), conversion cannot overflow in practice
 			CompletedAt:  completedAt,
 			SnapshotJson: snapBytes,
 		}); err != nil {
@@ -705,7 +705,7 @@ func (s *Service) TestRunWorkflow(ctx context.Context, workflowID string, target
 		TargetType:   run.TargetType,
 		TargetName:   run.TargetName,
 		Status:       run.Status,
-		CurrentStep:  int32(run.CurrentStep),
+		CurrentStep:  int32(run.CurrentStep), //nolint:gosec // G115: value is bounded by its source (DB column or workflow definition), conversion cannot overflow in practice
 		SnapshotJson: snapBytes,
 	})
 	if err != nil {

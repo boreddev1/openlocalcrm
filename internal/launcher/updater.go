@@ -271,16 +271,24 @@ func (u *Updater) ExtractZipSafely(zipReader *zip.Reader, destDir string) error 
 			return err
 		}
 
-		_, copyErr := io.Copy(outFile, rc)
+		// Cap the decompressed size so a zip bomb cannot exhaust the disk.
+		written, copyErr := io.Copy(outFile, io.LimitReader(rc, maxExtractFileBytes+1))
 		rc.Close()
 		outFile.Close()
 
 		if copyErr != nil {
 			return copyErr
 		}
+		if written > maxExtractFileBytes {
+			return fmt.Errorf("zip entry %q exceeds the %d byte extraction limit", file.Name, int64(maxExtractFileBytes))
+		}
 	}
 	return nil
 }
+
+// maxExtractFileBytes is the largest single file the updater will extract from a
+// release archive.
+const maxExtractFileBytes = 1 << 30
 
 func (u *Updater) ApplyStagedFiles(stagingDir string, logChan chan<- string) error {
 	cleanBase := filepath.Clean(u.BaseDir)

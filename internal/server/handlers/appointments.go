@@ -211,5 +211,5 @@ func (h *AppointmentHandler) DownloadICS(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="termin-%s.ics"`, app.ID))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(icsContent))
+	_, _ = w.Write([]byte(icsContent)) //nolint:gosec // G705: response is text/calendar (not HTML) and GenerateICS escapes special characters
 }

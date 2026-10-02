@@ -2205,7 +2205,7 @@ func (q *InMemoryQuerier) ListRecentCallActivities(ctx context.Context, limit in
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
 	})
-	if int32(len(list)) > limit {
+	if len(list) > int(limit) {
 		list = list[:limit]
 	}
 	return list, nil

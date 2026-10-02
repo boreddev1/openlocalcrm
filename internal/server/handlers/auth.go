@@ -105,7 +105,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set HttpOnly Cookies
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 		Name:     "access_token",
 		Value:    res.Token,
 		Path:     "/",
@@ -116,7 +116,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if res.RefreshToken != "" {
-		http.SetCookie(w, &http.Cookie{
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 			Name:     "refresh_token",
 			Value:    res.RefreshToken,
 			Path:     "/api/v1/auth",
@@ -158,7 +158,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 		Name:     "access_token",
 		Value:    newToken,
 		Path:     "/",
@@ -169,7 +169,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if newRefreshToken != "" {
-		http.SetCookie(w, &http.Cookie{
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 			Name:     "refresh_token",
 			Value:    newRefreshToken,
 			Path:     "/api/v1/auth",
@@ -213,7 +213,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 // ClearAuthCookies removes the session cookies (access_token, refresh_token, csrf_token).
 func ClearAuthCookies(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 		Name:     "access_token",
 		Value:    "",
 		Path:     "/",
@@ -223,7 +223,7 @@ func ClearAuthCookies(w http.ResponseWriter, r *http.Request) {
 		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 		Name:     "refresh_token",
 		Value:    "",
 		Path:     "/api/v1/auth",
@@ -282,7 +282,7 @@ func (h *AuthHandler) SetupTOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(res) //nolint:gosec // G117: intentional: the TOTP secret is exchanged between setup and verify so the user can enroll an authenticator app
 }
 
 type VerifyTOTPRequest struct {

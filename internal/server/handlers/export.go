@@ -18,6 +18,9 @@ func NewExportHandler(service *export.Service) *ExportHandler {
 	return &ExportHandler{service: service}
 }
 
+// maxImportBytes bounds an import request body (10 MB payload plus multipart overhead).
+const maxImportBytes = 10<<20 + 1<<20
+
 func (h *ExportHandler) ExportContactsCSV(w http.ResponseWriter, r *http.Request) {
 	data, err := h.service.ExportContactsCSV(r.Context())
 	if err != nil {
@@ -39,7 +42,8 @@ func (h *ExportHandler) ImportContactsCSV(w http.ResponseWriter, r *http.Request
 		_ = actorID.Scan(claims.UserID)
 	}
 
-	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10 MB limit
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
+	if err := r.ParseMultipartForm(maxImportBytes); err != nil { //nolint:gosec // G120: request body is capped with http.MaxBytesReader on the line above; limit is 10 MB plus multipart overhead
 		writeJSONError(w, http.StatusBadRequest, "file_too_large", "Datei zu groß oder ungültiges Formular")
 		return
 	}

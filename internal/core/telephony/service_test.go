@@ -56,3 +56,14 @@ func TestTelephonyService_LogCall_PropagatesDBError(t *testing.T) {
 		t.Fatalf("LogCall must fail honestly when DB is unavailable, got nil error")
 	}
 }
+
+func TestTelephonyService_LogCall_RejectsOutOfRangeDuration(t *testing.T) {
+	svc := telephony.NewService(demo.NewInMemoryQuerier(), sse.NewHub())
+	_, err := svc.LogCall(context.Background(), telephony.LogCallInput{
+		ContactID:       "44444444-4444-4444-4444-444444444441",
+		DurationSeconds: 1 << 40,
+	})
+	if err == nil {
+		t.Fatal("expected an error for a duration that does not fit in int32")
+	}
+}

@@ -277,11 +277,11 @@ func formatGermanNumber(val float64) string {
 	}
 	var res []byte
 	l := len(str)
-	for i, c := range str {
+	for i := 0; i < l; i++ {
 		if i > 0 && (l-i)%3 == 0 {
 			res = append(res, '.')
 		}
-		res = append(res, byte(c))
+		res = append(res, str[i])
 	}
 	return string(res)
 }

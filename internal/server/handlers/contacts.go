@@ -127,7 +127,7 @@ func (h *ContactHandler) List(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(offsetStr)
 
 	if searchQuery != "" {
-		results, err := h.service.Search(r.Context(), searchQuery, int32(limit), ownerID)
+		results, err := h.service.Search(r.Context(), searchQuery, clampInt32(limit), ownerID)
 		if err != nil {
 			http.Error(w, `{"error":"search_failed"}`, http.StatusInternalServerError)
 			return
@@ -140,7 +140,7 @@ func (h *ContactHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contacts, err := h.service.List(r.Context(), int32(limit), int32(offset), ownerID)
+	contacts, err := h.service.List(r.Context(), clampInt32(limit), clampInt32(offset), ownerID)
 	if err != nil {
 		http.Error(w, `{"error":"failed to list contacts"}`, http.StatusInternalServerError)
 		return

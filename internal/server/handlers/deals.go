@@ -246,9 +246,9 @@ func (h *DealHandler) List(w http.ResponseWriter, r *http.Request) {
 	var deals []db.Deal
 	var err error
 	if stage != "" {
-		deals, err = h.service.ListByStage(r.Context(), stage, assignedTo, int32(limit), int32(offset))
+		deals, err = h.service.ListByStage(r.Context(), stage, assignedTo, clampInt32(limit), clampInt32(offset))
 	} else {
-		deals, err = h.service.List(r.Context(), int32(limit), int32(offset), assignedTo)
+		deals, err = h.service.List(r.Context(), clampInt32(limit), clampInt32(offset), assignedTo)
 	}
 	if err != nil {
 		http.Error(w, `{"error":"failed to list deals"}`, http.StatusInternalServerError)
@@ -387,7 +387,7 @@ func (h *DealHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	if existing.Stage != "WON" && updated.Stage == "WON" && h.trigger != nil {
 		if _, trigErr := h.trigger.TriggerEvent(r.Context(), "DEAL_WON", idStr, "DEAL", updated.Title); trigErr != nil {
-			log.Printf("[deal_warning] automation trigger DEAL_WON failed for deal %s: %v", idStr, trigErr)
+			log.Printf("[deal_warning] automation trigger DEAL_WON failed for deal %s: %v", idStr, trigErr) //nolint:gosec // G706: logged value is a server-generated UUID and a wrapped error, not attacker-controlled free text
 		}
 	}
 

@@ -3,6 +3,7 @@ package telephony
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,9 +54,13 @@ func (s *Service) LogCall(ctx context.Context, input LogCallInput) (CallActivity
 		return CallActivity{}, fmt.Errorf("invalid contact ID %q: %w", input.ContactID, err)
 	}
 
+	if input.DurationSeconds > math.MaxInt32 || input.DurationSeconds < math.MinInt32 {
+		return CallActivity{}, fmt.Errorf("invalid call duration %d", input.DurationSeconds)
+	}
+
 	created, err := s.querier.CreateCallActivity(ctx, db.CreateCallActivityParams{
 		ContactID:       pgtype.UUID{Bytes: contactUUID, Valid: true},
-		DurationSeconds: int32(input.DurationSeconds),
+		DurationSeconds: int32(input.DurationSeconds), //nolint:gosec // G115: range checked above
 		Disposition:     input.Disposition,
 		Notes:           input.Notes,
 	})

@@ -155,14 +155,14 @@ const defaultCaddyfile = `# Caddyfile for OpenLocalCRM (Single-Tenant v3)
 func EnsureComposeAndCaddyFiles(baseDir string) error {
 	composePath := filepath.Join(baseDir, "docker-compose.yml")
 	if _, err := os.Stat(composePath); os.IsNotExist(err) {
-		if err := os.WriteFile(composePath, []byte(defaultDockerCompose), 0644); err != nil {
+		if err := os.WriteFile(composePath, []byte(defaultDockerCompose), 0644); err != nil { //nolint:gosec // G306: non-secret default/compose config that must stay readable by the docker/caddy containers
 			return fmt.Errorf("failed to write default docker-compose.yml: %w", err)
 		}
 	}
 
 	caddyPath := filepath.Join(baseDir, "Caddyfile")
 	if _, err := os.Stat(caddyPath); os.IsNotExist(err) {
-		if err := os.WriteFile(caddyPath, []byte(defaultCaddyfile), 0644); err != nil {
+		if err := os.WriteFile(caddyPath, []byte(defaultCaddyfile), 0644); err != nil { //nolint:gosec // G306: non-secret default/compose config that must stay readable by the docker/caddy containers
 			return fmt.Errorf("failed to write default Caddyfile: %w", err)
 		}
 	}
@@ -197,5 +197,5 @@ func PatchComposeEmbeddingDefaults(path string) error {
 	if !changed {
 		return nil
 	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644) //nolint:gosec // G306: non-secret default/compose config that must stay readable by the docker/caddy containers
 }

@@ -291,7 +291,7 @@ func (s *Service) SyncAccount(ctx context.Context, id pgtype.UUID) ([]db.EmailMe
 		Username:    acc.Username.String,
 		Password:    password,
 		ImplicitTLS: acc.ImapPort.Int32 == 993,
-	}, uint32(acc.LastUid))
+	}, uint32(acc.LastUid)) //nolint:gosec // G115: value is bounded by its source (DB column or workflow definition), conversion cannot overflow in practice
 	if err != nil {
 		return nil, fmt.Errorf("imap sync failed: %w", err)
 	}

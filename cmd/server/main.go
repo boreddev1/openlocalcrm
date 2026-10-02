@@ -31,10 +31,10 @@ func loadOrGenerateKey(keyPath string, isDemoMode bool) (ed25519.PublicKey, ed25
 		keyPath = "./data/storage/keys/ed25519.key"
 	}
 
-	if data, err := os.ReadFile(keyPath); err == nil && len(data) == ed25519.PrivateKeySize {
+	if data, err := os.ReadFile(keyPath); err == nil && len(data) == ed25519.PrivateKeySize { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 		privKey := ed25519.PrivateKey(data)
 		pubKey := privKey.Public().(ed25519.PublicKey)
-		log.Printf("[Crypto] Loaded persistent Ed25519 keypair from %s", keyPath)
+		log.Printf("[Crypto] Loaded persistent Ed25519 keypair from %s", keyPath) //nolint:gosec // G706: logged value is operator configuration (env/paths/port) or a server-generated ID, not attacker-controlled free text
 		return pubKey, privKey, nil
 	}
 
@@ -44,16 +44,16 @@ func loadOrGenerateKey(keyPath string, isDemoMode bool) (ed25519.PublicKey, ed25
 	}
 
 	keyDir := filepath.Dir(keyPath)
-	if err := os.MkdirAll(keyDir, 0700); err != nil {
+	if err := os.MkdirAll(keyDir, 0700); err != nil { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 		if !isDemoMode {
 			return nil, nil, fmt.Errorf("failed creating key directory %s: %w", keyDir, err)
 		}
-	} else if err := os.WriteFile(keyPath, privKey, 0600); err != nil {
+	} else if err := os.WriteFile(keyPath, privKey, 0600); err != nil { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 		if !isDemoMode {
 			return nil, nil, fmt.Errorf("failed persisting Ed25519 key at %s: %w", keyPath, err)
 		}
 	} else {
-		log.Printf("[Crypto] Generated and persisted new Ed25519 keypair to %s", keyPath)
+		log.Printf("[Crypto] Generated and persisted new Ed25519 keypair to %s", keyPath) //nolint:gosec // G706: logged value is operator configuration (env/paths/port) or a server-generated ID, not attacker-controlled free text
 		return pubKey, privKey, nil
 	}
 
@@ -71,7 +71,7 @@ func loadOrGenerateKey(keyPath string, isDemoMode bool) (ed25519.PublicKey, ed25
 func writeBootstrapSecret(storagePath, email, password string) error {
 	path := filepath.Join(storagePath, "bootstrap-admin.txt")
 	body := fmt.Sprintf("email=%s\npassword=%s\nwritten=%s\n", email, password, time.Now().UTC().Format(time.RFC3339))
-	return os.WriteFile(path, []byte(body), 0o600)
+	return os.WriteFile(path, []byte(body), 0o600) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 }
 
 func bootstrapAdminUser(ctx context.Context, querier db.Querier, storagePath string) {
@@ -90,12 +90,12 @@ func bootstrapAdminUser(ctx context.Context, querier db.Querier, storagePath str
 			password = hex.EncodeToString(pwBytes)
 			secretPath := filepath.Join(storagePath, "bootstrap-admin.txt")
 			if err := writeBootstrapSecret(storagePath, adminEmail, password); err != nil {
-				log.Printf("[BOOTSTRAP_ERROR] Failed writing bootstrap secret to %s: %v", secretPath, err)
+				log.Printf("[BOOTSTRAP_ERROR] Failed writing bootstrap secret to %s: %v", secretPath, err) //nolint:gosec // G706: logged value is operator configuration (env/paths/port) or a server-generated ID, not attacker-controlled free text
 			} else {
-				log.Printf("[BOOTSTRAP] Initial admin password written to %s (permissions 0600). Please change this password immediately upon first login!", secretPath)
+				log.Printf("[BOOTSTRAP] Initial admin password written to %s (permissions 0600). Please change this password immediately upon first login!", secretPath) //nolint:gosec // G706: logged value is operator configuration (env/paths/port) or a server-generated ID, not attacker-controlled free text
 			}
 		} else {
-			log.Printf("[Bootstrap] Using INITIAL_ADMIN_PASSWORD from environment for %s", adminEmail)
+			log.Printf("[Bootstrap] Using INITIAL_ADMIN_PASSWORD from environment for %s", adminEmail) //nolint:gosec // G706: logged value is operator configuration (env/paths/port) or a server-generated ID, not attacker-controlled free text
 		}
 
 		hash, hashErr := auth.HashPassword(password)
@@ -140,7 +140,7 @@ func main() {
 	}
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://crm_user:crm_pass@localhost:5432/crm_db?sslmode=disable"
+		dbURL = "postgres://crm_user:crm_pass@localhost:5432/crm_db?sslmode=disable" //nolint:gosec // G101: false positive: local-development default URL / context key name, not a real credential
 	}
 	storagePath := os.Getenv("STORAGE_PATH")
 	if storagePath == "" {
@@ -239,7 +239,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("openlocalcrm crm-server listening on :%s", port)
+		log.Printf("openlocalcrm crm-server listening on :%s", port) //nolint:gosec // G706: logged value is operator configuration (env/paths/port) or a server-generated ID, not attacker-controlled free text
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}

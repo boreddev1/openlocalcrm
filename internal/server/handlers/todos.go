@@ -79,7 +79,7 @@ func (h *TodoHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(limitStr)
 	offset, _ := strconv.Atoi(offsetStr)
 
-	todos, err := h.service.List(r.Context(), int32(limit), int32(offset), assignedTo)
+	todos, err := h.service.List(r.Context(), clampInt32(limit), clampInt32(offset), assignedTo)
 	if err != nil {
 		http.Error(w, `{"error":"failed to list todos"}`, http.StatusInternalServerError)
 		return

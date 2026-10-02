@@ -97,7 +97,7 @@ func SetCSRFCookie(w http.ResponseWriter, secure bool, userID ...string) (string
 		return "", err
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly is intentionally false (double-submit CSRF cookie must be readable by JS); Secure is set dynamically
 		Name:     CSRFCookieName,
 		Value:    token,
 		Path:     "/",
@@ -117,7 +117,7 @@ func ClearCSRFCookie(w http.ResponseWriter, secure ...bool) {
 		isSecure = secure[0]
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly is intentionally false (double-submit CSRF cookie must be readable by JS); Secure is set dynamically
 		Name:     CSRFCookieName,
 		Value:    "",
 		Path:     "/",

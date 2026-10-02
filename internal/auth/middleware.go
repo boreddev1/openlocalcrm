@@ -14,7 +14,7 @@ type contextKey string
 
 const (
 	UserContextKey          contextKey = "user_claims"
-	AuthViaBearerContextKey contextKey = "auth_via_bearer"
+	AuthViaBearerContextKey contextKey = "auth_via_bearer" //nolint:gosec // G101: false positive: local-development default URL / context key name, not a real credential
 )
 
 // WithAuthViaBearer marks the context as having authenticated via Bearer token
