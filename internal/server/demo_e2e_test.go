@@ -178,7 +178,7 @@ func TestDemoMode_FullSecurityAndE2E(t *testing.T) {
 		Format string                       `json:"format"`
 		Tables map[string][]json.RawMessage `json:"tables"`
 	}
-	if err := json.NewDecoder(exportRes.Body).Decode(&envelope); err != nil {
+	if err = json.NewDecoder(exportRes.Body).Decode(&envelope); err != nil {
 		t.Fatalf("backup export is not a valid envelope: %v", err)
 	}
 	if envelope.Format != "openlocalcrm-backup" || len(envelope.Tables) != 24 {

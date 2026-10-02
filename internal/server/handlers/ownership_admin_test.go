@@ -75,8 +75,8 @@ func TestBulkAssignOnlyTouchesUnownedRows(t *testing.T) {
 	require.NoError(t, err)
 
 	perform := func(claims *auth.AccessClaims, payload any) *httptest.ResponseRecorder {
-		b, err := json.Marshal(payload)
-		require.NoError(t, err)
+		b, marshalErr := json.Marshal(payload)
+		require.NoError(t, marshalErr)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/ownership/bulk-assign", bytes.NewReader(b))
 		req.Header.Set("Content-Type", "application/json")
 		req = req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, claims))

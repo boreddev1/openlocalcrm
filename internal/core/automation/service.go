@@ -648,7 +648,7 @@ func (s *Service) TestRunWorkflow(ctx context.Context, workflowID string, target
 	}
 
 	var steps []StepDefinition
-	if err := json.Unmarshal(dbWf.StepsJson, &steps); err != nil {
+	if err = json.Unmarshal(dbWf.StepsJson, &steps); err != nil {
 		return nil, fmt.Errorf("ungültige workflow-schritte: %w", err)
 	}
 
@@ -673,12 +673,12 @@ func (s *Service) TestRunWorkflow(ctx context.Context, workflowID string, target
 			run.Status = "WAITING_APPROVAL"
 			break
 		}
-		if err := s.executeStep(ctx, step, &run, snapshot); err != nil {
-			log.Printf("[automation] test run step %d failed: %v", step.StepNumber, err)
+		if execErr := s.executeStep(ctx, step, &run, snapshot); execErr != nil {
+			log.Printf("[automation] test run step %d failed: %v", step.StepNumber, execErr)
 			run.Status = "FAILED"
 			now := time.Now().UTC()
 			run.CompletedAt = &now
-			snapshot["error"] = fmt.Sprintf("Schritt %d (%s) fehlgeschlagen: %v", step.StepNumber, step.Title, err)
+			snapshot["error"] = fmt.Sprintf("Schritt %d (%s) fehlgeschlagen: %v", step.StepNumber, step.Title, execErr)
 			run.Error = snapshot["error"].(string)
 			break
 		}

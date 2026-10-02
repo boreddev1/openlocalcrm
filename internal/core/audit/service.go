@@ -38,7 +38,7 @@ func SanitizeDiffValue(key string, val any) any {
 
 	value := reflect.ValueOf(val)
 	switch value.Kind() {
-	case reflect.Map, reflect.Struct, reflect.Slice, reflect.Array, reflect.Ptr, reflect.Interface:
+	case reflect.Map, reflect.Struct, reflect.Slice, reflect.Array, reflect.Pointer, reflect.Interface:
 		normalized, err := normalizeJSONValue(val)
 		if err != nil {
 			return nil

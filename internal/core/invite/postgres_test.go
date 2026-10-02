@@ -403,22 +403,22 @@ func TestInviteConsumeIsSerialisedAgainstRealPostgres(t *testing.T) {
 	defer cancelAccept()
 	done := make(chan error, 1)
 	go func() {
-		_, err := db.New(pool).AcceptUserInvite(acceptCtx, db.AcceptUserInviteParams{
+		_, acceptErr := db.New(pool).AcceptUserInvite(acceptCtx, db.AcceptUserInviteParams{
 			TokenHash:    tokenHash,
 			PasswordHash: loserHash,
 		})
-		done <- err
+		done <- acceptErr
 	}()
 
 	select {
-	case err := <-done:
+	case doneErr := <-done:
 		t.Fatalf("the competing acceptance completed before the winner committed (err=%v): "+
-			"the invite row is not locked, so two acceptances can race", err)
+			"the invite row is not locked, so two acceptances can race", doneErr)
 	case <-time.After(blockedWindow):
 		// Expected: the statement is waiting for the invite row.
 	}
 
-	if err := winner.Commit(ctx); err != nil {
+	if err = winner.Commit(ctx); err != nil {
 		t.Fatalf("commit the winning acceptance: %v", err)
 	}
 

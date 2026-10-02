@@ -128,7 +128,7 @@ func (h *AppointmentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var input appointment.Appointment
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err = json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
 	}

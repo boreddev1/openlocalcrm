@@ -270,7 +270,7 @@ func TestTOTP_SecretIsEncryptedInDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed generating totp code: %v", err)
 	}
-	if err := svc.VerifyTOTP(ctx, adminUUID, setupRes.Secret, code); err != nil {
+	if err = svc.VerifyTOTP(ctx, adminUUID, setupRes.Secret, code); err != nil {
 		t.Fatalf("VerifyTOTP failed: %v", err)
 	}
 
@@ -316,7 +316,7 @@ func TestAuthService_TOTPReplayPrevention(t *testing.T) {
 	}
 
 	// Verify TOTP to enable it
-	if err := svc.VerifyTOTP(ctx, adminUUID, setupRes.Secret, code); err != nil {
+	if err = svc.VerifyTOTP(ctx, adminUUID, setupRes.Secret, code); err != nil {
 		t.Fatalf("verify failed: %v", err)
 	}
 

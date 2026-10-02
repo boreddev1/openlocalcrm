@@ -210,7 +210,7 @@ func (h *ContactHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req CreateContactRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
 		return
 	}
@@ -218,7 +218,7 @@ func (h *ContactHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.OwnerUserID != nil {
 		var requestedOwner pgtype.UUID
 		if *req.OwnerUserID != "" {
-			if err := requestedOwner.Scan(*req.OwnerUserID); err != nil {
+			if err = requestedOwner.Scan(*req.OwnerUserID); err != nil {
 				http.Error(w, `{"error":"invalid_owner_id"}`, http.StatusBadRequest)
 				return
 			}
@@ -238,7 +238,7 @@ func (h *ContactHandler) Update(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, `{"error":"forbidden","message":"only owner or admin may reassign"}`, http.StatusForbidden)
 				return
 			}
-			if err := h.service.SetOwner(r.Context(), id, requestedOwner); err != nil {
+			if err = h.service.SetOwner(r.Context(), id, requestedOwner); err != nil {
 				log.Printf("[contact] failed to set owner: %v", err)
 				http.Error(w, `{"error":"server_error","message":"failed to update contact owner"}`, http.StatusInternalServerError)
 				return

@@ -258,11 +258,11 @@ func readEnvelopeHeader(decoder *json.Decoder) (string, int, map[string]tableRan
 		key, _ := keyToken.(string)
 		switch key {
 		case "format":
-			if err := decoder.Decode(&format); err != nil {
+			if err = decoder.Decode(&format); err != nil {
 				return "", 0, nil, envelopeFieldError(key, err)
 			}
 		case "version":
-			if err := decoder.Decode(&version); err != nil {
+			if err = decoder.Decode(&version); err != nil {
 				return "", 0, nil, envelopeFieldError(key, err)
 			}
 		case "tables":

@@ -119,7 +119,7 @@ func TestDemoKBUpdateEmbedding(t *testing.T) {
 		t.Fatal("expected not indexed before embedding update")
 	}
 
-	if err := q.UpdateKBArticleEmbedding(ctx, db.UpdateKBArticleEmbeddingParams{
+	if err = q.UpdateKBArticleEmbedding(ctx, db.UpdateKBArticleEmbeddingParams{
 		ID:             a.ID,
 		Embedding:      vecLiteral(0, 0, 1),
 		EmbeddingModel: pgtype.Text{String: "qwen3-embedding:0.6b", Valid: true},

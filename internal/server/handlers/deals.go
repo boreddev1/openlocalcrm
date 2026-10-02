@@ -514,7 +514,7 @@ func (h *DealHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 
 	var req RevokeDealRequest
 	if r.Body != nil && r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
 			return
 		}

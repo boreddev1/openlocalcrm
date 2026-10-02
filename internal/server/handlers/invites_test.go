@@ -576,7 +576,7 @@ func TestInviteHandlerAcceptActivatesTheAccount(t *testing.T) {
 		t.Fatalf("expected 200 OK, got %d (body: %s)", rec.Code, rec.Body.String())
 	}
 	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+	if err = json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode accept response: %v", err)
 	}
 	if resp["status"] != "ACTIVE" {

@@ -283,7 +283,7 @@ func (h *EmailHandler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req EmailAccountRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
 		return
 	}

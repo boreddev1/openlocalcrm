@@ -22,9 +22,9 @@ type beginner interface {
 // transactional restores without reaching for the pool themselves, and it
 // returns ErrTransactionsUnsupported instead of panicking when no pool exists.
 func (q *Queries) Begin(ctx context.Context) (pgx.Tx, error) {
-	beginner, ok := q.db.(beginner)
+	b, ok := q.db.(beginner)
 	if !ok {
 		return nil, ErrTransactionsUnsupported
 	}
-	return beginner.Begin(ctx)
+	return b.Begin(ctx)
 }

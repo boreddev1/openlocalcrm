@@ -236,8 +236,8 @@ func TestDemoBackupRowsRoundTripThroughExportAndUpsert(t *testing.T) {
 
 			if !entry.stored {
 				require.Empty(t, before, "a table the demo does not store exports zero rows")
-				err := entry.upsert(q, ctx, []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`))
-				require.Error(t, err,
+				upsertErr := entry.upsert(q, ctx, []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`))
+				require.Error(t, upsertErr,
 					"the demo must not silently accept a row for a table it does not store")
 				return
 			}

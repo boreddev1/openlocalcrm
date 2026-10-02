@@ -250,8 +250,8 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 		}()
 		go func() {
 			defer close(logChan)
-			if err := s.engine.Update(context.Background(), logChan); err != nil {
-				s.appendLog(fmt.Sprintf("[FEHLER] Update fehlgeschlagen: %v", err))
+			if updateErr := s.engine.Update(context.Background(), logChan); updateErr != nil {
+				s.appendLog(fmt.Sprintf("[FEHLER] Update fehlgeschlagen: %v", updateErr))
 			}
 		}()
 	case "reset":

@@ -410,7 +410,7 @@ func (e *Engine) GetContainers(ctx context.Context) ([]ContainerInfo, error) {
 				State  string `json:"State"`
 				Status string `json:"Status"`
 			}
-			if err := json.Unmarshal([]byte(line), &item); err == nil {
+			if jsonErr := json.Unmarshal([]byte(line), &item); jsonErr == nil {
 				cleanName := strings.TrimPrefix(item.Names, "/")
 				if strings.Contains(cleanName, "crm") || strings.Contains(cleanName, "openlocalcrm") || strings.Contains(cleanName, "mavalio") {
 					service := cleanName
@@ -674,7 +674,7 @@ func (e *Engine) RestoreBackup(ctx context.Context, filename string, logChan cha
 	if logChan != nil {
 		logChan <- "[RESTORE] Schritt 1/5: Erstelle automatischen Sicherheits-Snapshot der aktuellen Datenbank..."
 	}
-	if snap, err := e.CreateBackup(ctx); err == nil && logChan != nil {
+	if snap, snapErr := e.CreateBackup(ctx); snapErr == nil && logChan != nil {
 		logChan <- fmt.Sprintf("[RESTORE] Sicherheits-Snapshot gesichert als: %s", snap)
 	}
 
@@ -820,7 +820,7 @@ func (e *Engine) ResetAdminPassword(ctx context.Context, email, newPassword stri
 	for i := 0; i < 10; i++ {
 		checkCmd := execCommand(ctx, "docker", "compose", "exec", "-T", "db", "pg_isready", "-U", user, "-d", dbName)
 		checkCmd.Dir = e.BaseDir
-		if err := checkCmd.Run(); err == nil {
+		if runErr := checkCmd.Run(); runErr == nil {
 			break
 		}
 		select {

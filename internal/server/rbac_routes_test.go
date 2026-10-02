@@ -51,20 +51,20 @@ func TestRouteMatrixAcrossRoles(t *testing.T) {
 
 	for _, role := range roles {
 		email := role + "@example.de"
-		created, err := querier.CreateUser(ctx, db.CreateUserParams{
+		created, seedErr := querier.CreateUser(ctx, db.CreateUserParams{
 			Email:        email,
 			PasswordHash: "$argon2id$v=19$m=65536,t=3,p=2$demo$fakehash",
 			FirstName:    role,
 			LastName:     "Tester",
 			Role:         role,
 		})
-		require.NoError(t, err)
+		require.NoError(t, seedErr)
 
 		uID := uuid.UUID(created.ID.Bytes)
 		userIDs[role] = uID
 
-		token, err := auth.GenerateAccessToken(uID, email, role, 0, privKey, 15*time.Minute)
-		require.NoError(t, err)
+		token, seedErr := auth.GenerateAccessToken(uID, email, role, 0, privKey, 15*time.Minute)
+		require.NoError(t, seedErr)
 		tokens[role] = token
 	}
 

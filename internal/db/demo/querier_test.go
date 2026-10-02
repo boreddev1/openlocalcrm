@@ -55,7 +55,7 @@ func TestDemoQuerierSeedAndUsers(t *testing.T) {
 	if err != nil || fetched.Name != "Test AG" {
 		t.Fatalf("get company failed: %v", err)
 	}
-	if err := q.DeleteCompany(ctx, comp.ID); err != nil {
+	if err = q.DeleteCompany(ctx, comp.ID); err != nil {
 		t.Fatalf("delete company failed: %v", err)
 	}
 	_, err = q.GetCompanyByID(ctx, comp.ID)
@@ -126,7 +126,7 @@ func TestDemoQuerierEmailAccountLifecycle(t *testing.T) {
 	}
 
 	syncTime := pgtype.Timestamptz{Time: updated.CreatedAt.Time, Valid: true}
-	if err := q.UpdateEmailAccountSyncState(ctx, db.UpdateEmailAccountSyncStateParams{
+	if err = q.UpdateEmailAccountSyncState(ctx, db.UpdateEmailAccountSyncStateParams{
 		ID:         acc.ID,
 		LastSyncAt: syncTime,
 		LastUid:    42,

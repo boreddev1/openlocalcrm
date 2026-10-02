@@ -225,7 +225,7 @@ func (s *Service) SendMessage(ctx context.Context, accountID pgtype.UUID, msg ma
 		msg.From = acc.EmailAddress
 	}
 
-	if err := mailclient.SendMail(mailclient.SMTPConfig{
+	if err = mailclient.SendMail(mailclient.SMTPConfig{
 		Host:        acc.SmtpHost.String,
 		Port:        int(acc.SmtpPort.Int32),
 		Username:    acc.Username.String,

@@ -351,7 +351,7 @@ func TestSyncAccount_SkipsInactiveAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAccount failed: %v", err)
 	}
-	if _, err := svc.UpdateAccount(context.Background(), acc.ID, email.AccountInput{Name: acc.Name, IsActive: false}); err != nil {
+	if _, err = svc.UpdateAccount(context.Background(), acc.ID, email.AccountInput{Name: acc.Name, IsActive: false}); err != nil {
 		t.Fatalf("UpdateAccount failed: %v", err)
 	}
 

@@ -593,7 +593,7 @@ func (u *Updater) ExecuteUpdate(ctx context.Context, engine *Engine, logChan cha
 
 	stagingDir := filepath.Join(u.BaseDir, ".openlocalcrm_update_staging")
 	_ = os.RemoveAll(stagingDir)
-	if err := os.MkdirAll(stagingDir, 0755); err != nil {
+	if err = os.MkdirAll(stagingDir, 0755); err != nil {
 		return fmt.Errorf("failed creating staging directory: %w", err)
 	}
 	defer os.RemoveAll(stagingDir)
@@ -868,7 +868,7 @@ func (u *Updater) EnsureProjectFilesForVersion(ctx context.Context, version stri
 
 	stagingDir := filepath.Join(u.BaseDir, ".openlocalcrm_setup_staging")
 	_ = os.RemoveAll(stagingDir)
-	if err := os.MkdirAll(stagingDir, 0755); err != nil {
+	if err = os.MkdirAll(stagingDir, 0755); err != nil {
 		return fmt.Errorf("failed creating staging directory: %w", err)
 	}
 	defer os.RemoveAll(stagingDir)

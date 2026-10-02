@@ -23,7 +23,7 @@ func NewClient(ctx context.Context, dbPool *pgxpool.Pool, deps Deps) (*river.Cli
 	if err != nil {
 		return nil, fmt.Errorf("failed to create river migrator: %w", err)
 	}
-	if _, err := migrator.Migrate(ctx, rivermigrate.DirectionUp, &rivermigrate.MigrateOpts{}); err != nil {
+	if _, err = migrator.Migrate(ctx, rivermigrate.DirectionUp, &rivermigrate.MigrateOpts{}); err != nil {
 		return nil, fmt.Errorf("failed to apply river migrations: %w", err)
 	}
 

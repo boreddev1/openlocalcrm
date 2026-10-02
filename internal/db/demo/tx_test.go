@@ -67,7 +67,7 @@ func TestEveryDemoCollectionIsCloned(t *testing.T) {
 	want := 0
 	for i := 0; i < typ.NumField(); i++ {
 		switch typ.Field(i).Type.Kind() {
-		case reflect.Map, reflect.Slice, reflect.Ptr, reflect.Interface, reflect.Array:
+		case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface, reflect.Array:
 			want++
 		}
 	}

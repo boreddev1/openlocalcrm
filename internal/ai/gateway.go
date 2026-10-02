@@ -275,7 +275,7 @@ func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstructi
 	var res struct {
 		Response string `json:"response"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&res); err != nil {
 		return "", fmt.Errorf("%w: ollama response decode failed: %v", ErrUpstreamUnavailable, err)
 	}
 

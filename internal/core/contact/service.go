@@ -452,21 +452,21 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateC
 
 	var oldAuditValues, newAuditValues audit.DiffMap
 	if s.audit != nil {
-		oldStrom, err := numericAuditValue(existing.StromverbrauchKwh)
-		if err != nil {
-			return db.Contact{}, fmt.Errorf("convert existing stromverbrauch_kwh: %w", err)
+		oldStrom, auditErr := numericAuditValue(existing.StromverbrauchKwh)
+		if auditErr != nil {
+			return db.Contact{}, fmt.Errorf("convert existing stromverbrauch_kwh: %w", auditErr)
 		}
-		oldGas, err := numericAuditValue(existing.GasverbrauchKwh)
-		if err != nil {
-			return db.Contact{}, fmt.Errorf("convert existing gasverbrauch_kwh: %w", err)
+		oldGas, auditErr := numericAuditValue(existing.GasverbrauchKwh)
+		if auditErr != nil {
+			return db.Contact{}, fmt.Errorf("convert existing gasverbrauch_kwh: %w", auditErr)
 		}
-		newStrom, err := numericAuditValue(stromVal)
-		if err != nil {
-			return db.Contact{}, fmt.Errorf("convert stromverbrauch_kwh: %w", err)
+		newStrom, auditErr := numericAuditValue(stromVal)
+		if auditErr != nil {
+			return db.Contact{}, fmt.Errorf("convert stromverbrauch_kwh: %w", auditErr)
 		}
-		newGas, err := numericAuditValue(gasVal)
-		if err != nil {
-			return db.Contact{}, fmt.Errorf("convert gasverbrauch_kwh: %w", err)
+		newGas, auditErr := numericAuditValue(gasVal)
+		if auditErr != nil {
+			return db.Contact{}, fmt.Errorf("convert gasverbrauch_kwh: %w", auditErr)
 		}
 		oldAuditValues = audit.DiffMap{
 			"company_id":         uuidAuditValue(existing.CompanyID),

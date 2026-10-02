@@ -420,7 +420,7 @@ func TestAcceptConsumesExactlyTheInviteTheTokenNames(t *testing.T) {
 		t.Fatalf("CreateUserInvite failed: %v", err)
 	}
 
-	if _, err := svc.Accept(ctx, issued.RawToken, "SuperSecret1!"); err != nil {
+	if _, err = svc.Accept(ctx, issued.RawToken, "SuperSecret1!"); err != nil {
 		t.Fatalf("Accept failed: %v", err)
 	}
 

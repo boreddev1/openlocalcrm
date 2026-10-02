@@ -257,8 +257,8 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 		}
 
 		encryptedSecret := user.TotpSecretEncrypted.String
-		plainSecret, err := crypto.DecryptSecret(encryptedSecret)
-		if err != nil {
+		plainSecret, decErr := crypto.DecryptSecret(encryptedSecret)
+		if decErr != nil {
 			s.limiter.RecordFailure(rateLimitKey)
 			if s.audit != nil {
 				_ = s.audit.Log(ctx, user.ID, "USER", user.ID, "LOGIN_FAILED", map[string]any{"reason": "totp_decrypt_failed"}, ip, userAgent)
@@ -276,11 +276,11 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 		}
 
 		// Persist used step to prevent replay attacks (F-02)
-		if err := s.querier.UpdateUserTOTPLastUsedStep(ctx, db.UpdateUserTOTPLastUsedStepParams{
+		if stepErr := s.querier.UpdateUserTOTPLastUsedStep(ctx, db.UpdateUserTOTPLastUsedStepParams{
 			ID:               user.ID,
 			TotpLastUsedStep: usedStep,
-		}); err != nil {
-			log.Printf("[AUTH] Warning: failed updating totp_last_used_step for user %s: %v", user.Email, err)
+		}); stepErr != nil {
+			log.Printf("[AUTH] Warning: failed updating totp_last_used_step for user %s: %v", user.Email, stepErr)
 		}
 	}
 
@@ -288,7 +288,7 @@ func (s *AuthService) Login(ctx context.Context, email, password, totpCode, ip, 
 	s.limiter.Reset(rateLimitKey)
 
 	// Update last login
-	if err := s.querier.UpdateUserLastLogin(ctx, db.UpdateUserLastLoginParams{
+	if err = s.querier.UpdateUserLastLogin(ctx, db.UpdateUserLastLoginParams{
 		ID:          user.ID,
 		LastLoginAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 	}); err != nil {
@@ -358,8 +358,8 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ip, use
 
 	var accessToken, newRefresh string
 	err = s.runTx(ctx, func(q db.Querier) error {
-		consumed, err := q.ConsumeRefreshToken(ctx, hash)
-		if err != nil {
+		consumed, txErr := q.ConsumeRefreshToken(ctx, hash)
+		if txErr != nil {
 			// Another request consumed it between the read and here. That is a
 			// race, not a theft, so roll back and let the caller retry.
 			return ErrInvalidRefreshToken
@@ -367,30 +367,30 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, ip, use
 		// The status check runs before the commit. Checking it afterwards would
 		// leave the old token consumed while the client got an error, so the
 		// next attempt would look like a replay.
-		user, err := q.GetUserByID(ctx, consumed.UserID)
-		if err != nil {
-			return err
+		user, txErr := q.GetUserByID(ctx, consumed.UserID)
+		if txErr != nil {
+			return txErr
 		}
 		if user.Status != "ACTIVE" {
 			return ErrUserNotActive
 		}
-		if newRefresh, err = generateRefreshToken(); err != nil {
-			return err
+		if newRefresh, txErr = generateRefreshToken(); txErr != nil {
+			return txErr
 		}
-		if _, err := q.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
+		if _, txErr = q.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
 			UserID:    consumed.UserID,
 			TokenHash: hashToken(newRefresh),
 			UserAgent: pgtype.Text{String: userAgent, Valid: userAgent != ""},
 			IpAddress: pgtype.Text{String: ip, Valid: ip != ""},
 			ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(refreshTokenDuration), Valid: true},
 			FamilyID:  consumed.FamilyID,
-		}); err != nil {
-			return err
+		}); txErr != nil {
+			return txErr
 		}
 		// The access token is signed before the commit for the same reason: a
 		// signing failure must not leave the rotation half applied.
-		accessToken, err = s.issueAccessToken(user)
-		return err
+		accessToken, txErr = s.issueAccessToken(user)
+		return txErr
 	})
 	if err != nil {
 		return "", "", err

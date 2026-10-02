@@ -56,14 +56,14 @@ func (d *AIDrafter) DraftEmail(ctx context.Context, template string, targetType,
 
 	switch strings.ToUpper(targetType) {
 	case "CONTACT":
-		cUUID, err := uuid.Parse(targetID)
-		if err != nil {
-			return fmt.Errorf("ungültige kontakt-id %q: %w", targetID, err)
+		cUUID, parseErr := uuid.Parse(targetID)
+		if parseErr != nil {
+			return fmt.Errorf("ungültige kontakt-id %q: %w", targetID, parseErr)
 		}
 		contactID = pgtype.UUID{Bytes: cUUID, Valid: true}
-		c, err := d.queries.GetContactByID(ctx, contactID)
-		if err != nil {
-			return fmt.Errorf("kontakt %s nicht gefunden: %w", targetID, err)
+		c, parseErr := d.queries.GetContactByID(ctx, contactID)
+		if parseErr != nil {
+			return fmt.Errorf("kontakt %s nicht gefunden: %w", targetID, parseErr)
 		}
 		if !c.Email.Valid || strings.TrimSpace(c.Email.String) == "" {
 			return fmt.Errorf("kontakt %s hat keine gültige E-Mail-Adresse", targetID)
@@ -71,22 +71,22 @@ func (d *AIDrafter) DraftEmail(ctx context.Context, template string, targetType,
 		recipientEmail = strings.TrimSpace(c.Email.String)
 
 	case "DEAL":
-		dUUID, err := uuid.Parse(targetID)
-		if err != nil {
-			return fmt.Errorf("ungültige deal-id %q: %w", targetID, err)
+		dUUID, parseErr := uuid.Parse(targetID)
+		if parseErr != nil {
+			return fmt.Errorf("ungültige deal-id %q: %w", targetID, parseErr)
 		}
 		dealID = pgtype.UUID{Bytes: dUUID, Valid: true}
-		dl, err := d.queries.GetDealByID(ctx, dealID)
-		if err != nil {
-			return fmt.Errorf("deal %s nicht gefunden: %w", targetID, err)
+		dl, parseErr := d.queries.GetDealByID(ctx, dealID)
+		if parseErr != nil {
+			return fmt.Errorf("deal %s nicht gefunden: %w", targetID, parseErr)
 		}
 		if !dl.ContactID.Valid {
 			return fmt.Errorf("deal %s ist keinem Kontakt zugeordnet", targetID)
 		}
 		contactID = dl.ContactID
-		c, err := d.queries.GetContactByID(ctx, contactID)
-		if err != nil {
-			return fmt.Errorf("zugeordneter kontakt für deal %s nicht gefunden: %w", targetID, err)
+		c, lookupErr := d.queries.GetContactByID(ctx, contactID)
+		if lookupErr != nil {
+			return fmt.Errorf("zugeordneter kontakt für deal %s nicht gefunden: %w", targetID, lookupErr)
 		}
 		if !c.Email.Valid || strings.TrimSpace(c.Email.String) == "" {
 			return fmt.Errorf("kontakt für deal %s hat keine gültige E-Mail-Adresse", targetID)

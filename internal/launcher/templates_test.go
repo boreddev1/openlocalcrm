@@ -16,12 +16,12 @@ func TestEnsureComposeAndCaddyFiles(t *testing.T) {
 	}
 
 	composeFile := filepath.Join(tmpDir, "docker-compose.yml")
-	if _, err := os.Stat(composeFile); err != nil {
+	if _, err = os.Stat(composeFile); err != nil {
 		t.Errorf("docker-compose.yml was not created in target dir")
 	}
 
 	caddyFile := filepath.Join(tmpDir, "Caddyfile")
-	if _, err := os.Stat(caddyFile); err != nil {
+	if _, err = os.Stat(caddyFile); err != nil {
 		t.Errorf("Caddyfile was not created in target dir")
 	}
 

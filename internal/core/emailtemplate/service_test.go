@@ -67,7 +67,7 @@ func TestTemplateCrudPersistsRealRows(t *testing.T) {
 	}
 
 	// The row really exists, not just in the return value.
-	if _, err := q.GetEmailTemplateByKey(ctx, "pv-first-offer"); err != nil {
+	if _, err = q.GetEmailTemplateByKey(ctx, "pv-first-offer"); err != nil {
 		t.Fatalf("Create must persist the row: %v", err)
 	}
 

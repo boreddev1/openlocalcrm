@@ -100,7 +100,7 @@ func (s *Service) Drill(ctx context.Context, meta RequestMeta) (DrillResult, err
 	if err != nil {
 		return DrillResult{}, err
 	}
-	if err := validateScratchSchemaName(schema); err != nil {
+	if err = validateScratchSchemaName(schema); err != nil {
 		return DrillResult{}, err
 	}
 
@@ -130,10 +130,10 @@ func (s *Service) Drill(ctx context.Context, meta RequestMeta) (DrillResult, err
 		return result, cause
 	}
 
-	if err := scratch.CreateSchema(ctx, schema); err != nil {
+	if err = scratch.CreateSchema(ctx, schema); err != nil {
 		return abort(err)
 	}
-	if err := scratch.CloneTables(ctx, schema, tableNames()); err != nil {
+	if err = scratch.CloneTables(ctx, schema, tableNames()); err != nil {
 		return abort(err)
 	}
 	fkStats, err := scratch.RewriteForeignKeys(ctx, schema)
@@ -462,7 +462,7 @@ func (p *poolTarget) Prepare(ctx context.Context, schema string) (RowSource, pgx
 	}
 	// The source handle is pinned to public so the unqualified row selectors
 	// read the live tables even while a scratch schema exists.
-	if _, err := source.Exec(ctx, "SET search_path TO public"); err != nil {
+	if _, err = source.Exec(ctx, "SET search_path TO public"); err != nil {
 		source.Release()
 		return nil, nil, fmt.Errorf("backup drill: could not pin the source schema: %w", err)
 	}

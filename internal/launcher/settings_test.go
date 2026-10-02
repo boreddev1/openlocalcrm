@@ -64,7 +64,7 @@ OPENLOCALCRM_VERSION=v1.0.2
 
 	// 3. Save to settings.json and load back
 	settingsFile := filepath.Join(tmp, "openlocalcrm-settings.json")
-	if err := SaveSettingsToFile(settingsFile, exported); err != nil {
+	if err = SaveSettingsToFile(settingsFile, exported); err != nil {
 		t.Fatalf("failed saving settings file: %v", err)
 	}
 
@@ -83,7 +83,7 @@ CONNECTOR_API_TOKEN=custom-token-xyz
 `
 	_ = os.WriteFile(filepath.Join(rebuildDir, ".env"), []byte(existingEnv), 0600)
 
-	if err := ImportSettingsToEnv(rebuildDir, loaded, true); err != nil {
+	if err = ImportSettingsToEnv(rebuildDir, loaded, true); err != nil {
 		t.Fatalf("failed importing settings to rebuild dir: %v", err)
 	}
 
@@ -171,15 +171,15 @@ func TestSettingsExportImportEmbeddingModel(t *testing.T) {
 	}
 
 	imported := &ExportedSettings{AI: AISettings{Provider: "ollama", Model: "gemma2:12b", EmbeddingModel: "mistral-embed"}}
-	if err := ValidateSettingsValues(imported); err != nil {
+	if err = ValidateSettingsValues(imported); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
-	if err := ValidateSettingsValues(&ExportedSettings{AI: AISettings{EmbeddingModel: "bad\nmodel"}}); err == nil {
+	if err = ValidateSettingsValues(&ExportedSettings{AI: AISettings{EmbeddingModel: "bad\nmodel"}}); err == nil {
 		t.Fatalf("expected newline injection to be rejected")
 	}
 
 	outDir := t.TempDir()
-	if err := ImportSettingsToEnv(outDir, imported, false); err != nil {
+	if err = ImportSettingsToEnv(outDir, imported, false); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(filepath.Join(outDir, ".env"))

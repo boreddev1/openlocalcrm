@@ -181,9 +181,9 @@ func (h *TodoHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var dueDatePtr *time.Time
 	if req.DueDate != "" {
-		if parsedTime, err := time.Parse(time.RFC3339, req.DueDate); err == nil {
+		if parsedTime, timeErr := time.Parse(time.RFC3339, req.DueDate); timeErr == nil {
 			dueDatePtr = &parsedTime
-		} else if parsedDate, err := time.Parse("2006-01-02", req.DueDate); err == nil {
+		} else if parsedDate, dateErr := time.Parse("2006-01-02", req.DueDate); dateErr == nil {
 			dueDatePtr = &parsedDate
 		}
 	} else if existing.DueDate.Valid {
