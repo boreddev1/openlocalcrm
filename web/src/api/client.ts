@@ -102,6 +102,18 @@ function withFreshCsrf(init?: RequestInit): RequestInit | undefined {
   return { ...init, headers };
 }
 
+// Request inputs carry their own headers and a one-shot body, so the retry is built from a clone
+// taken before the first attempt, with the rotated token applied on top.
+function retryRequestWithFreshCsrf(clone: Request): Request {
+  const fresh = getCookie('csrf_token');
+  if (!fresh) {
+    return clone;
+  }
+  const headers = new Headers(clone.headers);
+  headers.set('X-CSRF-Token', fresh);
+  return new Request(clone, { headers });
+}
+
 if (typeof window !== 'undefined' && !(window as any).__crmFetchIntercepted) {
   (window as any).__crmFetchIntercepted = true;
   const originalFetch = window.fetch.bind(window);
@@ -113,6 +125,13 @@ if (typeof window !== 'undefined' && !(window as any).__crmFetchIntercepted) {
           ? input.toString()
           : (input as Request).url || '';
 
+    const retryClone =
+      !init &&
+      input instanceof Request &&
+      ['POST', 'PUT', 'DELETE', 'PATCH'].includes(input.method.toUpperCase())
+        ? input.clone()
+        : null;
+
     const res = await originalFetch(input, init);
 
     const isNonExpiry =
@@ -122,6 +141,9 @@ if (typeof window !== 'undefined' && !(window as any).__crmFetchIntercepted) {
     if (res.status === 401 && !isNonExpiry) {
       try {
         await withCrossTabLock(executeRefresh);
+        if (retryClone) {
+          return await originalFetch(retryRequestWithFreshCsrf(retryClone));
+        }
         return await originalFetch(input, withFreshCsrf(init));
       } catch {
         window.dispatchEvent(new CustomEvent('auth:logout'));

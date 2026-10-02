@@ -719,4 +719,53 @@ test.describe("Authentication & Navigation Layout", () => {
     expect(status).toBe(200);
     expect(seenTokens).toEqual(["old-token", "new-token"]);
   });
+
+  test("should rebuild a retried Request input with the rotated CSRF token after refresh (R-08)", async ({
+    page,
+    context,
+  }) => {
+    await page.goto("/");
+    await expect(page.getByText("Vertriebs-Dashboard")).toBeVisible();
+
+    await context.addCookies([
+      { name: "csrf_token", value: "old-token", url: "http://localhost:5173" },
+    ]);
+
+    const seen: { token: string | undefined; body: string | null }[] = [];
+    let calls = 0;
+    await page.route("**/api/v1/e2e-csrf-probe-request", async (route) => {
+      calls++;
+      seen.push({
+        token: route.request().headers()["x-csrf-token"],
+        body: route.request().postData(),
+      });
+      if (calls === 1) {
+        await route.fulfill({ status: 401, body: "{}" });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+    await page.route("**/api/v1/auth/refresh", async (route) => {
+      await context.addCookies([
+        { name: "csrf_token", value: "new-token", url: "http://localhost:5173" },
+      ]);
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    const status = await page.evaluate(async () => {
+      const res = await fetch(
+        new Request("/api/v1/e2e-csrf-probe-request", {
+          method: "POST",
+          body: JSON.stringify({ a: 1 }),
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": "old-token" },
+          credentials: "include",
+        }),
+      );
+      return res.status;
+    });
+
+    expect(status).toBe(200);
+    expect(seen.map((s) => s.token)).toEqual(["old-token", "new-token"]);
+    expect(seen[1].body).toBe('{"a":1}');
+  });
 });
