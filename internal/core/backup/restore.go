@@ -172,12 +172,22 @@ func applyTableRows(
 	rng tableRange,
 	queries db.Querier,
 ) (int64, error) {
-	if _, err := spool.Seek(rng.offset, io.SeekStart); err != nil {
+	// The recorded offset points just past the table's '['. A fresh decoder
+	// only tracks array state for delimiters it consumed itself, so step back
+	// onto the '[' and read it as a token; otherwise the separator after the
+	// first row is rejected as an invalid value.
+	if rng.offset < 1 {
+		return 0, fmt.Errorf("table %s: invalid recorded row offset", spec.Name)
+	}
+	if _, err := spool.Seek(rng.offset-1, io.SeekStart); err != nil {
 		return 0, fmt.Errorf("table %s: could not seek to the uploaded rows: %w", spec.Name, err)
 	}
-	// The recorded offset points just past the table's '[', so decoding starts
-	// at the first row.
 	decoder := json.NewDecoder(bufio.NewReader(spool))
+	if token, err := decoder.Token(); err != nil {
+		return 0, fmt.Errorf("table %s: could not read the uploaded rows: %w", spec.Name, err)
+	} else if delim, ok := token.(json.Delim); !ok || delim != '[' {
+		return 0, fmt.Errorf("table %s: the uploaded rows do not start with an array", spec.Name)
+	}
 
 	var count int64
 	for decoder.More() {
@@ -189,6 +199,12 @@ func applyTableRows(
 			return count, fmt.Errorf("table %s: could not import a row: %w", spec.Name, err)
 		}
 		count++
+	}
+	// A truncated array must never look like a successful import.
+	if token, err := decoder.Token(); err != nil {
+		return count, fmt.Errorf("table %s: the uploaded rows are truncated: %w", spec.Name, err)
+	} else if delim, ok := token.(json.Delim); !ok || delim != ']' {
+		return count, fmt.Errorf("table %s: the uploaded rows do not end with an array close", spec.Name)
 	}
 	return count, nil
 }

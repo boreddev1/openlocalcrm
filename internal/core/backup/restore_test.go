@@ -626,3 +626,37 @@ func TestMissingTablesErrorNamesTheInventorySize(t *testing.T) {
 	require.NotErrorIs(t, err, ErrInvalidBackup,
 		"an incomplete replace is its own condition, not a malformed envelope")
 }
+
+func TestRestoreRejectsATruncatedTableArray(t *testing.T) {
+	// Three rows, then the envelope ends before the closing ']'.
+	raw := `{"format":"openlocalcrm-backup","version":1,"tables":{"users":[` +
+		`{"id":"00000000-0000-0000-0000-0000000000a1"},` +
+		`{"id":"00000000-0000-0000-0000-0000000000a2"},` +
+		`{"id":"00000000-0000-0000-0000-0000000000a3"}`
+	fake := newFakeDBTX()
+	svc := newRestoreService(t, fake, &recordingAudit{})
+	_, err := svc.Restore(context.Background(), strings.NewReader(raw), RestoreModeMerge, RequestMeta{})
+	require.Error(t, err)
+}
+
+func TestApplyTableRowsReadsEveryRowAndDetectsTruncation(t *testing.T) {
+	spec := tableByName("users")
+	require.NotNil(t, spec)
+	body := `{"t":[{"id":"a"},{"id":"b"},{"id":"c"}]}`
+	spool, err := os.CreateTemp(t.TempDir(), "spool")
+	require.NoError(t, err)
+	defer spool.Close()
+	_, err = spool.WriteString(body)
+	require.NoError(t, err)
+	offset := int64(strings.Index(body, "[") + 1)
+
+	fake := newFakeDBTX()
+	count, err := applyTableRows(context.Background(), spool, spec, tableRange{offset: offset}, db.New(fake))
+	require.NoError(t, err)
+	require.Equal(t, int64(3), count)
+
+	// Truncated after the second row: the array never closes.
+	require.NoError(t, spool.Truncate(int64(strings.Index(body, `,{"id":"c"}`))))
+	_, err = applyTableRows(context.Background(), spool, spec, tableRange{offset: offset}, db.New(fake))
+	require.Error(t, err)
+}
