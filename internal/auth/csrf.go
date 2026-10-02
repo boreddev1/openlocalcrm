@@ -186,7 +186,7 @@ func CSRFProtectionMiddleware(next http.Handler) http.Handler {
 // authenticated by the HttpOnly SameSite=Strict refresh cookie, which browsers never send
 // cross-site, and they run without an access token (it expires after 30 minutes and its
 // cookie is then dropped). The user-bound HMAC check of CSRFProtectionMiddleware therefore
-// cannot apply; the cookie/header equality check remains as defence in depth.
+// cannot apply; the cookie/header equality check remains as defense in depth.
 func CSRFDoubleSubmitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(CSRFCookieName)

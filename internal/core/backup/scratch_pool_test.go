@@ -150,7 +150,7 @@ func (r *stringRows) Close()     {}
 func (r *stringRows) Err() error { return nil }
 
 // fkSchemaRows replays the "parent schema -> constraint count" rows. The keys
-// are materialised in sorted order so the double is deterministic.
+// are materialized in sorted order so the double is deterministic.
 type fkSchemaRows struct {
 	pgx.Rows
 	keys   []string

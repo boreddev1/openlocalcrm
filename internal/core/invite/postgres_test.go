@@ -5,7 +5,7 @@ package invite_test
 // The in-memory demo querier and the unit tests can only prove what the Go code
 // asks for. They cannot prove the SQL, and this SQL carries the security
 // property: a one-time token must activate an account exactly once, and a
-// concurrent second acceptance must be serialised rather than allowed to
+// concurrent second acceptance must be serialized rather than allowed to
 // overwrite the password. A missing FOR UPDATE or an inverted predicate would
 // leave every unit test green.
 //

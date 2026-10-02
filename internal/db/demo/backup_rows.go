@@ -12,7 +12,7 @@ import (
 // The methods in this file satisfy the generated db.Querier contract for the
 // backup queries. They are the demo-mode mirror of the canonical SQL in
 // internal/db/queries/backup.sql: same table set, same primary-key ordering,
-// same ON CONFLICT behaviour. The bounded-memory export never uses them: it
+// same ON CONFLICT behavior. The bounded-memory export never uses them: it
 // goes through the ScanBackup* methods in backup_stream.go, which stream one
 // row at a time.
 

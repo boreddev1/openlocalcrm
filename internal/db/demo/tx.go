@@ -26,7 +26,7 @@ var _ TxRunner = (*InMemoryQuerier)(nil)
 // succeeds, so rollback is exact and needs no restore step, and no concurrent
 // reader can observe a half-applied transaction.
 func (q *InMemoryQuerier) RunTx(ctx context.Context, fn func(db.Querier) error) error {
-	// Held for the whole callback so the transaction is serialised against
+	// Held for the whole callback so the transaction is serialized against
 	// other writers and against itself; never re-entered, because fn works on
 	// the shadow.
 	q.mu.Lock()

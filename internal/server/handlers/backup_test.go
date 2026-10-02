@@ -273,7 +273,7 @@ func TestBackupDrillIgnoresAnyRequestBody(t *testing.T) {
 	h := demoBackupHandler()
 
 	// The drill is bodyless: even a body claiming live data must not change the
-	// answer, and no uploaded backup may be honoured.
+	// answer, and no uploaded backup may be honored.
 	rec := httptest.NewRecorder()
 	h.Drill(rec, adminRequest(http.MethodPost, "/api/v1/backup/drill", `{"source":"uploaded"}`))
 	require.Equal(t, http.StatusNotImplemented, rec.Code)

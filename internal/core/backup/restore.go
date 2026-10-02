@@ -101,7 +101,7 @@ func (s *Service) Restore(
 	committed := false
 	defer func() {
 		if !committed {
-			// A cancelled request must still release the transaction.
+			// A canceled request must still release the transaction.
 			_ = tx.Rollback(context.WithoutCancel(ctx))
 		}
 	}()

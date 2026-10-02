@@ -74,7 +74,7 @@ func (d *RowDigest) Count() int64 { return d.count }
 // Sum returns the hex-encoded digest.
 func (d *RowDigest) Sum() string { return hex.EncodeToString(d.hash.Sum(nil)) }
 
-// DigestRows digests a materialised row slice with the same algorithm, so a
+// DigestRows digests a materialized row slice with the same algorithm, so a
 // caller can predict the digest of a streamed table.
 func DigestRows(rows [][]byte) (int64, string) {
 	digest := NewRowDigest()

@@ -39,6 +39,11 @@ linters:
       - legacy
       - std-error-handling
     rules:
+      # misspell checks against US English only. These hits are German UI text
+      # or API/DB enum values (todo_status CANCELLED) that must not change.
+      - linters:
+          - misspell
+        text: '`(Konfiguration|Initiales|Interaktion|persistente|Analyse|analyse|CANCELLED)`'
       - linters:
           - errcheck
           - gosec

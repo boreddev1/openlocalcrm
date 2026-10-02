@@ -15,7 +15,7 @@ import (
 // is what an empty table would produce from PostgreSQL as well.
 
 // scanDemoRows streams each entry in primary-key order. The map is copied by
-// the caller under the read lock, so one row is marshalled at a time and no
+// the caller under the read lock, so one row is marshaled at a time and no
 // []json.RawMessage is ever built.
 func scanDemoRows(ctx context.Context, key string, rows map[string]any, sink db.RowSink) error {
 	if sink == nil {

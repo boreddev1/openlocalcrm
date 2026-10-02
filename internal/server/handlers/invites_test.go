@@ -213,7 +213,7 @@ func TestInviteLinkOriginFollowsTheRequest(t *testing.T) {
 			want:      "https://crm.example.de/accept-invite?token=",
 		},
 		{
-			name:      "forwarded http is honoured",
+			name:      "forwarded http is honored",
 			target:    "http://crm.example.de/api/v1/users/invite",
 			forwarded: "http",
 			want:      "http://crm.example.de/accept-invite?token=",

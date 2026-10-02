@@ -152,7 +152,7 @@ func HashToken(raw string) string {
 //
 // base is empty when no usable origin is known, in which case the link is the
 // bare InvitePath. A base that already carries a scheme is used verbatim; one
-// that does not is assumed to be https. Callers are responsible for sanitising
+// that does not is assumed to be https. Callers are responsible for sanitizing
 // an untrusted host before it reaches this function — see SanitizeHost — because
 // the result is a link an administrator hands to a person.
 func BuildInviteURL(base, rawToken string) string {
@@ -165,7 +165,7 @@ func BuildInviteURL(base, rawToken string) string {
 
 // SanitizeHost accepts a host only if it is unambiguously one.
 //
-// The Host header is attacker-controlled, and the sanitised value ends up in a
+// The Host header is attacker-controlled, and the sanitized value ends up in a
 // link that is displayed, copied and handed over. A value carrying a scheme, a
 // path, a credential, a control character or any whitespace is refused outright
 // rather than cleaned up, because guessing at a repaired version of
@@ -202,7 +202,7 @@ var validRoles = map[string]struct{}{
 // admin; the token is unrecoverable afterwards.
 //
 // baseURL is the browser-facing origin for the link. It must already be
-// sanitised (SanitizeHost) when it is derived from the request, and may be empty,
+// sanitized (SanitizeHost) when it is derived from the request, and may be empty,
 // in which case the link is the bare InvitePath.
 func (s *Service) Issue(ctx context.Context, actorID pgtype.UUID, req CreateUserInput, baseURL string) (IssuedInvite, error) {
 	if s == nil || s.queries == nil {

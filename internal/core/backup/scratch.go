@@ -24,7 +24,7 @@ const scratchSchemaPrefix = "backup_drill_"
 
 var scratchSchemaPattern = regexp.MustCompile(`^backup_drill_[0-9a-f]{16}$`)
 
-// scratchCleanupTimeout bounds the guaranteed DROP SCHEMA so a cancelled drill
+// scratchCleanupTimeout bounds the guaranteed DROP SCHEMA so a canceled drill
 // still releases its schema instead of leaking it.
 const scratchCleanupTimeout = 30 * time.Second
 
@@ -109,7 +109,7 @@ func (s *Service) Drill(ctx context.Context, meta RequestMeta) (DrillResult, err
 	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), scratchCleanupTimeout)
 	defer cancelCleanup()
 	// The scratch schema is dropped on every path, including every failure and
-	// a cancelled request. A failed drop is not fatal: the schema is namespaced
+	// a canceled request. A failed drop is not fatal: the schema is namespaced
 	// and never read by the application.
 	defer func() {
 		_ = scratch.DropSchema(cleanupCtx, schema)

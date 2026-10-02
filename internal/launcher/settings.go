@@ -302,7 +302,7 @@ func ImportSettingsToEnv(baseDir string, s *ExportedSettings, keepExistingSecret
 func SaveSettingsToFile(filePath string, s *ExportedSettings) error {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed marshalling settings: %w", err)
+		return fmt.Errorf("failed marshaling settings: %w", err)
 	}
 	return os.WriteFile(filePath, data, 0600)
 }
