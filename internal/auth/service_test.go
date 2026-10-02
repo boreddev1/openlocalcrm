@@ -627,3 +627,28 @@ func TestAuthService_SecurityEventAuditing(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, capturer.actions, "PASSWORD_CHANGED")
 }
+
+// TestRefreshTokenSigningFailureRollsBackRotation: if signing the rotated access
+// token fails, the real error must surface and the rotation must not commit.
+func TestRefreshTokenSigningFailureRollsBackRotation(t *testing.T) {
+	svc, q, _ := newTestAuthService(t)
+	loginRes, err := svc.Login(context.Background(), "a@example.de", "Str0ng!Pass", "", "127.0.0.1", "test")
+	require.NoError(t, err)
+	before := countRefreshTokens(t, q)
+
+	svc.SetAccessTokenSignerForTest(func(db.User) (string, error) {
+		return "", errors.New("injected signing failure")
+	})
+	access, refresh, err := svc.RefreshToken(context.Background(), loginRes.RefreshToken, "127.0.0.1", "test")
+	require.Error(t, err)
+	require.Empty(t, access)
+	require.Empty(t, refresh)
+	require.Equal(t, before, countRefreshTokens(t, q), "no successor token may be left behind")
+
+	// The original token was not consumed: with a working key it still rotates.
+	svc.SetAccessTokenSignerForTest(nil)
+	access, refresh, err = svc.RefreshToken(context.Background(), loginRes.RefreshToken, "127.0.0.1", "test")
+	require.NoError(t, err)
+	require.NotEmpty(t, access)
+	require.NotEmpty(t, refresh)
+}

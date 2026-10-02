@@ -90,6 +90,7 @@ type TxRunner interface {
 type AuthService struct {
 	querier             db.Querier
 	privKey             ed25519.PrivateKey
+	signAccessToken     func(db.User) (string, error) // test seam; nil uses privKey
 	pubKey              ed25519.PublicKey
 	limiter             *RateLimiter
 	revoker             SessionRevoker
@@ -117,6 +118,9 @@ func (s *AuthService) SetQuerierForTest(q db.Querier) {
 }
 
 func (s *AuthService) issueAccessToken(user db.User) (string, error) {
+	if s.signAccessToken != nil {
+		return s.signAccessToken(user)
+	}
 	userID := uuid.UUID(user.ID.Bytes)
 	return GenerateAccessToken(userID, user.Email, user.Role, user.TokenVersion, s.privKey, AccessTokenDuration)
 }
