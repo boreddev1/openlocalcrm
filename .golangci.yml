@@ -1,12 +1,16 @@
+version: "2"
+
 run:
   timeout: 5m
   tests: true
   modules-download-mode: readonly
 
 linters:
+  # "standard" already enables errcheck, govet, ineffassign, staticcheck
+  # (which includes the former gosimple) and unused; listed explicitly for clarity.
+  default: standard
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
@@ -15,27 +19,39 @@ linters:
     - bodyclose
     - misspell
     - unconvert
+  settings:
+    govet:
+      enable:
+        - nilness
+        - shadow
+    gosec:
+      excludes:
+        - G104 # Audit errors not checked (already caught by errcheck)
+        - G204 # Subprocess launched with variable (needed in setup-launcher/updater)
+        - G304 # File path provided as taint input (storage and backups require dynamic paths)
+    misspell:
+      locale: US
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gosec
+        path: _test\.go
+    paths:
+      - ^web/
+      - ^data/
+      - ^backups/
 
-linters-settings:
-  govet:
-    enable:
-      - nilness
-      - shadow
-  gosec:
-    excludes:
-      - G104 # Audit errors not checked (already caught by errcheck)
-      - G204 # Subprocess launched with variable (needed in setup-launcher/updater)
-      - G304 # File path provided as taint input (storage and backups require dynamic paths)
-  misspell:
-    locale: US
-
-issues:
-  exclude-dirs:
-    - web
-    - data
-    - backups
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - ^web/
+      - ^data/
+      - ^backups/
