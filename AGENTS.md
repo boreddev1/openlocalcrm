@@ -105,11 +105,11 @@ make check-coverage  # same gate as coverage
 ```bash
 make check           # THE canonical local gate: setup-hooks + fmt + lint + check-licenses + test
 make fmt             # gofmt -s -w .
-make lint            # go vet ./...  +  (cd web && pnpm lint && pnpm typecheck)
+make lint            # go vet ./...  +  golangci-lint run ./...  +  (cd web && pnpm lint && pnpm typecheck)
 make check-licenses  # 100% permissive-only license audit
 ```
 
-- **Go:** `gofmt -s` (tabs), `go vet`, and `golangci-lint` (see `.golangci.yml`: errcheck, gosimple, govet nilness+shadow, ineffassign, staticcheck, unused, gosec, bodyclose, misspell, unconvert).
+- **Go:** `gofmt -s` (tabs), `go vet`, and `golangci-lint` v2.x (see `.golangci.yml`: errcheck, govet nilness+shadow, ineffassign, staticcheck, unused, gosec, bodyclose, misspell, unconvert). CI runs it with the pinned version; use `//nolint:gosec // <reason>` only for narrow, justified false positives.
 - **Web:** ESLint (`web/eslint.config.js`), Prettier, `tsc` typecheck.
 - **Formatting rules** (`.editorconfig`): LF line endings, UTF-8, final newline, trim trailing whitespace. Go = tabs; web/shell = 2/4 spaces; Markdown may keep trailing spaces.
 
