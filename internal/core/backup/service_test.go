@@ -28,7 +28,6 @@ type fakeRowSource struct {
 	rowsPerTable int
 	calls        []string
 	failTable    string
-	nilSinkErr   bool
 }
 
 func newFakeRowSource(rowsPerTable int) *fakeRowSource {

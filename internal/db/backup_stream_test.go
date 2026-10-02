@@ -37,9 +37,7 @@ func (r *fakeRows) Close()     {}
 func (r *fakeRows) Err() error { return r.err }
 
 // noTransactions is a DBTX that cannot open a transaction, like the demo store.
-type noTransactions struct {
-	tx pgx.Tx
-}
+type noTransactions struct{}
 
 func (n *noTransactions) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, nil

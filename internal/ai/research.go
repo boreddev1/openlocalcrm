@@ -275,10 +275,3 @@ func (s *ResearchService) scrapeWebsite(ctx context.Context, targetURL string) (
 	}
 	return title, metaDesc, string(runes)
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

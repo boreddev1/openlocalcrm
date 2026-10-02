@@ -112,34 +112,6 @@ func (f *fakeScratch) matching(fragment string) []string {
 	return out
 }
 
-type fakeCatalogRows struct {
-	pgx.Rows
-	rows []catalogFK
-	pos  int
-}
-
-func (r *fakeCatalogRows) Next() bool { return r.pos < len(r.rows) }
-
-func (r *fakeCatalogRows) Scan(dest ...any) error {
-	if r.pos >= len(r.rows) {
-		return pgx.ErrNoRows
-	}
-	row := r.rows[r.pos]
-	r.pos++
-	if len(dest) != 5 {
-		return fmt.Errorf("expected 5 scan destinations, got %d", len(dest))
-	}
-	*(dest[0].(*string)) = row.constraint
-	*(dest[1].(*string)) = row.child
-	*(dest[2].(*string)) = row.definition
-	*(dest[3].(*string)) = row.parent
-	*(dest[4].(*string)) = row.parentSchema
-	return nil
-}
-
-func (r *fakeCatalogRows) Close()     {}
-func (r *fakeCatalogRows) Err() error { return nil }
-
 func defaultCatalog() []catalogFK {
 	return []catalogFK{
 		{
