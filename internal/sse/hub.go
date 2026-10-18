@@ -5,6 +5,19 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
+)
+
+const (
+	// DefaultMaxClients bounds the number of concurrent SSE streams. Without a
+	// bound a flood of connections can exhaust goroutines and sockets.
+	DefaultMaxClients = 1000
+	// DefaultHeartbeatInterval is how often an idle stream receives a comment
+	// frame so proxies and NAT keep the connection alive.
+	DefaultHeartbeatInterval = 25 * time.Second
+	// DefaultWriteDeadline bounds a single write to a client, so a hung TCP
+	// connection cannot pin the stream goroutine indefinitely.
+	DefaultWriteDeadline = 10 * time.Second
 )
 
 // Event represents a Server-Sent Event message
@@ -17,12 +30,26 @@ type Event struct {
 type Hub struct {
 	mu      sync.RWMutex
 	clients map[chan Event]bool
+
+	// MaxClients is the maximum number of concurrent streams. Streams beyond
+	// the limit are declined with 503 Service Unavailable. A non-positive
+	// value disables the cap.
+	MaxClients int
+	// HeartbeatInterval is the period of the SSE comment keep-alive frames.
+	// A non-positive value disables heartbeats.
+	HeartbeatInterval time.Duration
+	// WriteDeadline bounds each write to a client. A non-positive value
+	// disables the per-write deadline.
+	WriteDeadline time.Duration
 }
 
-// NewHub creates a new SSE Hub instance
+// NewHub creates a new SSE Hub instance with finite production defaults.
 func NewHub() *Hub {
 	return &Hub{
-		clients: make(map[chan Event]bool),
+		clients:           make(map[chan Event]bool),
+		MaxClients:        DefaultMaxClients,
+		HeartbeatInterval: DefaultHeartbeatInterval,
+		WriteDeadline:     DefaultWriteDeadline,
 	}
 }
 
@@ -48,19 +75,19 @@ func (h *Hub) ClientCount() int {
 }
 
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	if _, ok := w.(http.Flusher); !ok {
 		http.Error(w, `{"error":"Streaming unsupported"}`, http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
 	ch := make(chan Event, 16)
+
 	h.mu.Lock()
+	if h.MaxClients > 0 && len(h.clients) >= h.MaxClients {
+		h.mu.Unlock()
+		http.Error(w, `{"error":"Too many concurrent streams"}`, http.StatusServiceUnavailable)
+		return
+	}
 	h.clients[ch] = true
 	h.mu.Unlock()
 
@@ -71,15 +98,35 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.mu.Unlock()
 	}()
 
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	rc := http.NewResponseController(w)
+	heartbeat := h.HeartbeatInterval
+	var ticker *time.Ticker
+	var ticks <-chan time.Time
+	if heartbeat > 0 {
+		ticker = time.NewTicker(heartbeat)
+		defer ticker.Stop()
+		ticks = ticker.C
+	}
+
 	// Send initial connection event
 	initData, _ := json.Marshal(map[string]string{"status": "connected"})
-	fmt.Fprintf(w, "event: connected\ndata: %s\n\n", string(initData))
-	flusher.Flush()
+	if !h.writeFrame(w, rc, fmt.Sprintf("event: connected\ndata: %s\n\n", string(initData))) {
+		return
+	}
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-ticks:
+			if !h.writeFrame(w, rc, ": heartbeat\n\n") {
+				return
+			}
 		case evt, ok := <-ch:
 			if !ok {
 				return
@@ -88,8 +135,26 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, string(data))
-			flusher.Flush()
+			if !h.writeFrame(w, rc, fmt.Sprintf("event: %s\ndata: %s\n\n", evt.Type, string(data))) {
+				return
+			}
 		}
 	}
+}
+
+// writeFrame applies the per-write deadline through the http.ResponseController
+// and reports whether the frame was written and flushed successfully.
+func (h *Hub) writeFrame(w http.ResponseWriter, rc *http.ResponseController, frame string) bool {
+	if h.WriteDeadline > 0 {
+		// ErrNotSupported is expected for ResponseWriters without a connection
+		// (for example httptest.ResponseRecorder); the write is still attempted.
+		_ = rc.SetWriteDeadline(time.Now().Add(h.WriteDeadline))
+	}
+	if _, err := fmt.Fprint(w, frame); err != nil {
+		return false
+	}
+	if err := rc.Flush(); err != nil {
+		return false
+	}
+	return true
 }
