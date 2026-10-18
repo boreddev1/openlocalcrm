@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
@@ -20,9 +21,10 @@ import (
 func TestHealthEndpoint(t *testing.T) {
 	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
 	r := server.NewRouter(server.Config{
-		SSEHub:  sse.NewHub(),
-		PubKey:  pubKey,
-		PrivKey: privKey,
+		SSEHub:   sse.NewHub(),
+		PubKey:   pubKey,
+		PrivKey:  privKey,
+		DemoMode: true,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
@@ -42,28 +44,53 @@ func TestHealthEndpoint(t *testing.T) {
 	if resp["status"] != "healthy" {
 		t.Fatalf("expected healthy status, got %v", resp["status"])
 	}
-	if resp["ai_model"] == nil || resp["ai_model"] == "" {
-		t.Errorf("expected non-empty ai_model in health check, got %v", resp["ai_model"])
+	if resp["demo_mode"] != true {
+		t.Fatalf("expected demo_mode true, got %v", resp["demo_mode"])
 	}
-	if resp["ai_provider"] == nil || resp["ai_provider"] == "" {
-		t.Errorf("expected non-empty ai_provider in health check, got %v", resp["ai_provider"])
+	// F-40: Ensure internal AI configuration is NOT disclosed
+	if resp["ai_model"] != nil {
+		t.Errorf("expected ai_model to be omitted from health response, got %v", resp["ai_model"])
 	}
+	if resp["ai_provider"] != nil {
+		t.Errorf("expected ai_provider to be omitted from health response, got %v", resp["ai_provider"])
+	}
+	if resp["ai_base_url"] != nil {
+		t.Errorf("expected ai_base_url to be omitted from health response, got %v", resp["ai_base_url"])
+	}
+}
 
-	// Custom model test
-	rCustom := server.NewRouter(server.Config{
-		SSEHub:     sse.NewHub(),
-		PubKey:     pubKey,
-		PrivKey:    privKey,
-		AIProvider: "ollama",
-		AIModel:    "mistral",
+func TestSecurityHeaders(t *testing.T) {
+	pubKey, privKey, _ := ed25519.GenerateKey(rand.Reader)
+	r := server.NewRouter(server.Config{
+		SSEHub:  sse.NewHub(),
+		PubKey:  pubKey,
+		PrivKey: privKey,
 	})
-	reqCustom := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
-	recCustom := httptest.NewRecorder()
-	rCustom.ServeHTTP(recCustom, reqCustom)
-	var respCustom map[string]any
-	_ = json.NewDecoder(recCustom.Body).Decode(&respCustom)
-	if respCustom["ai_model"] != "mistral" {
-		t.Errorf("expected mistral model, got %v", respCustom["ai_model"])
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+
+	r.ServeHTTP(rec, req)
+
+	headers := rec.Header()
+	if headers.Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("missing or incorrect X-Content-Type-Options header")
+	}
+	if headers.Get("X-Frame-Options") != "DENY" {
+		t.Errorf("missing or incorrect X-Frame-Options header")
+	}
+	if headers.Get("Referrer-Policy") != "strict-origin-when-cross-origin" {
+		t.Errorf("missing or incorrect Referrer-Policy header")
+	}
+	if headers.Get("Permissions-Policy") == "" {
+		t.Errorf("missing Permissions-Policy header")
+	}
+	if headers.Get("Content-Security-Policy") == "" {
+		t.Errorf("missing Content-Security-Policy header")
+	}
+	if headers.Get("Strict-Transport-Security") == "" {
+		t.Errorf("missing Strict-Transport-Security header on https request")
 	}
 }
 
@@ -85,7 +112,7 @@ func TestAuthenticatedRoute(t *testing.T) {
 
 	// 2. Authenticated request with Bearer token should succeed
 	userID := uuid.New()
-	token, _ := auth.GenerateAccessToken(userID, "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+	token, _ := auth.GenerateAccessToken(userID, "admin@openlocalcrm.local", "ADMIN", 0, privKey, 15*time.Minute)
 	authReq := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
 	authReq.Header.Set("Authorization", "Bearer "+token)
 	authRec := httptest.NewRecorder()
@@ -107,9 +134,10 @@ func TestRBAC_AdminEndpointsProtection(t *testing.T) {
 		DemoMode: true,
 	})
 
-	userID := uuid.New()
-	benutzerToken, _ := auth.GenerateAccessToken(userID, "user@openlocalcrm.local", "BENUTZER", privKey, 15*time.Minute)
-	adminToken, _ := auth.GenerateAccessToken(userID, "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+	adminUser, _ := querier.GetUserByEmail(context.Background(), "admin@openlocalcrm.local")
+	vertriebUser, _ := querier.GetUserByEmail(context.Background(), "vertrieb@openlocalcrm.local")
+	benutzerToken, _ := auth.GenerateAccessToken(uuid.UUID(vertriebUser.ID.Bytes), vertriebUser.Email, vertriebUser.Role, 0, privKey, 15*time.Minute)
+	adminToken, _ := auth.GenerateAccessToken(uuid.UUID(adminUser.ID.Bytes), adminUser.Email, adminUser.Role, 0, privKey, 15*time.Minute)
 
 	adminRoutes := []string{
 		"/api/v1/users",
@@ -149,8 +177,8 @@ func TestSettingsEndpoints(t *testing.T) {
 		DemoMode: true,
 	})
 
-	userID := uuid.New()
-	adminToken, _ := auth.GenerateAccessToken(userID, "admin@openlocalcrm.local", "ADMIN", privKey, 15*time.Minute)
+	adminUser, _ := querier.GetUserByEmail(context.Background(), "admin@openlocalcrm.local")
+	adminToken, _ := auth.GenerateAccessToken(uuid.UUID(adminUser.ID.Bytes), adminUser.Email, adminUser.Role, 0, privKey, 15*time.Minute)
 
 	// GET /api/v1/settings/export
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings/export", nil)

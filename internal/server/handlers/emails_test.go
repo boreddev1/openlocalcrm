@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/email"
 	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
@@ -103,6 +104,13 @@ func TestEmailHandler_AccountCRUDAndSend(t *testing.T) {
 	q := demo.NewEmptyInMemoryQuerier()
 	svc := email.NewService(q, nil, nil, nil)
 	h := handlers.NewEmailHandler(svc, true)
+	adminClaims := &auth.AccessClaims{
+		UserID: uuid.New(),
+		Role:   "ADMIN",
+	}
+	withAuth := func(req *http.Request) *http.Request {
+		return req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, adminClaims))
+	}
 
 	// 1. Create account
 	createBody, _ := json.Marshal(handlers.EmailAccountRequest{
@@ -116,7 +124,7 @@ func TestEmailHandler_AccountCRUDAndSend(t *testing.T) {
 		Username:     "vertrieb@openlocalcrm.local",
 		Password:     "s3cret-password",
 	})
-	reqCreate := httptest.NewRequest(http.MethodPost, "/api/v1/emails/accounts", bytes.NewReader(createBody))
+	reqCreate := withAuth(httptest.NewRequest(http.MethodPost, "/api/v1/emails/accounts", bytes.NewReader(createBody)))
 	recCreate := httptest.NewRecorder()
 	h.CreateAccount(recCreate, reqCreate)
 	require.Equal(t, http.StatusCreated, recCreate.Code)
@@ -128,7 +136,7 @@ func TestEmailHandler_AccountCRUDAndSend(t *testing.T) {
 	accIDStr := uuid.UUID(created.ID.Bytes).String()
 
 	// 2. List accounts never leaks the password
-	reqList := httptest.NewRequest(http.MethodGet, "/api/v1/emails/accounts", nil)
+	reqList := withAuth(httptest.NewRequest(http.MethodGet, "/api/v1/emails/accounts", nil))
 	recList := httptest.NewRecorder()
 	h.ListAccounts(recList, reqList)
 	require.Equal(t, http.StatusOK, recList.Code)
@@ -147,8 +155,8 @@ func TestEmailHandler_AccountCRUDAndSend(t *testing.T) {
 		Username: "vertrieb@openlocalcrm.local",
 		IsActive: true,
 	})
-	reqUpdate := httptest.NewRequest(http.MethodPatch, "/api/v1/emails/accounts/"+accIDStr, bytes.NewReader(updateBody)).
-		WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+	reqUpdate := withAuth(httptest.NewRequest(http.MethodPatch, "/api/v1/emails/accounts/"+accIDStr, bytes.NewReader(updateBody)).
+		WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx)))
 	recUpdate := httptest.NewRecorder()
 	h.UpdateAccount(recUpdate, reqUpdate)
 	require.Equal(t, http.StatusOK, recUpdate.Code)
@@ -158,15 +166,15 @@ func TestEmailHandler_AccountCRUDAndSend(t *testing.T) {
 	require.Equal(t, "Vertrieb Postfach (neu)", updated.Name)
 
 	// 4. Test connection against an unreachable host fails honestly with 502
-	reqTest := httptest.NewRequest(http.MethodPost, "/api/v1/emails/accounts/"+accIDStr+"/test", nil).
-		WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+	reqTest := withAuth(httptest.NewRequest(http.MethodPost, "/api/v1/emails/accounts/"+accIDStr+"/test", nil).
+		WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx)))
 	recTest := httptest.NewRecorder()
 	h.TestAccountConnection(recTest, reqTest)
 	require.Equal(t, http.StatusBadGateway, recTest.Code)
 
 	// 5. Manual sync against an unreachable host fails honestly with 502
-	reqSync := httptest.NewRequest(http.MethodPost, "/api/v1/emails/accounts/"+accIDStr+"/sync", nil).
-		WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+	reqSync := withAuth(httptest.NewRequest(http.MethodPost, "/api/v1/emails/accounts/"+accIDStr+"/sync", nil).
+		WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx)))
 	recSync := httptest.NewRecorder()
 	h.SyncAccount(recSync, reqSync)
 	require.Equal(t, http.StatusBadGateway, recSync.Code)
@@ -178,14 +186,14 @@ func TestEmailHandler_AccountCRUDAndSend(t *testing.T) {
 		Subject:   "Test",
 		TextBody:  "Test",
 	})
-	reqSend := httptest.NewRequest(http.MethodPost, "/api/v1/emails/send", bytes.NewReader(sendBody))
+	reqSend := withAuth(httptest.NewRequest(http.MethodPost, "/api/v1/emails/send", bytes.NewReader(sendBody)))
 	recSend := httptest.NewRecorder()
 	h.SendEmail(recSend, reqSend)
 	require.Equal(t, http.StatusBadGateway, recSend.Code)
 
 	// 7. Delete account
-	reqDelete := httptest.NewRequest(http.MethodDelete, "/api/v1/emails/accounts/"+accIDStr, nil).
-		WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx))
+	reqDelete := withAuth(httptest.NewRequest(http.MethodDelete, "/api/v1/emails/accounts/"+accIDStr, nil).
+		WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, rctx)))
 	recDelete := httptest.NewRecorder()
 	h.DeleteAccount(recDelete, reqDelete)
 	require.Equal(t, http.StatusOK, recDelete.Code)
@@ -198,6 +206,10 @@ func TestEmailHandler_SendEmail_ValidatesInput(t *testing.T) {
 
 	body, _ := json.Marshal(handlers.SendEmailRequest{AccountID: uuid.New().String()})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/emails/send", bytes.NewReader(body))
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: uuid.New(),
+		Role:   "ADMIN",
+	}))
 	rec := httptest.NewRecorder()
 
 	h.SendEmail(rec, req)

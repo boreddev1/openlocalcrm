@@ -80,7 +80,7 @@ func TestRunCLI_SettingsExportAndImport(t *testing.T) {
 	initialEnv := `PORT=9090
 INITIAL_ADMIN_EMAIL=cliadmin@solar.de
 AI_PROVIDER=ollama
-OLLAMA_MODEL=gemma4:12b
+OLLAMA_MODEL=gemma2:12b
 `
 	_ = os.WriteFile(filepath.Join(tmp, ".env"), []byte(initialEnv), 0600)
 

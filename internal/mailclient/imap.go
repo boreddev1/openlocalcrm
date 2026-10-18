@@ -110,7 +110,7 @@ func FetchNewMessages(cfg IMAPConfig, sinceUID uint32) (FetchResult, error) {
 	}
 	defer func() { _ = client.Close() }()
 
-	if err := client.Login(cfg.Username, cfg.Password).Wait(); err != nil {
+	if err = client.Login(cfg.Username, cfg.Password).Wait(); err != nil {
 		return FetchResult{}, fmt.Errorf("mailclient: imap login failed: %w", err)
 	}
 

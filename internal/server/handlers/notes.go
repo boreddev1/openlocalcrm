@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
-	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/note"
 )
 
@@ -35,10 +35,20 @@ type CreateNoteRequest struct {
 }
 
 func (h *NoteHandler) List(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var userID pgtype.UUID
+	if claims.Role == "BENUTZER" {
+		_ = userID.Scan(claims.UserID.String())
+	}
+
 	entityType := r.URL.Query().Get("entity_type")
 	entityID := r.URL.Query().Get("entity_id")
 
-	notes, err := h.service.List(r.Context(), entityType, entityID)
+	notes, err := h.service.List(r.Context(), entityType, entityID, userID)
 	if err != nil {
 		http.Error(w, `{"error":"failed to list notes"}`, http.StatusInternalServerError)
 		return
@@ -53,10 +63,25 @@ func (h *NoteHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NoteHandler) Get(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	n, err := h.service.GetByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, `{"error":"note not found"}`, http.StatusNotFound)
+		return
+	}
+
+	var ownerUUID pgtype.UUID
+	if n.UserID != nil && *n.UserID != "" {
+		_ = ownerUUID.Scan(*n.UserID)
+	}
+	if !canRead(claims, ownerUUID) {
+		http.Error(w, `{"error":"forbidden","message":"insufficient permissions to view note"}`, http.StatusForbidden)
 		return
 	}
 
@@ -72,10 +97,13 @@ func (h *NoteHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	author := "Vertriebsmitarbeiter"
-	if claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims); ok && claims != nil {
+	var authorID *string
+	if claims, ok := claimsFrom(r); ok {
 		if claims.Email != "" {
 			author = claims.Email
 		}
+		uid := claims.UserID.String()
+		authorID = &uid
 	} else if req.Author != "" {
 		author = req.Author
 	}
@@ -86,9 +114,10 @@ func (h *NoteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Type:       req.Type,
 		Author:     author,
 		Content:    req.Content,
+		UserID:     authorID,
 	})
 	if err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "create_note_failed", "Notiz konnte nicht erstellt werden")
 		return
 	}
 
@@ -103,23 +132,29 @@ type UpdateNoteRequest struct {
 }
 
 func (h *NoteHandler) Update(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
+	}
 	id := chi.URLParam(r, "id")
 
-	if claims != nil && claims.Role != "ADMIN" {
-		existing, err := h.service.GetByID(r.Context(), id)
-		if err != nil {
-			http.Error(w, `{"error":"note not found"}`, http.StatusNotFound)
-			return
-		}
-		if existing.Author != claims.Email {
-			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihre eigenen Notizen bearbeiten"}`, http.StatusForbidden)
-			return
-		}
+	existing, err := h.service.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, `{"error":"note not found"}`, http.StatusNotFound)
+		return
+	}
+	var ownerUUID pgtype.UUID
+	if existing.UserID != nil && *existing.UserID != "" {
+		_ = ownerUUID.Scan(*existing.UserID)
+	}
+	if !canModify(claims, ownerUUID) {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "Keine Berechtigung für diesen Datensatz")
+		return
 	}
 
 	var req UpdateNoteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
 	}
@@ -135,19 +170,25 @@ func (h *NoteHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NoteHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
+	claims, ok := claimsFrom(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
+		return
+	}
 	id := chi.URLParam(r, "id")
 
-	if claims != nil && claims.Role != "ADMIN" {
-		existing, err := h.service.GetByID(r.Context(), id)
-		if err != nil {
-			http.Error(w, `{"error":"note not found"}`, http.StatusNotFound)
-			return
-		}
-		if existing.Author != claims.Email {
-			http.Error(w, `{"error":"forbidden","message":"Sie können nur Ihre eigenen Notizen löschen"}`, http.StatusForbidden)
-			return
-		}
+	existing, err := h.service.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, `{"error":"note not found"}`, http.StatusNotFound)
+		return
+	}
+	var ownerUUID pgtype.UUID
+	if existing.UserID != nil && *existing.UserID != "" {
+		_ = ownerUUID.Scan(*existing.UserID)
+	}
+	if !canModify(claims, ownerUUID) {
+		writeJSONError(w, http.StatusForbidden, "forbidden", "Keine Berechtigung für diesen Datensatz")
+		return
 	}
 
 	if err := h.service.Delete(r.Context(), id); err != nil {
@@ -196,10 +237,10 @@ func (h *NoteHandler) Synthesize(w http.ResponseWriter, r *http.Request) {
 
 	var builder strings.Builder
 	for _, n := range notes {
-		builder.WriteString(fmt.Sprintf("- [%s] %s: %s\n", n.Type, n.Author, n.Content))
+		fmt.Fprintf(&builder, "- [%s] %s: %s\n", n.Type, n.Author, n.Content)
 	}
 
-	safeNotes := strings.ReplaceAll(builder.String(), "</untrusted_note_content>", "")
+	safeNotes := ai.SanitizeRoleMarkers(builder.String())
 	prompt := fmt.Sprintf(`Analysiere die folgenden Kundennotizen und erstelle eine strukturierte Vertriebsauswertung.
 Antworte ausschließlich mit gültigem JSON in exakt diesem Schema:
 {

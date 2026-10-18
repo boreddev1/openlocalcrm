@@ -1,4 +1,4 @@
-.PHONY: help build up down restart logs test test-e2e check-licenses run-local clean
+.PHONY: help build up down restart logs test test-e2e check-licenses run-local clean check-backup-integration
 
 help: ## Show help instructions
 	@echo "OpenLocalCRM — Single-Tenant Production & Development Commands:"
@@ -75,11 +75,15 @@ test-e2e: ## Run Playwright E2E tests
 fmt: ## Format Go source code with gofmt
 	gofmt -s -w .
 
-lint: ## Run Go static analysis, frontend ESLint and TypeScript checks
+GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || echo "$(shell go env GOPATH)/bin/golangci-lint")
+
+lint: ## Run go vet, golangci-lint (v2, .golangci.yml), frontend ESLint and TypeScript checks
 	go vet ./...
+	@test -x "$(GOLANGCI_LINT)" || { echo "golangci-lint v2 not found. Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 (or see https://golangci-lint.run/welcome/install/)"; exit 1; }
+	$(GOLANGCI_LINT) run ./...
 	cd web && pnpm lint && pnpm typecheck
 
-check: setup-hooks fmt lint check-licenses test ## Run full suite of local quality checks
+check: setup-hooks fmt lint check-licenses check-backup-integration test ## Run full suite of local quality checks
 
 setup-hooks: ## Configure and enable enterprise Git pre-commit and pre-push hooks
 	git config core.hooksPath .githooks
@@ -91,6 +95,9 @@ simulate: ## Run 10-minute visual live simulation in browser
 
 check-licenses: ## Verify Open Source License compliance
 	./scripts/check-licenses.sh
+
+check-backup-integration: ## Verify the backup round trip against a real pgvector database
+	./scripts/test-backup-integration.sh
 
 run-local: build-web ## Run Go binary locally
 	go run ./cmd/server

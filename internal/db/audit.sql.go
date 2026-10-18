@@ -18,12 +18,16 @@ INSERT INTO audit_logs (
     entity_id,
     action,
     changes,
+    old_values,
+    new_values,
     ip_address,
-    user_agent
+    user_agent,
+    prev_hash,
+    hash
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at
+RETURNING id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at, old_values, new_values, prev_hash, hash
 `
 
 type CreateAuditLogParams struct {
@@ -32,8 +36,12 @@ type CreateAuditLogParams struct {
 	EntityID   pgtype.UUID `json:"entity_id"`
 	Action     string      `json:"action"`
 	Changes    []byte      `json:"changes"`
+	OldValues  []byte      `json:"old_values"`
+	NewValues  []byte      `json:"new_values"`
 	IpAddress  pgtype.Text `json:"ip_address"`
 	UserAgent  pgtype.Text `json:"user_agent"`
+	PrevHash   pgtype.Text `json:"prev_hash"`
+	Hash       pgtype.Text `json:"hash"`
 }
 
 // internal/db/queries/audit.sql
@@ -44,8 +52,12 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 		arg.EntityID,
 		arg.Action,
 		arg.Changes,
+		arg.OldValues,
+		arg.NewValues,
 		arg.IpAddress,
 		arg.UserAgent,
+		arg.PrevHash,
+		arg.Hash,
 	)
 	var i AuditLog
 	err := row.Scan(
@@ -58,12 +70,69 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 		&i.IpAddress,
 		&i.UserAgent,
 		&i.CreatedAt,
+		&i.OldValues,
+		&i.NewValues,
+		&i.PrevHash,
+		&i.Hash,
 	)
 	return i, err
 }
 
+const getLatestAuditLogHash = `-- name: GetLatestAuditLogHash :one
+SELECT hash FROM audit_logs
+WHERE hash IS NOT NULL AND hash != ''
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLatestAuditLogHash(ctx context.Context) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, getLatestAuditLogHash)
+	var hash pgtype.Text
+	err := row.Scan(&hash)
+	return hash, err
+}
+
+const listAuditLogsAsc = `-- name: ListAuditLogsAsc :many
+SELECT id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at, old_values, new_values, prev_hash, hash FROM audit_logs
+ORDER BY created_at ASC, id ASC
+`
+
+func (q *Queries) ListAuditLogsAsc(ctx context.Context) ([]AuditLog, error) {
+	rows, err := q.db.Query(ctx, listAuditLogsAsc)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditLog
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.EntityType,
+			&i.EntityID,
+			&i.Action,
+			&i.Changes,
+			&i.IpAddress,
+			&i.UserAgent,
+			&i.CreatedAt,
+			&i.OldValues,
+			&i.NewValues,
+			&i.PrevHash,
+			&i.Hash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAuditLogsByEntity = `-- name: ListAuditLogsByEntity :many
-SELECT id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at FROM audit_logs
+SELECT id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at, old_values, new_values, prev_hash, hash FROM audit_logs
 WHERE entity_type = $1 AND entity_id = $2
 ORDER BY created_at DESC
 LIMIT $3
@@ -94,6 +163,10 @@ func (q *Queries) ListAuditLogsByEntity(ctx context.Context, arg ListAuditLogsBy
 			&i.IpAddress,
 			&i.UserAgent,
 			&i.CreatedAt,
+			&i.OldValues,
+			&i.NewValues,
+			&i.PrevHash,
+			&i.Hash,
 		); err != nil {
 			return nil, err
 		}
@@ -106,7 +179,7 @@ func (q *Queries) ListAuditLogsByEntity(ctx context.Context, arg ListAuditLogsBy
 }
 
 const listRecentAuditLogs = `-- name: ListRecentAuditLogs :many
-SELECT id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at FROM audit_logs
+SELECT id, user_id, entity_type, entity_id, action, changes, ip_address, user_agent, created_at, old_values, new_values, prev_hash, hash FROM audit_logs
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -135,6 +208,10 @@ func (q *Queries) ListRecentAuditLogs(ctx context.Context, arg ListRecentAuditLo
 			&i.IpAddress,
 			&i.UserAgent,
 			&i.CreatedAt,
+			&i.OldValues,
+			&i.NewValues,
+			&i.PrevHash,
+			&i.Hash,
 		); err != nil {
 			return nil, err
 		}

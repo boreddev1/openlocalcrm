@@ -109,7 +109,7 @@ func TestProbeAIConnection_OllamaEmbeddingOK(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/tags":
-			_, _ = w.Write([]byte(`{"models":[{"name":"gemma4:12b"}]}`))
+			_, _ = w.Write([]byte(`{"models":[{"name":"gemma2:12b"}]}`))
 		case "/api/embeddings":
 			_, _ = w.Write([]byte(embeddingVecJSON(ai.EmbeddingDimensions)))
 		default:
@@ -119,7 +119,7 @@ func TestProbeAIConnection_OllamaEmbeddingOK(t *testing.T) {
 	defer ts.Close()
 
 	res := ProbeAIConnection(context.Background(), AIProbeRequest{
-		Provider: "ollama", BaseURL: ts.URL, Model: "gemma4:12b",
+		Provider: "ollama", BaseURL: ts.URL, Model: "gemma2:12b",
 		EmbeddingModel: "qwen3-embedding:0.6b",
 	})
 	if !res.Success {
@@ -134,7 +134,7 @@ func TestProbeAIConnection_OllamaEmbeddingDimensionMismatch(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/tags" {
-			_, _ = w.Write([]byte(`{"models":[{"name":"gemma4:12b"}]}`))
+			_, _ = w.Write([]byte(`{"models":[{"name":"gemma2:12b"}]}`))
 			return
 		}
 		_, _ = w.Write([]byte(embeddingVecJSON(512)))
@@ -142,7 +142,7 @@ func TestProbeAIConnection_OllamaEmbeddingDimensionMismatch(t *testing.T) {
 	defer ts.Close()
 
 	res := ProbeAIConnection(context.Background(), AIProbeRequest{
-		Provider: "ollama", BaseURL: ts.URL, Model: "gemma4:12b",
+		Provider: "ollama", BaseURL: ts.URL, Model: "gemma2:12b",
 		EmbeddingModel: "tiny-model",
 	})
 	if res.Success {
@@ -183,7 +183,7 @@ func TestProbeAIConnection_ChatSubResultAlwaysPresent(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/tags" {
-			_, _ = w.Write([]byte(`{"models":[{"name":"gemma4:12b"}]}`))
+			_, _ = w.Write([]byte(`{"models":[{"name":"gemma2:12b"}]}`))
 			return
 		}
 		_, _ = w.Write([]byte(embeddingVecJSON(ai.EmbeddingDimensions)))
@@ -191,7 +191,7 @@ func TestProbeAIConnection_ChatSubResultAlwaysPresent(t *testing.T) {
 	defer ts.Close()
 
 	res := ProbeAIConnection(context.Background(), AIProbeRequest{
-		Provider: "ollama", BaseURL: ts.URL, Model: "gemma4:12b",
+		Provider: "ollama", BaseURL: ts.URL, Model: "gemma2:12b",
 		EmbeddingModel: "qwen3-embedding:0.6b",
 	})
 	if res.Chat == nil || !res.Chat.Success {
@@ -207,7 +207,7 @@ func TestProbeAIConnection_ChatSubResultAlwaysPresent(t *testing.T) {
 
 func TestProbeAIConnection_ChatSubResultOnFailure(t *testing.T) {
 	res := ProbeAIConnection(context.Background(), AIProbeRequest{
-		Provider: "ollama", BaseURL: "http://127.0.0.1:1", Model: "gemma4:12b",
+		Provider: "ollama", BaseURL: "http://127.0.0.1:1", Model: "gemma2:12b",
 	})
 	if res.Success {
 		t.Fatalf("expected overall failure for unreachable ollama")
@@ -226,12 +226,12 @@ func TestListAIModels_OllamaSuccess(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`{"models":[{"name":"gemma4:12b"},{"name":"qwen3-embedding:0.6b"}]}`))
+		_, _ = w.Write([]byte(`{"models":[{"name":"gemma2:12b"},{"name":"qwen3-embedding:0.6b"}]}`))
 	}))
 	defer ts.Close()
 
 	res := ListAIModels(context.Background(), ListAIModelsQuery{Provider: "ollama", BaseURL: ts.URL})
-	if !res.Success || len(res.Models) != 2 || res.Models[0] != "gemma4:12b" {
+	if !res.Success || len(res.Models) != 2 || res.Models[0] != "gemma2:12b" {
 		t.Fatalf("expected 2 models from ollama, got %+v", res)
 	}
 }
@@ -292,7 +292,7 @@ func TestProbeAIConnection_IgnoresLauncherEnv(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/tags" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"models":[{"name":"gemma4:12b"}]}`))
+			_, _ = w.Write([]byte(`{"models":[{"name":"gemma2:12b"}]}`))
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
@@ -306,7 +306,7 @@ func TestProbeAIConnection_IgnoresLauncherEnv(t *testing.T) {
 	defer ts.Close()
 
 	res := ProbeAIConnection(context.Background(), AIProbeRequest{
-		Provider: "ollama", BaseURL: ts.URL, Model: "gemma4:12b",
+		Provider: "ollama", BaseURL: ts.URL, Model: "gemma2:12b",
 	})
 	if !res.Success {
 		t.Fatalf("expected probe to use explicit default model, not env, got: %s", res.Message)
@@ -326,7 +326,7 @@ func TestProbeAIConnection_URLMappingUsesEnteredPort(t *testing.T) {
 	defer ts.Close()
 
 	res := ProbeAIConnection(context.Background(), AIProbeRequest{
-		Provider: "ollama", BaseURL: ts.URL + "/", Model: "gemma4:12b",
+		Provider: "ollama", BaseURL: ts.URL + "/", Model: "gemma2:12b",
 		EmbeddingModel: "qwen3-embedding:0.6b",
 	})
 	if !res.Success {

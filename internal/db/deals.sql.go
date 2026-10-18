@@ -26,7 +26,7 @@ INSERT INTO deals (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 )
-RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund
+RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
 `
 
 type CreateDealParams struct {
@@ -73,22 +73,27 @@ func (q *Queries) CreateDeal(ctx context.Context, arg CreateDealParams) (Deal, e
 		&i.UpdatedAt,
 		&i.WiderrufenAt,
 		&i.WiderrufGrund,
+		&i.Tags,
 	)
 	return i, err
 }
 
-const deleteDeal = `-- name: DeleteDeal :exec
+const deleteDeal = `-- name: DeleteDeal :one
 DELETE FROM deals
 WHERE id = $1
+  AND stage <> 'WIDERRUFEN'
+RETURNING id
 `
 
-func (q *Queries) DeleteDeal(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteDeal, id)
-	return err
+func (q *Queries) DeleteDeal(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteDeal, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const getDealByID = `-- name: GetDealByID :one
-SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund FROM deals
+SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags FROM deals
 WHERE id = $1 LIMIT 1
 `
 
@@ -111,23 +116,26 @@ func (q *Queries) GetDealByID(ctx context.Context, id pgtype.UUID) (Deal, error)
 		&i.UpdatedAt,
 		&i.WiderrufenAt,
 		&i.WiderrufGrund,
+		&i.Tags,
 	)
 	return i, err
 }
 
 const listDeals = `-- name: ListDeals :many
-SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund FROM deals
+SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags FROM deals
+WHERE ($3::uuid IS NULL OR assigned_to = $3::uuid)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListDealsParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit      int32       `json:"limit"`
+	Offset     int32       `json:"offset"`
+	AssignedTo pgtype.UUID `json:"assigned_to"`
 }
 
 func (q *Queries) ListDeals(ctx context.Context, arg ListDealsParams) ([]Deal, error) {
-	rows, err := q.db.Query(ctx, listDeals, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listDeals, arg.Limit, arg.Offset, arg.AssignedTo)
 	if err != nil {
 		return nil, err
 	}
@@ -151,6 +159,7 @@ func (q *Queries) ListDeals(ctx context.Context, arg ListDealsParams) ([]Deal, e
 			&i.UpdatedAt,
 			&i.WiderrufenAt,
 			&i.WiderrufGrund,
+			&i.Tags,
 		); err != nil {
 			return nil, err
 		}
@@ -163,13 +172,19 @@ func (q *Queries) ListDeals(ctx context.Context, arg ListDealsParams) ([]Deal, e
 }
 
 const listDealsByStage = `-- name: ListDealsByStage :many
-SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund FROM deals
+SELECT id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags FROM deals
 WHERE stage = $1
+  AND ($2::uuid IS NULL OR assigned_to = $2::uuid)
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListDealsByStage(ctx context.Context, stage string) ([]Deal, error) {
-	rows, err := q.db.Query(ctx, listDealsByStage, stage)
+type ListDealsByStageParams struct {
+	Stage      string      `json:"stage"`
+	AssignedTo pgtype.UUID `json:"assigned_to"`
+}
+
+func (q *Queries) ListDealsByStage(ctx context.Context, arg ListDealsByStageParams) ([]Deal, error) {
+	rows, err := q.db.Query(ctx, listDealsByStage, arg.Stage, arg.AssignedTo)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +208,7 @@ func (q *Queries) ListDealsByStage(ctx context.Context, stage string) ([]Deal, e
 			&i.UpdatedAt,
 			&i.WiderrufenAt,
 			&i.WiderrufGrund,
+			&i.Tags,
 		); err != nil {
 			return nil, err
 		}
@@ -202,6 +218,47 @@ func (q *Queries) ListDealsByStage(ctx context.Context, stage string) ([]Deal, e
 		return nil, err
 	}
 	return items, nil
+}
+
+const revokeDeal = `-- name: RevokeDeal :one
+UPDATE deals
+SET stage = 'WIDERRUFEN',
+    probability = 0,
+    widerrufen_at = CASE WHEN stage = 'WIDERRUFEN' THEN widerrufen_at ELSE $2 END,
+    widerruf_grund = CASE WHEN stage = 'WIDERRUFEN' THEN widerruf_grund ELSE $3 END,
+    updated_at = CASE WHEN stage = 'WIDERRUFEN' THEN updated_at ELSE NOW() END
+WHERE id = $1
+RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
+`
+
+type RevokeDealParams struct {
+	ID            pgtype.UUID        `json:"id"`
+	WiderrufenAt  pgtype.Timestamptz `json:"widerrufen_at"`
+	WiderrufGrund pgtype.Text        `json:"widerruf_grund"`
+}
+
+func (q *Queries) RevokeDeal(ctx context.Context, arg RevokeDealParams) (Deal, error) {
+	row := q.db.QueryRow(ctx, revokeDeal, arg.ID, arg.WiderrufenAt, arg.WiderrufGrund)
+	var i Deal
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.CompanyID,
+		&i.ContactID,
+		&i.Value,
+		&i.Currency,
+		&i.Stage,
+		&i.Probability,
+		&i.AssignedTo,
+		&i.ClosedAt,
+		&i.CustomFields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WiderrufenAt,
+		&i.WiderrufGrund,
+		&i.Tags,
+	)
+	return i, err
 }
 
 const updateDeal = `-- name: UpdateDeal :one
@@ -218,7 +275,8 @@ SET title = $2,
     custom_fields = $11,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund
+  AND stage <> 'WIDERRUFEN'
+RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
 `
 
 type UpdateDealParams struct {
@@ -266,6 +324,7 @@ func (q *Queries) UpdateDeal(ctx context.Context, arg UpdateDealParams) (Deal, e
 		&i.UpdatedAt,
 		&i.WiderrufenAt,
 		&i.WiderrufGrund,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -277,7 +336,8 @@ SET stage = $2,
     closed_at = $4,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund
+  AND stage <> 'WIDERRUFEN'
+RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
 `
 
 type UpdateDealStageParams struct {
@@ -311,6 +371,45 @@ func (q *Queries) UpdateDealStage(ctx context.Context, arg UpdateDealStageParams
 		&i.UpdatedAt,
 		&i.WiderrufenAt,
 		&i.WiderrufGrund,
+		&i.Tags,
+	)
+	return i, err
+}
+
+const updateDealTags = `-- name: UpdateDealTags :one
+UPDATE deals
+SET tags = CASE WHEN tags @> $1::jsonb THEN tags ELSE tags || $1::jsonb END,
+    updated_at = NOW()
+WHERE id = $2
+  AND stage <> 'WIDERRUFEN'
+RETURNING id, title, company_id, contact_id, value, currency, stage, probability, assigned_to, closed_at, custom_fields, created_at, updated_at, widerrufen_at, widerruf_grund, tags
+`
+
+type UpdateDealTagsParams struct {
+	Tags []byte      `json:"tags"`
+	ID   pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateDealTags(ctx context.Context, arg UpdateDealTagsParams) (Deal, error) {
+	row := q.db.QueryRow(ctx, updateDealTags, arg.Tags, arg.ID)
+	var i Deal
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.CompanyID,
+		&i.ContactID,
+		&i.Value,
+		&i.Currency,
+		&i.Stage,
+		&i.Probability,
+		&i.AssignedTo,
+		&i.ClosedAt,
+		&i.CustomFields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WiderrufenAt,
+		&i.WiderrufGrund,
+		&i.Tags,
 	)
 	return i, err
 }

@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/mailclient"
@@ -22,24 +25,41 @@ var (
 	ErrMessageNotFound = errors.New("email message not found")
 )
 
+type EventTrigger interface {
+	TriggerEvent(ctx context.Context, triggerType, targetID, targetType, targetName string) ([]automation.WorkflowRun, error)
+}
+
+func uuidStr(id pgtype.UUID) string {
+	return uuid.UUID(id.Bytes).String()
+}
+
 type Service struct {
 	queries db.Querier
 	audit   *audit.Service
 	storage storage.StorageService
 	sseHub  *sse.Hub
+	trigger EventTrigger
 }
 
-func NewService(queries db.Querier, audit *audit.Service, storage storage.StorageService, sseHub *sse.Hub) *Service {
-	return &Service{
+func NewService(queries db.Querier, audit *audit.Service, storage storage.StorageService, sseHub *sse.Hub, trigger ...EventTrigger) *Service {
+	s := &Service{
 		queries: queries,
 		audit:   audit,
 		storage: storage,
 		sseHub:  sseHub,
 	}
+	if len(trigger) > 0 {
+		s.trigger = trigger[0]
+	}
+	return s
+}
+
+func (s *Service) SetTrigger(trigger EventTrigger) {
+	s.trigger = trigger
 }
 
 func (s *Service) EnsureDefaultAccount(ctx context.Context) (pgtype.UUID, error) {
-	accounts, err := s.queries.ListEmailAccounts(ctx)
+	accounts, err := s.queries.ListEmailAccounts(ctx, pgtype.UUID{})
 	if err == nil && len(accounts) > 0 {
 		return accounts[0].ID, nil
 	}
@@ -143,6 +163,18 @@ func (s *Service) IngestMessage(ctx context.Context, input IngestEmailInput) (db
 		})
 	}
 
+	if s.trigger != nil {
+		targetID := uuidStr(msg.ID)
+		targetType := "EMAIL"
+		if msg.ContactID.Valid {
+			targetID = uuidStr(msg.ContactID)
+			targetType = "CONTACT"
+		}
+		if _, trigErr := s.trigger.TriggerEvent(ctx, "INBOUND_EMAIL", targetID, targetType, msg.Subject); trigErr != nil {
+			log.Printf("[email_warning] automation trigger INBOUND_EMAIL failed for message %s: %v", uuidStr(msg.ID), trigErr)
+		}
+	}
+
 	return msg, nil
 }
 
@@ -193,7 +225,7 @@ func (s *Service) SendMessage(ctx context.Context, accountID pgtype.UUID, msg ma
 		msg.From = acc.EmailAddress
 	}
 
-	if err := mailclient.SendMail(mailclient.SMTPConfig{
+	if err = mailclient.SendMail(mailclient.SMTPConfig{
 		Host:        acc.SmtpHost.String,
 		Port:        int(acc.SmtpPort.Int32),
 		Username:    acc.Username.String,
@@ -259,7 +291,7 @@ func (s *Service) SyncAccount(ctx context.Context, id pgtype.UUID) ([]db.EmailMe
 		Username:    acc.Username.String,
 		Password:    password,
 		ImplicitTLS: acc.ImapPort.Int32 == 993,
-	}, uint32(acc.LastUid))
+	}, uint32(acc.LastUid)) //nolint:gosec // G115: value is bounded by its source (DB column or workflow definition), conversion cannot overflow in practice
 	if err != nil {
 		return nil, fmt.Errorf("imap sync failed: %w", err)
 	}
@@ -343,10 +375,14 @@ func (s *Service) CreateAccount(ctx context.Context, input AccountInput) (db.Ema
 	})
 }
 
-// ListAccounts returns every email account. Passwords remain encrypted;
+// ListAccounts returns email accounts, optionally filtered by owner. Passwords remain encrypted;
 // callers must never decrypt them for display.
-func (s *Service) ListAccounts(ctx context.Context) ([]db.EmailAccount, error) {
-	return s.queries.ListEmailAccounts(ctx)
+func (s *Service) ListAccounts(ctx context.Context, ownerID ...pgtype.UUID) ([]db.EmailAccount, error) {
+	var uid pgtype.UUID
+	if len(ownerID) > 0 {
+		uid = ownerID[0]
+	}
+	return s.queries.ListEmailAccounts(ctx, uid)
 }
 
 // GetAccount returns a single email account by ID.

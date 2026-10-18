@@ -22,8 +22,11 @@ import {
 import { CallModal } from '../components/telephony/CallModal';
 import { CSVImportModal } from '../components/contacts/CSVImportModal';
 import { ActivityLogDrawer } from '../components/notes/ActivityLogDrawer';
+import { useAuth } from '../context/AuthContext';
+import { OwnerSelect, canModifyRecord, canReassignRecord } from '../components/common/OwnerSelect';
 
 export const ContactsPage: React.FC = () => {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -94,20 +97,54 @@ export const ContactsPage: React.FC = () => {
     address_zip: '',
     address_city: '',
     zaehlernummer: '',
+    stromverbrauch_kwh: '',
+    gasverbrauch_kwh: '',
+    eigentuemer_status: '',
     customer_type: 'GESCHAEFTSKUNDE',
-    consent_phone: true,
-    consent_email: true,
+    consent_phone: false,
+    consent_email: false,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    createMutation.mutate(formData);
+    createMutation.mutate({
+      ...formData,
+      stromverbrauch_kwh: formData.stromverbrauch_kwh
+        ? Number(formData.stromverbrauch_kwh)
+        : undefined,
+      gasverbrauch_kwh: formData.gasverbrauch_kwh ? Number(formData.gasverbrauch_kwh) : undefined,
+      eigentuemer_status: formData.eigentuemer_status || undefined,
+    });
   };
 
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingContact) return;
-    updateMutation.mutate(editingContact);
+
+    const payload: any = {
+      ...editingContact,
+      stromverbrauch_kwh:
+        editingContact.stromverbrauch_kwh !== null &&
+        editingContact.stromverbrauch_kwh !== undefined &&
+        editingContact.stromverbrauch_kwh !== ''
+          ? Number(editingContact.stromverbrauch_kwh)
+          : null,
+      gasverbrauch_kwh:
+        editingContact.gasverbrauch_kwh !== null &&
+        editingContact.gasverbrauch_kwh !== undefined &&
+        editingContact.gasverbrauch_kwh !== ''
+          ? Number(editingContact.gasverbrauch_kwh)
+          : null,
+      eigentuemer_status: editingContact.eigentuemer_status || null,
+      consent_phone: editingContact.consent_phone,
+      consent_email: editingContact.consent_email,
+    };
+
+    if (!canReassignRecord(user, editingContact.owner_user_id)) {
+      delete payload.owner_user_id;
+    }
+
+    updateMutation.mutate(payload);
   };
 
   const handleExportCSV = async () => {
@@ -279,6 +316,8 @@ export const ContactsPage: React.FC = () => {
                   const zaehler =
                     getFieldText(contact.zaehlernummer) ||
                     (typeof contact.zaehlernummer === 'string' ? contact.zaehlernummer : '');
+                  const hasConsent =
+                    contact.consent_phone === true || contact.consent_email === true;
 
                   return (
                     <tr key={contact.id} className="hover:bg-slate-800/40 transition-colors">
@@ -324,8 +363,15 @@ export const ContactsPage: React.FC = () => {
                           </button>
                         )}
                         <div className="flex items-center gap-1.5 pt-1">
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                            <ShieldCheck className="w-3 h-3" /> Consent OK
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                              hasConsent
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            }`}
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            {hasConsent ? 'Consent OK' : 'Keine Einwilligung'}
                           </span>
                         </div>
                       </td>
@@ -391,7 +437,9 @@ export const ContactsPage: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() =>
+                          disabled={!canModifyRecord(user, contact.owner_user_id)}
+                          onClick={() => {
+                            if (!canModifyRecord(user, contact.owner_user_id)) return;
                             setEditingContact({
                               ...contact,
                               first_name: firstName,
@@ -403,10 +451,18 @@ export const ContactsPage: React.FC = () => {
                               address_zip: zip,
                               address_city: city,
                               zaehlernummer: zaehler,
-                            })
+                            });
+                          }}
+                          className={`p-1.5 rounded-lg text-xs transition-colors inline-flex items-center gap-1 ${
+                            canModifyRecord(user, contact.owner_user_id)
+                              ? 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                              : 'bg-slate-800/40 text-slate-600 cursor-not-allowed opacity-50'
+                          }`}
+                          title={
+                            canModifyRecord(user, contact.owner_user_id)
+                              ? 'Kontakt bearbeiten'
+                              : 'Keine Berechtigung: Nur der Eigentümer oder Administrator kann diesen Kontakt bearbeiten'
                           }
-                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-colors inline-flex items-center gap-1"
-                          title="Kontakt bearbeiten"
                           aria-label="Bearbeiten"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
@@ -414,15 +470,25 @@ export const ContactsPage: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() =>
+                          disabled={!canModifyRecord(user, contact.owner_user_id)}
+                          onClick={() => {
+                            if (!canModifyRecord(user, contact.owner_user_id)) return;
                             setDeletingContact({
                               ...contact,
                               first_name: firstName,
                               last_name: lastName,
-                            })
+                            });
+                          }}
+                          className={`p-1.5 rounded-lg text-xs transition-colors inline-flex items-center gap-1 ${
+                            canModifyRecord(user, contact.owner_user_id)
+                              ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20'
+                              : 'bg-slate-800/40 text-slate-600 border border-slate-800/20 cursor-not-allowed opacity-50'
+                          }`}
+                          title={
+                            canModifyRecord(user, contact.owner_user_id)
+                              ? 'Kontakt löschen'
+                              : 'Keine Berechtigung: Nur der Eigentümer oder Administrator kann diesen Kontakt löschen'
                           }
-                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg text-xs transition-colors inline-flex items-center gap-1"
-                          title="Kontakt löschen"
                           aria-label="Löschen"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -588,6 +654,53 @@ export const ContactsPage: React.FC = () => {
                   onChange={(e) => setFormData({ ...formData, zaehlernummer: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Stromverbrauch (kWh/Jahr)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.stromverbrauch_kwh}
+                    onChange={(e) =>
+                      setFormData({ ...formData, stromverbrauch_kwh: e.target.value })
+                    }
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Gasverbrauch (kWh/Jahr)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.gasverbrauch_kwh}
+                    onChange={(e) => setFormData({ ...formData, gasverbrauch_kwh: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Eigentümerstatus
+                </label>
+                <select
+                  value={formData.eigentuemer_status}
+                  onChange={(e) => setFormData({ ...formData, eigentuemer_status: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="Eigentümer">Eigentümer</option>
+                  <option value="Mieter">Mieter</option>
+                  <option value="Pächter">Pächter</option>
+                  <option value="">Nicht angegeben</option>
+                </select>
               </div>
 
               {/* UWG § 7 Consent Toggles */}
@@ -796,6 +909,103 @@ export const ContactsPage: React.FC = () => {
                     setEditingContact({ ...editingContact, zaehlernummer: e.target.value })
                   }
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Stromverbrauch (kWh/Jahr)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={editingContact.stromverbrauch_kwh ?? ''}
+                    onChange={(e) =>
+                      setEditingContact({
+                        ...editingContact,
+                        stromverbrauch_kwh: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Gasverbrauch (kWh/Jahr)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={editingContact.gasverbrauch_kwh ?? ''}
+                    onChange={(e) =>
+                      setEditingContact({
+                        ...editingContact,
+                        gasverbrauch_kwh: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">
+                  Eigentümerstatus
+                </label>
+                <select
+                  value={editingContact.eigentuemer_status ?? ''}
+                  onChange={(e) =>
+                    setEditingContact({ ...editingContact, eigentuemer_status: e.target.value })
+                  }
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="Eigentümer">Eigentümer</option>
+                  <option value="Mieter">Mieter</option>
+                  <option value="Pächter">Pächter</option>
+                  <option value="">Nicht angegeben</option>
+                </select>
+              </div>
+
+              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+                <div className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>DSGVO & UWG § 7 Werbe-Einwilligung</span>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-slate-300">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingContact.consent_email ?? false}
+                      onChange={(e) =>
+                        setEditingContact({ ...editingContact, consent_email: e.target.checked })
+                      }
+                      className="rounded text-emerald-500 bg-slate-900 border-slate-700"
+                    />
+                    <span>E-Mail Opt-in</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingContact.consent_phone ?? false}
+                      onChange={(e) =>
+                        setEditingContact({ ...editingContact, consent_phone: e.target.checked })
+                      }
+                      className="rounded text-emerald-500 bg-slate-900 border-slate-700"
+                    />
+                    <span>Telefon Opt-in</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <OwnerSelect
+                  value={editingContact.owner_user_id}
+                  onChange={(ownerId) =>
+                    setEditingContact({ ...editingContact, owner_user_id: ownerId || null })
+                  }
                 />
               </div>
 

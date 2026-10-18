@@ -3,6 +3,53 @@
 Alle nennenswerten Änderungen an **OpenLocalCRM** werden in dieser Datei dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/) und folgt [Semantic Versioning](https://semver.org/).
 
+## [1.0.8] - 2026-09-30
+
+### Behoben & Gehärtet (SP8b, SP8c & SP9 Final Security & Truth Remediation)
+- **Netzwerk-, Upload- & Server-Härtung (SP8b):**
+  - CSRF-Schutz mit kryptographischer HMAC-Sitzungsbindung (`internal/server/csrf.go`, `internal/auth/csrf.go`).
+  - Strikte MIME-/Extension-Allowlists für Datei-Uploads mit Magic-Byte-Prüfung und Pfad-Normalisierung (`internal/server/handlers/upload.go`).
+  - Explizite Server-Timeouts (ReadTimeout 30s, WriteTimeout 120s, IdleTimeout 120s) und globale Request-Body-Limits (10 MB Standard, 25 MB Multipart).
+  - Isolierter, benutzerspezifischer Server-Sent-Events (SSE) Hub (`internal/sse`) verhindert kanalübergreifende Datenlecks.
+  - SSRF-Schutz bei ausgehenden Webhooks (`internal/core/automation/engine.go`) blockiert Zugriffe auf private Adressräume und Loopback.
+  - Generische Fehlerantworten ohne Stack-Trace-Leakage (`internal/server/handlers/response.go`).
+  - RFC 4180-konformer CSV-Streaming-Parser mit Zeilenlimit und Transaktions-Rollback.
+  - Verifikation von Release-Prüfsummen (SHA-256) beim Launcher-Update.
+- **Kryptographisches Audit-Ledger & KI-Transparenz (SP8c):**
+  - Manipulationssichere SHA-256-Hashkette für Audit-Logs (`prev_hash` + `hash`) mit Integritätsprüfungs-Endpunkt `/api/v1/audit/verify`.
+  - Vollständiges Security-Event-Auditing für Authentifizierungs-Aktionen (`LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGOUT`, `PASSWORD_CHANGED`, `TOTP_SETUP_INITIATED`, `TOTP_ENABLED`, `TOTP_DISABLED`).
+  - Benutzer-Attribution (`user_id`) im KI-Observability-Ledger (`internal/ai/observability.go`).
+  - Verschärfte PII-Erkennung für deutsche Steuer-Identifikationsnummern (`internal/ai/guard.go`) verhindert Über-Redaktion regulärer 11-stelliger Zahlen.
+  - Filterung von LLM-Rollenmarkern (`SanitizeRoleMarkers`) zur Abwehr von Prompt-Injection-Angriffen.
+- **Konfigurations-Wahrheit, Demo-Isolation & System-Cleanup (SP9):**
+  - Standardisierung des lokalen Ollama-Sprachmodells auf das reale `gemma2:12b` (Beseitigung inkonsistenter `gemma4:12b`-Referenzen).
+  - Vollständige Isolierung der Live-Simulation: `SimulationWidget` wird per `React.lazy` dynamisch geladen und nur ausgeführt, wenn `demo_mode === true` ist.
+  - Produktionssicheres Login: Standardmäßig leere Login-Felder; Demo-Zugangsdaten werden nur im aktiven Demo-Modus bereitgestellt.
+  - Erweiterung des Schnellbefehlsmenüs (`CommandPalette`) um Termine und Kalendereinträge.
+  - Bereinigung veralteter statischer Audit-Reports.
+
+---
+
+## [1.0.7] - 2026-09-26
+
+### Behoben & Gehärtet (SP8a Auth, Sessions & RBAC)
+- **Sitzungen & Refresh-Token-Rotation:**
+  - Single-Use Refresh Token Rotation mit Erkennung von Replay-Angriffen und automatischer Revokation der gesamten Token-Familie.
+  - Refresh-Tokens werden ausschließlich über HttpOnly-Cookies übertragen (`refresh_token`).
+  - Cross-Tab-Safe Refresh-Mutex (`withCrossTabLock`) im Web-Frontend verhindert parallele 401-Kollisionen.
+- **Session-Invalidierung & Token-Versionierung:**
+  - `token_version`-Claim im Access-Token sorgt für sofortigen Widerruf aktiver Tokens bei Passwortänderung, 2FA-Änderung oder `POST /api/v1/auth/logout-all`.
+  - Neuer administrativer und benutzereigener Endpunkt `/api/v1/auth/logout-all` zur globalen Sitzungsabmeldung über alle Endgeräte.
+- **Passwort-Richtlinie & TOTP-Härtung:**
+  - Vereinheitlichte Passwort-Richtlinie (mindestens 8 Zeichen, keine erfundenen Sonderzeichenregeln).
+  - Persistentes `must_change_password`-Flag für den initialen Admin-Bootstrap mit nicht-schließbarem UI-Banner.
+  - RFC 6238 TOTP-Schritt-Tracking verhindert Wiederverwendung desselben Codes im selben Zeitfenster; Replay-Schutz und Ratenbegrenzung.
+- **Rollenmatrix & Datensatz-Eigentümerschaft:**
+  - Durchgängiges Eigentümerschaftsmodell mit `owner_user_id` für Kontakte, Firmen, Deals, Termine, Todos und Notizen.
+  - Strikte RBAC-Durchsetzung: Lese- und Schreib-Scoping für `BENUTZER`, `VERTRIEB` und `BACKOFFICE`.
+  - Neuer administrativer Neuzuweisungs-Endpunkt `/api/v1/admin/ownership/bulk-assign`.
+  - UI-Bedienelemente reflektieren Berechtigungen und Eigentümerschaft mit Tooltip-Begründungen.
+
 ---
 
 ## [1.0.6] - 2026-09-21

@@ -3,9 +3,14 @@ package reports_test
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/deal"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/reports"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
+	"github.com/stretchr/testify/require"
 )
 
 func TestReportsService_CleanEmptyState(t *testing.T) {
@@ -55,4 +60,27 @@ func TestReportsService_WithDemoQuerier(t *testing.T) {
 	if report.ConversionStats.RevokedDeals < 0 {
 		t.Fatalf("expected non-negative revoked deals")
 	}
+}
+
+func TestReportsService_RevokedDealsCount(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	auditSvc := audit.NewService(querier)
+	dealSvc := deal.NewService(querier, auditSvc)
+	reportsSvc := reports.NewService(querier)
+
+	actorID := pgtype.UUID{Bytes: [16]byte{1, 1, 1}, Valid: true}
+	d, err := dealSvc.Create(ctx, actorID, deal.CreateDealInput{
+		Title:       "BGB Widerruf Test Deal",
+		Stage:       "WON",
+		Probability: 100,
+	})
+	require.NoError(t, err)
+
+	_, err = dealSvc.Revoke(ctx, actorID, d.ID, time.Now().UTC(), "Fristgerechter Widerruf")
+	require.NoError(t, err)
+
+	report, err := reportsSvc.GetSalesReport(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, report.ConversionStats.RevokedDeals)
 }

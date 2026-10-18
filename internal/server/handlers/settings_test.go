@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
+	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/openlocalcrm/openlocalcrm/internal/launcher"
 	"github.com/openlocalcrm/openlocalcrm/internal/server/handlers"
 	"github.com/stretchr/testify/require"
@@ -22,7 +24,7 @@ func TestSettingsHandler_ExportImport(t *testing.T) {
 	envContent := `PORT=8080
 INITIAL_ADMIN_EMAIL=admin@system.de
 AI_PROVIDER=ollama
-OLLAMA_MODEL=gemma4:12b
+OLLAMA_MODEL=gemma2:12b
 `
 	_ = os.WriteFile(filepath.Join(tmp, ".env"), []byte(envContent), 0600)
 
@@ -56,7 +58,7 @@ OLLAMA_MODEL=gemma4:12b
 		err := json.NewDecoder(rec.Body).Decode(&exported)
 		require.NoError(t, err)
 		require.Equal(t, "ollama", exported.AI.Provider)
-		require.Equal(t, "gemma4:12b", exported.AI.Model)
+		require.Equal(t, "gemma2:12b", exported.AI.Model)
 		require.Equal(t, "admin@system.de", exported.Admin.Email)
 		require.Equal(t, 8080, exported.System.Port)
 	})
@@ -111,7 +113,7 @@ OLLAMA_MODEL=gemma4:12b
 			AI: launcher.AISettings{
 				Provider: "ollama",
 				BaseURL:  "http://host.docker.internal:11434",
-				Model:    "gemma4:12b",
+				Model:    "gemma2:12b",
 			},
 			Admin: launcher.AdminSettings{
 				Email: "multipart-admin@solar.de",
@@ -211,5 +213,49 @@ CONNECTOR_API_TOKEN=super-secret-connector-token-789
 		require.NotContains(t, rawBody, "NewPlaintextPassword999!")
 		require.NotContains(t, rawBody, "sk-another-secret-key-111")
 		require.NotContains(t, rawBody, "conn-secret-token-222")
+	})
+
+	t.Run("Export and Import audit logging", func(t *testing.T) {
+		memQ := demo.NewInMemoryQuerier()
+		auditSvc := audit.NewService(memQ)
+		hWithAudit := handlers.NewSettingsHandler(tmp).WithAudit(auditSvc)
+
+		// 1. Export
+		reqExport := httptest.NewRequest(http.MethodGet, "/api/v1/settings/export", nil).WithContext(adminCtx)
+		recExport := httptest.NewRecorder()
+		hWithAudit.ExportSettings(recExport, reqExport)
+		require.Equal(t, http.StatusOK, recExport.Code)
+
+		// 2. Import
+		validSettings := launcher.ExportedSettings{
+			Admin: launcher.AdminSettings{Email: "admin@system.de"},
+		}
+		body, _ := json.Marshal(validSettings)
+		reqImport := httptest.NewRequest(http.MethodPost, "/api/v1/settings/import", bytes.NewReader(body)).WithContext(adminCtx)
+		reqImport.Header.Set("Content-Type", "application/json")
+		recImport := httptest.NewRecorder()
+		hWithAudit.ImportSettings(recImport, reqImport)
+		require.Equal(t, http.StatusOK, recImport.Code)
+
+		// 3. Verify audit logs
+		logs, err := memQ.ListAuditLogsAsc(context.Background())
+		require.NoError(t, err)
+		var hasExport, hasImport bool
+		for _, l := range logs {
+			if l.Action == "SETTINGS_EXPORTED" {
+				hasExport = true
+			}
+			if l.Action == "SETTINGS_IMPORTED" {
+				hasImport = true
+			}
+		}
+		require.True(t, hasExport, "expected SETTINGS_EXPORTED audit log")
+		require.True(t, hasImport, "expected SETTINGS_IMPORTED audit log")
+
+		// 4. Verify chain integrity
+		valid, count, err := auditSvc.VerifyAuditChain(context.Background())
+		require.NoError(t, err)
+		require.True(t, valid)
+		require.Equal(t, 2, count)
 	})
 }

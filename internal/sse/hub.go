@@ -67,11 +67,50 @@ func (h *Hub) Broadcast(evt Event) {
 	}
 }
 
+// SendToUser sends an event only to the clients registered with the given userID
+func (h *Hub) SendToUser(userID uuid.UUID, evt Event) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for ch, owner := range h.clients {
+		if owner == userID {
+			select {
+			case ch <- evt:
+			default:
+				// Non-blocking drop if client is saturated
+			}
+		}
+	}
+}
+
 // ClientCount returns the number of active connected clients
 func (h *Hub) ClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)
+}
+
+// register records a subscriber's channel against its user id and returns the
+// channel, so a test can observe the close.
+func (h *Hub) register(userID uuid.UUID) chan Event {
+	ch := make(chan Event, 16)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clients[ch] = userID
+	return ch
+}
+
+// RevokeUser closes every stream belonging to userID. A role or status change
+// must terminate a long-lived stream immediately, not at token expiry.
+func (h *Hub) RevokeUser(userID uuid.UUID) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for ch, owner := range h.clients {
+		if owner == userID {
+			close(ch)
+			delete(h.clients, ch)
+		}
+	}
 }
 
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -93,8 +132,10 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		h.mu.Lock()
-		delete(h.clients, ch)
-		close(ch)
+		if _, ok := h.clients[ch]; ok {
+			delete(h.clients, ch)
+			close(ch)
+		}
 		h.mu.Unlock()
 	}()
 

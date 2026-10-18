@@ -20,9 +20,138 @@ export class ApiError extends Error {
 }
 
 export function getCookie(name: string): string | null {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
-  return match ? decodeURIComponent(match[3]) : null;
+  if (typeof document === 'undefined' || !document.cookie) return null;
+  const cookies = document.cookie.split(';');
+  for (let i = 0; i < cookies.length; i++) {
+    const cookie = cookies[i].trim();
+    const eqIdx = cookie.indexOf('=');
+    if (eqIdx !== -1) {
+      const key = cookie.substring(0, eqIdx).trim();
+      if (key === name) {
+        return decodeURIComponent(cookie.substring(eqIdx + 1));
+      }
+    }
+  }
+  return null;
+}
+
+let refreshPromise: Promise<void> | null = null;
+let lastRefreshSuccess = 0;
+
+export async function withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
+  if (!refreshPromise) {
+    refreshPromise = (fn() as Promise<any>).finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise as unknown as T;
+}
+
+// Cross-tab coordination: two tabs have separate heaps, so a module promise is
+// not enough. The Web Lock makes one tab the refresher; the others wait and
+// then reuse the shared cookie jar.
+export async function withCrossTabLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks =
+    typeof navigator !== 'undefined'
+      ? (navigator as Navigator & { locks?: LockManager }).locks
+      : undefined;
+  if (!locks) return withRefreshLock(fn);
+  return locks.request('openlocalcrm-refresh', { mode: 'exclusive' }, () => withRefreshLock(fn));
+}
+
+export const UNAUTHORIZED_IS_NOT_SESSION_EXPIRY = new Set([
+  '/api/v1/auth/login',
+  '/api/v1/auth/totp/disable',
+]);
+
+const rawFetch = typeof window !== 'undefined' ? window.fetch.bind(window) : fetch;
+
+async function executeRefresh(): Promise<void> {
+  // If another tab or concurrent call refreshed very recently, the cookies are already fresh.
+  if (Date.now() - lastRefreshSuccess < 2000) {
+    return;
+  }
+  const headers = new Headers();
+  const csrf = getCookie('csrf_token');
+  if (csrf) headers.set('X-CSRF-Token', csrf);
+
+  const res = await rawFetch('/api/v1/auth/refresh', {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    throw new Error('Refresh failed');
+  }
+  lastRefreshSuccess = Date.now();
+}
+
+// The refresh rotates the csrf_token cookie. A retried mutating request must carry the new
+// value, not the header captured before the refresh.
+function withFreshCsrf(init?: RequestInit): RequestInit | undefined {
+  const method = (init?.method || 'GET').toUpperCase();
+  if (!init || !['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+    return init;
+  }
+  const fresh = getCookie('csrf_token');
+  if (!fresh) {
+    return init;
+  }
+  const headers = new Headers(init.headers || {});
+  headers.set('X-CSRF-Token', fresh);
+  return { ...init, headers };
+}
+
+// Request inputs carry their own headers and a one-shot body, so the retry is built from a clone
+// taken before the first attempt, with the rotated token applied on top.
+function retryRequestWithFreshCsrf(clone: Request): Request {
+  const fresh = getCookie('csrf_token');
+  if (!fresh) {
+    return clone;
+  }
+  const headers = new Headers(clone.headers);
+  headers.set('X-CSRF-Token', fresh);
+  return new Request(clone, { headers });
+}
+
+if (typeof window !== 'undefined' && !(window as any).__crmFetchIntercepted) {
+  (window as any).__crmFetchIntercepted = true;
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const urlStr =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as Request).url || '';
+
+    const retryClone =
+      !init &&
+      input instanceof Request &&
+      ['POST', 'PUT', 'DELETE', 'PATCH'].includes(input.method.toUpperCase())
+        ? input.clone()
+        : null;
+
+    const res = await originalFetch(input, init);
+
+    const isNonExpiry =
+      Array.from(UNAUTHORIZED_IS_NOT_SESSION_EXPIRY).some((path) => urlStr.includes(path)) ||
+      urlStr.includes('/api/v1/auth/refresh');
+
+    if (res.status === 401 && !isNonExpiry) {
+      try {
+        await withCrossTabLock(executeRefresh);
+        if (retryClone) {
+          return await originalFetch(retryRequestWithFreshCsrf(retryClone));
+        }
+        return await originalFetch(input, withFreshCsrf(init));
+      } catch {
+        window.dispatchEvent(new CustomEvent('auth:logout'));
+        return res;
+      }
+    }
+    return res;
+  };
 }
 
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -88,13 +217,158 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
   }
 
   // Notify session expiry on 401 Unauthorized
-  if (res.status === 401 && endpoint !== '/api/v1/auth/login') {
+  if (res.status === 401 && !UNAUTHORIZED_IS_NOT_SESSION_EXPIRY.has(endpoint)) {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('auth:logout'));
     }
   }
 
   throw new ApiError(res.status, errorMessage, errJson);
+}
+
+// --- Backup (streaming download / upload) ----------------------------------
+
+/**
+ * Streams an authenticated endpoint straight to a file.
+ *
+ * The Blob, the object URL and the download click are created only after the
+ * reader reports `done` without throwing. An interrupted stream therefore never
+ * produces a file: every buffered chunk is discarded and an error is thrown. If
+ * the server sent a Content-Length, the received byte count must match it before
+ * anything is saved, so a truncated body can never masquerade as a complete
+ * backup.
+ */
+export async function downloadToFile(
+  endpoint: string,
+  fileName: string,
+  options: RequestInit = {},
+): Promise<number> {
+  const headers = new Headers(options.headers || {});
+  if (!headers.has('X-CSRF-Token')) {
+    const csrfToken = getCookie('csrf_token');
+    if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(endpoint, { ...options, headers, credentials: 'include' });
+  } catch (netErr: any) {
+    throw new ApiError(
+      0,
+      `Verbindung zum Server fehlgeschlagen (${netErr?.message || 'Netzwerkfehler'})`,
+    );
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let message = `HTTP ${res.status}: ${res.statusText}`;
+    let data: any = null;
+    try {
+      data = JSON.parse(text);
+      if (data && (data.message || data.error)) message = data.message || data.error;
+    } catch {
+      if (text) message = text;
+    }
+    if (res.status === 401) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('auth:logout'));
+      }
+    }
+    throw new ApiError(res.status, message, data);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new ApiError(res.status, 'Backup-Stream nicht verfügbar');
+
+  const chunks: Uint8Array[] = [];
+  let receivedBytes = 0;
+  for (;;) {
+    let step: ReadableStreamReadResult<Uint8Array>;
+    try {
+      step = await reader.read();
+    } catch (streamErr: any) {
+      throw new ApiError(
+        0,
+        `Backup-Stream abgebrochen (${streamErr?.message || 'Verbindung unterbrochen'})`,
+      );
+    }
+    if (step.done) break;
+    if (step.value) {
+      chunks.push(step.value);
+      receivedBytes += step.value.byteLength;
+    }
+  }
+
+  const expected = Number(res.headers.get('Content-Length') || 0);
+  if (expected > 0 && receivedBytes !== expected) {
+    throw new ApiError(0, `Backup unvollständig: ${receivedBytes}/${expected} Bytes`);
+  }
+
+  const blob = new Blob(chunks as BlobPart[], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  return receivedBytes;
+}
+
+export interface RestoreResponse {
+  mode: string;
+  counts: Record<string, number>;
+  committed: boolean;
+}
+
+/**
+ * Uploads a backup envelope. The committed flag in the error payload is the
+ * only trustworthy answer: a rolled-back restore and a committed restore with a
+ * failed audit insert are both HTTP 500 but mean opposite things.
+ */
+export async function uploadBackup(
+  file: File,
+  mode: 'merge' | 'replace',
+): Promise<RestoreResponse> {
+  const headers = new Headers();
+  const csrfToken = getCookie('csrf_token');
+  if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
+
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1/backup/restore?mode=${mode}`, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: file,
+    });
+  } catch (netErr: any) {
+    throw new ApiError(
+      0,
+      `Verbindung zum Server fehlgeschlagen (${netErr?.message || 'Netzwerkfehler'})`,
+    );
+  }
+
+  const text = await res.text();
+  let data: any;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const committed = Boolean(data && data.committed);
+    throw new ApiError(res.status, (data && (data.message || data.error)) || `HTTP ${res.status}`, {
+      ...data,
+      committed,
+    });
+  }
+  return data as RestoreResponse;
 }
 
 // --- E-Mail (SMTP/IMAP) --------------------------------------------------
@@ -191,3 +465,20 @@ export function tagEmailMessage(id: string, tags: string[]): Promise<any> {
     body: JSON.stringify({ tags }),
   });
 }
+
+export interface TestRunPayload {
+  target_id: string;
+  target_type: string;
+  target_name: string;
+}
+
+export const testRunWorkflow = (id: string, payload: TestRunPayload) =>
+  apiFetch<any>(`/api/v1/automations/${id}/test-run`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const approveWorkflowStep = (runId: string) =>
+  apiFetch<any>(`/api/v1/automations/runs/${runId}/approve`, {
+    method: 'POST',
+  });

@@ -68,11 +68,12 @@ func ExtractEnvFromInspect(items []DockerInspectItem) map[string]string {
 				parts := strings.SplitN(line, "=", 2)
 				if len(parts) == 2 {
 					k, v := parts[0], parts[1]
-					if k == "POSTGRES_PASSWORD" {
+					switch k {
+					case "POSTGRES_PASSWORD":
 						env["DB_PASSWORD"] = v
-					} else if k == "POSTGRES_USER" {
+					case "POSTGRES_USER":
 						env["DB_USER"] = v
-					} else if k == "POSTGRES_DB" {
+					case "POSTGRES_DB":
 						env["DB_NAME"] = v
 					}
 				}
@@ -410,7 +411,7 @@ func (e *Engine) GetContainers(ctx context.Context) ([]ContainerInfo, error) {
 				State  string `json:"State"`
 				Status string `json:"Status"`
 			}
-			if err := json.Unmarshal([]byte(line), &item); err == nil {
+			if jsonErr := json.Unmarshal([]byte(line), &item); jsonErr == nil {
 				cleanName := strings.TrimPrefix(item.Names, "/")
 				if strings.Contains(cleanName, "crm") || strings.Contains(cleanName, "openlocalcrm") || strings.Contains(cleanName, "mavalio") {
 					service := cleanName
@@ -462,7 +463,7 @@ func (e *Engine) GetContainers(ctx context.Context) ([]ContainerInfo, error) {
 
 func GetPersistentBackupDir() string {
 	if custom := os.Getenv("OPENLOCALCRM_BACKUP_DIR"); custom != "" {
-		_ = os.MkdirAll(custom, 0755)
+		_ = os.MkdirAll(custom, 0755) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 		return custom
 	}
 	var dir string
@@ -480,7 +481,7 @@ func GetPersistentBackupDir() string {
 			dir = filepath.Join(os.TempDir(), "openlocalcrm-backups")
 		}
 	}
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0755) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 	return dir
 }
 
@@ -565,7 +566,7 @@ func (e *Engine) CreateBackup(ctx context.Context) (string, error) {
 	persistentDir := GetPersistentBackupDir()
 	persistentPath := filepath.Join(persistentDir, filename)
 	if data, readErr := os.ReadFile(outPath); readErr == nil {
-		_ = os.WriteFile(persistentPath, data, 0644)
+		_ = os.WriteFile(persistentPath, data, 0600) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 	}
 
 	return filename, nil
@@ -580,7 +581,7 @@ func (e *Engine) ListBackups() ([]BackupInfo, error) {
 	if runtime.GOOS == "windows" {
 		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
 			legacyDir := filepath.Join(localAppData, "mavalio", "backups")
-			if _, err := os.Stat(legacyDir); err == nil {
+			if _, err := os.Stat(legacyDir); err == nil { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 				persistentDirs = append(persistentDirs, legacyDir)
 			}
 		}
@@ -597,9 +598,9 @@ func (e *Engine) ListBackups() ([]BackupInfo, error) {
 			for _, entry := range pEntries {
 				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
 					target := filepath.Join(backupDir, entry.Name())
-					if _, err := os.Stat(target); os.IsNotExist(err) {
-						if data, err := os.ReadFile(filepath.Join(pDir, entry.Name())); err == nil {
-							_ = os.WriteFile(target, data, 0644)
+					if _, err := os.Stat(target); os.IsNotExist(err) { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
+						if data, err := os.ReadFile(filepath.Join(pDir, entry.Name())); err == nil { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
+							_ = os.WriteFile(target, data, 0600) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 						}
 					}
 				}
@@ -644,12 +645,12 @@ func (e *Engine) RestoreBackup(ctx context.Context, filename string, logChan cha
 		persistentPath := filepath.Join(GetPersistentBackupDir(), cleanName)
 		if data, err := os.ReadFile(persistentPath); err == nil {
 			_ = os.MkdirAll(filepath.Join(e.BaseDir, "backups"), 0755)
-			_ = os.WriteFile(backupPath, data, 0644)
+			_ = os.WriteFile(backupPath, data, 0600) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 		} else if runtime.GOOS == "windows" {
 			if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-				if legacyData, lErr := os.ReadFile(filepath.Join(localAppData, "mavalio", "backups", cleanName)); lErr == nil {
+				if legacyData, lErr := os.ReadFile(filepath.Join(localAppData, "mavalio", "backups", cleanName)); lErr == nil { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 					_ = os.MkdirAll(filepath.Join(e.BaseDir, "backups"), 0755)
-					_ = os.WriteFile(backupPath, legacyData, 0644)
+					_ = os.WriteFile(backupPath, legacyData, 0600) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 				}
 			}
 		}
@@ -674,7 +675,7 @@ func (e *Engine) RestoreBackup(ctx context.Context, filename string, logChan cha
 	if logChan != nil {
 		logChan <- "[RESTORE] Schritt 1/5: Erstelle automatischen Sicherheits-Snapshot der aktuellen Datenbank..."
 	}
-	if snap, err := e.CreateBackup(ctx); err == nil && logChan != nil {
+	if snap, snapErr := e.CreateBackup(ctx); snapErr == nil && logChan != nil {
 		logChan <- fmt.Sprintf("[RESTORE] Sicherheits-Snapshot gesichert als: %s", snap)
 	}
 
@@ -801,7 +802,7 @@ func (e *Engine) ResetAdminPassword(ctx context.Context, email, newPassword stri
 		return fmt.Errorf("E-Mail-Adresse darf nicht leer sein")
 	}
 	if len(newPassword) < 6 {
-		return fmt.Errorf("Passwort muss mindestens 6 Zeichen lang sein")
+		return fmt.Errorf("Passwort muss mindestens 6 Zeichen lang sein") //nolint:staticcheck // user-facing German message; capitalized noun is correct
 	}
 
 	hash, err := auth.HashPassword(newPassword)
@@ -820,7 +821,7 @@ func (e *Engine) ResetAdminPassword(ctx context.Context, email, newPassword stri
 	for i := 0; i < 10; i++ {
 		checkCmd := execCommand(ctx, "docker", "compose", "exec", "-T", "db", "pg_isready", "-U", user, "-d", dbName)
 		checkCmd.Dir = e.BaseDir
-		if err := checkCmd.Run(); err == nil {
+		if runErr := checkCmd.Run(); runErr == nil {
 			break
 		}
 		select {

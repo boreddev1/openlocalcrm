@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/email"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/queue"
@@ -33,7 +34,7 @@ func aiEnv(key, fallbackKey, def string) string {
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://crm_user:crm_pass@localhost:5432/crm_db?sslmode=disable"
+		dbURL = "postgres://crm_user:crm_pass@localhost:5432/crm_db?sslmode=disable" //nolint:gosec // G101: false positive: local-development default URL / context key name, not a real credential
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -48,7 +49,8 @@ func main() {
 
 	queries := db.New(dbPool)
 	auditSvc := audit.NewService(queries)
-	emailSvc := email.NewService(queries, auditSvc, nil, nil)
+	automationSvc := automation.NewService(queries)
+	emailSvc := email.NewService(queries, auditSvc, nil, nil, automationSvc)
 
 	obsSvc := ai.NewObservabilityService(dbPool)
 	aiGateway := ai.NewGateway(ai.GatewayConfig{
@@ -60,9 +62,10 @@ func main() {
 	triageSvc := ai.NewTriageService(aiGateway, obsSvc)
 
 	deps := queue.Deps{
-		Queries:  queries,
-		EmailSvc: emailSvc,
-		Triager:  triageSvc,
+		Queries:       queries,
+		EmailSvc:      emailSvc,
+		Triager:       triageSvc,
+		AutomationSvc: automationSvc,
 	}
 
 	var client *river.Client[pgx.Tx]

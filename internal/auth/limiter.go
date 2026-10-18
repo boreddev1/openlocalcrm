@@ -267,3 +267,8 @@ func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// NewRateLimiterForTest returns a rate limiter with high capacity and long durations for testing
+func NewRateLimiterForTest() *RateLimiter {
+	return NewRateLimiter(100, time.Minute, time.Minute)
+}

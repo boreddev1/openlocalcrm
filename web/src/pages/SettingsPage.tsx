@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   apiFetch,
+  downloadToFile,
+  uploadBackup,
   getEmailAccounts,
   createEmailAccount,
   updateEmailAccount,
@@ -9,6 +11,7 @@ import {
   testEmailAccount,
   type EmailAccount,
 } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import {
   Webhook,
   ShieldCheck,
@@ -35,6 +38,8 @@ import {
   Users,
   UserPlus,
   Upload,
+  Trash2,
+  Pencil,
 } from 'lucide-react';
 
 interface TeamUser {
@@ -44,6 +49,17 @@ interface TeamUser {
   role: 'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE';
   status: 'ACTIVE' | 'INVITED' | 'DEACTIVATED';
   invited_at?: string;
+}
+
+interface EmailTemplate {
+  key: string;
+  name: string;
+  subject: string;
+  body: string;
+  category: string;
+  locale: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export const SettingsPage: React.FC = () => {
@@ -68,6 +84,10 @@ export const SettingsPage: React.FC = () => {
   const [inviteRole, setInviteRole] = useState<'ADMIN' | 'BENUTZER' | 'VERTRIEB' | 'BACKOFFICE'>(
     'BENUTZER',
   );
+  // inviteLink holds the one-time link returned by the server. It is never
+  // persisted and never re-fetchable: only the token's hash is stored.
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteExpiresAt, setInviteExpiresAt] = useState<string | null>(null);
   const [userMsg, setUserMsg] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null,
   );
@@ -126,25 +146,38 @@ export const SettingsPage: React.FC = () => {
     const firstName = parts[0] || 'Team';
     const lastName = parts.slice(1).join(' ') || 'Mitglied';
 
+    setInviteLink(null);
+    setInviteExpiresAt(null);
     try {
-      await apiFetch('/api/v1/users/invite', {
-        method: 'POST',
-        body: JSON.stringify({
-          email: inviteEmail.trim().toLowerCase(),
-          first_name: firstName,
-          last_name: lastName,
-          role: inviteRole,
-        }),
-      });
+      const res = await apiFetch<{ invite_url: string; expires_at: string }>(
+        '/api/v1/users/invite',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            email: inviteEmail.trim().toLowerCase(),
+            first_name: firstName,
+            last_name: lastName,
+            role: inviteRole,
+          }),
+        },
+      );
 
-      setUserMsg({ type: 'success', message: `Einladung erfolgreich an ${inviteEmail} gesendet.` });
+      // The server really created the account and the invite. It cannot send
+      // mail, so the link is shown for the admin to hand over. Only the token's
+      // hash is stored, so this link is the only chance to copy it.
+      setInviteLink(res.invite_url);
+      setInviteExpiresAt(res.expires_at);
+      setUserMsg({
+        type: 'success',
+        message: `Einladung erstellt für ${inviteEmail.trim().toLowerCase()}. Bitte den Link unten kopieren und weitergeben.`,
+      });
       setInviteEmail('');
       setInviteName('');
       await reloadUsers();
     } catch (err: any) {
       setUserMsg({ type: 'error', message: err.message || 'Fehler beim Einladen des Benutzers' });
     }
-    setTimeout(() => setUserMsg(null), 5000);
+    setTimeout(() => setUserMsg(null), 8000);
   };
 
   const handleToggleUserRole = async (userId: string) => {
@@ -318,7 +351,10 @@ export const SettingsPage: React.FC = () => {
   };
 
   // --- 2FA TOTP State (§2.2) ---
-  const [totpEnabled, setTotpEnabled] = useState(false);
+  // totpEnabled mirrors the server's totp_enabled. `null` means the server could
+  // not read the user row, which is unknown - never rendered as "disabled".
+  const { user: authUser, refreshUser } = useAuth();
+  const [totpEnabled, setTotpEnabled] = useState<boolean | null>(null);
   const [totpSecret, setTotpSecret] = useState('');
   const [totpUrl, setTotpUrl] = useState('');
   const [totpCodeInput, setTotpCodeInput] = useState('');
@@ -326,6 +362,13 @@ export const SettingsPage: React.FC = () => {
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+  const [showDisableModal, setShowDisableModal] = useState(false);
+  const [disablePassword, setDisablePassword] = useState('');
+  const [isDisablingTotp, setIsDisablingTotp] = useState(false);
+
+  useEffect(() => {
+    setTotpEnabled(authUser?.totp_enabled ?? null);
+  }, [authUser?.totp_enabled]);
 
   const handleGenerateNewTotpSecret = async () => {
     try {
@@ -334,7 +377,6 @@ export const SettingsPage: React.FC = () => {
       });
       setTotpSecret(res.secret);
       setTotpUrl(res.url);
-      setTotpEnabled(false);
       setTotpCodeInput('');
       setTotpStatus({
         type: 'success',
@@ -347,7 +389,7 @@ export const SettingsPage: React.FC = () => {
         message: err.message || 'Fehler beim Generieren des TOTP-Schlüssels',
       });
     }
-    setTimeout(() => setTotpStatus(null), 6000);
+    setTimeout(() => setTotpStatus(null), 8000);
   };
 
   const handleVerifyTotp = async (e?: React.FormEvent) => {
@@ -363,21 +405,70 @@ export const SettingsPage: React.FC = () => {
     try {
       await apiFetch('/api/v1/auth/totp/verify', {
         method: 'POST',
-        body: JSON.stringify({ code: totpCodeInput.trim() }),
+        body: JSON.stringify({ code: totpCodeInput.trim(), secret: totpSecret }),
       });
-      setTotpEnabled(true);
+      setTotpCodeInput('');
+      // The state comes from the server, never from an optimistic local toggle.
+      const session = await refreshUser();
+      if (session?.totp_enabled !== true) {
+        setTotpStatus({
+          type: 'error',
+          message:
+            'Der Code wurde akzeptiert, aber der Server meldet weiterhin keine aktive 2FA. Bitte prüfen Sie den Status.',
+        });
+        return;
+      }
       setTotpStatus({
         type: 'success',
         message: '2FA erfolgreich verifiziert und für Ihr Konto aktiviert!',
       });
-      setTotpCodeInput('');
     } catch (err: any) {
       const msg = err.message?.includes('Ungültiger Authenticator-Code')
         ? err.message
         : 'Ungültiger Authenticator-Code: ' + (err.message || 'Prüfen Sie den Code.');
       setTotpStatus({ type: 'error', message: msg });
     }
-    setTimeout(() => setTotpStatus(null), 6000);
+    setTimeout(() => setTotpStatus(null), 8000);
+  };
+
+  const handleDisableTotp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!disablePassword) {
+      setTotpStatus({ type: 'error', message: 'Bitte geben Sie Ihr aktuelles Passwort ein.' });
+      return;
+    }
+    setIsDisablingTotp(true);
+    try {
+      await apiFetch('/api/v1/auth/totp/disable', {
+        method: 'POST',
+        body: JSON.stringify({ password: disablePassword }),
+      });
+      setShowDisableModal(false);
+      setDisablePassword('');
+      // Only a successful response updates the state, and even then from /me.
+      const session = await refreshUser();
+      if (session?.totp_enabled !== false) {
+        setTotpStatus({
+          type: 'error',
+          message:
+            'Die Deaktivierung wurde bestätigt, aber der Server meldet weiterhin aktive 2FA. Bitte Seite neu laden.',
+        });
+        return;
+      }
+      setTotpStatus({
+        type: 'success',
+        message: '2FA wurde deaktiviert.',
+      });
+    } catch (err: any) {
+      // A refused request leaves 2FA enabled and shows the real server error.
+      setTotpStatus({
+        type: 'error',
+        message: err.message || '2FA konnte nicht deaktiviert werden.',
+      });
+    } finally {
+      setIsDisablingTotp(false);
+    }
+    setTimeout(() => setTotpStatus(null), 8000);
   };
 
   // --- Password Change State (§2.2) ---
@@ -402,15 +493,6 @@ export const SettingsPage: React.FC = () => {
       });
       return;
     }
-    const hasNumber = /\d/.test(newPassword);
-    const hasSpecial = /[^A-Za-z0-9]/.test(newPassword);
-    if (!hasNumber || !hasSpecial) {
-      setPasswordStatus({
-        type: 'error',
-        message: 'Das neue Passwort muss mindestens eine Zahl und ein Sonderzeichen enthalten.',
-      });
-      return;
-    }
     if (newPassword !== confirmPassword) {
       setPasswordStatus({ type: 'error', message: 'Die Passwörter stimmen nicht überein.' });
       return;
@@ -428,6 +510,7 @@ export const SettingsPage: React.FC = () => {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      await refreshUser();
     } catch (err: any) {
       setPasswordStatus({
         type: 'error',
@@ -440,14 +523,20 @@ export const SettingsPage: React.FC = () => {
   // --- Backup & Restore-Drill State (§8.7) ---
   const [restoreDrillStatus, setRestoreDrillStatus] = useState<string | null>(null);
   const [isDrilling, setIsDrilling] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
 
   const handleRunRestoreDrill = async () => {
     setIsDrilling(true);
     setRestoreDrillStatus('Konsistenzprüfung läuft...');
     try {
       const res = await apiFetch<any>('/api/v1/backup/drill', { method: 'POST' });
+      // The drill really cloned the live tables into a scratch schema and
+      // compared every row, so the counts come from real work.
+      const tables = Array.isArray(res.tables) ? res.tables : [];
+      const rows = tables.reduce((sum: number, t: any) => sum + Number(t.target_rows || 0), 0);
       setRestoreDrillStatus(
-        `✅ Restore-Drill erfolgreich (Restore-Drill & Konsistenzprüfung erfolgreich: ${res.user_count} Benutzer, ${res.company_count} Firmen, ${res.contact_count} Kontakte, ${res.deal_count} Deals).`,
+        `✅ Restore-Drill erfolgreich: ${rows} Zeilen in ${tables.length} Tabellen in das Scratch-Schema importiert und byteweise verglichen.`,
       );
     } catch (err: any) {
       setRestoreDrillStatus(`❌ Prüfung fehlgeschlagen: ${err.message}`);
@@ -456,18 +545,76 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  // Streams the response body to disk. No blob is created unless the whole
+  // envelope arrived, so an interrupted download produces no file at all.
   const handleDownloadBackup = async (_type?: 'db' | 'storage') => {
+    setBackupStatus(null);
+    setIsDownloadingBackup(true);
     try {
-      const data = await apiFetch<any>('/api/v1/backup/export');
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `openlocalcrm-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const bytes = await downloadToFile(
+        '/api/v1/backup/export',
+        `openlocalcrm-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      );
+      setBackupStatus(`✅ Backup vollständig heruntergeladen (${bytes} Bytes).`);
     } catch (err: any) {
-      alert(`Export fehlgeschlagen: ${err.message}`);
+      setBackupStatus(`❌ Export fehlgeschlagen, es wurde keine Datei gespeichert: ${err.message}`);
+    } finally {
+      setIsDownloadingBackup(false);
+    }
+  };
+
+  // --- Restore (§8.7) ---
+  const [restoreMode, setRestoreMode] = useState<'merge' | 'replace'>('merge');
+  const [isRestoring, setIsRestoring] = useState(false);
+
+  const handleRestoreBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Reset the input so re-selecting the same file fires again.
+    event.target.value = '';
+    if (!file) return;
+
+    if (restoreMode === 'replace') {
+      const confirmed = window.confirm(
+        'Ersetzungsmodus: ALLE 24 Tabellen werden zuerst geleert und dann aus dieser Datei neu befüllt. Fortfahren?',
+      );
+      if (!confirmed) return;
+    }
+
+    setBackupStatus(null);
+    setIsRestoring(true);
+    try {
+      const res = await uploadBackup(file, restoreMode);
+      setBackupStatus(
+        `✅ Wiederherstellung übernommen (Modus ${res.mode}, ${Object.keys(res.counts || {}).length} Tabellen).`,
+      );
+    } catch (err: any) {
+      // A rolled-back restore and a committed restore with a failed audit
+      // insert are both HTTP 500, and the difference matters: only the second
+      // one may be retried, and only the second one already changed the data.
+      // Two 400s never opened a transaction either, so "rolled back" would be a
+      // lie for them as well.
+      const code = err?.data?.error;
+      if (err?.data?.committed === true) {
+        setBackupStatus(
+          `⚠️ Die Wiederherstellung wurde ÜBERNOMMEN, aber das Audit-Log konnte nicht geschrieben werden. Bitte prüfen Sie das Audit-Log manuell. (${err.message})`,
+        );
+      } else if (code === 'restore_incomplete_backup') {
+        // Nothing was attempted: no transaction was opened and nothing was
+        // deleted, so "rolled back" would be a lie.
+        setBackupStatus(`❌ Ersetzungsmodus abgebrochen, es wurde nichts gelöscht: ${err.message}`);
+      } else if (code === 'restore_invalid_backup') {
+        // The file never passed validation, so no transaction was ever opened
+        // and the existing data was never touched.
+        setBackupStatus(`❌ Die Datei wurde abgelehnt, es wurde nichts verändert: ${err.message}`);
+      } else if (code === 'restore_too_large') {
+        setBackupStatus(`❌ Die Datei wurde abgelehnt, es wurde nichts verändert: ${err.message}`);
+      } else {
+        setBackupStatus(
+          `❌ Wiederherstellung vollständig zurückgerollt, es wurden keine Änderungen übernommen. (${err.message})`,
+        );
+      }
+    } finally {
+      setIsRestoring(false);
     }
   };
 
@@ -626,42 +773,197 @@ export const SettingsPage: React.FC = () => {
   };
 
   // --- E-Mail Templates State (§4.6 / §5.1) ---
-  const [templates, setTemplates] = useState([
-    {
-      id: 'tpl-1',
-      name: 'PV 10 kWp Erstangebot mit Speicher',
-      subject: 'Ihr persönliches Photovoltaik-Angebot für {{contact_name}}',
-      body: 'Sehr geehrte(r) {{contact_name}},\n\nvielen Dank für Ihr Interesse an einer nachhaltigen Energieversorgung für {{company_name}}.\n\nGerne unterbreiten wir Ihnen das Angebot über ein 10 kWp Solarsystem inkl. Batteriespeicher im Gesamtwert von {{deal_amount}} €.\n\nMit freundlichen Grüßen,\n{{user_name}}',
-    },
-    {
-      id: 'tpl-2',
-      name: 'Auftragsbestätigung & Widerrufsbelehrung § 355 BGB',
-      subject: 'Auftragsbestätigung & wichtige Verbraucherhinweise',
-      body: 'Sehr geehrte(r) {{contact_name}},\n\nwir bestätigen hiermit Ihren Auftrag über {{deal_amount}} €.\n\nRechtliche Belehrung: Als Verbraucher haben Sie das Recht, binnen 14 Tagen ohne Angabe von Gründen diesen Vertrag zu widerrufen (§ 355 BGB).\n\nMit freundlichen Grüßen,\nIhr Team von OpenLocalCRM',
-    },
-  ]);
+  // Templates live in email_templates. Nothing is stored in component state
+  // before the server confirmed a write.
+  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const [templatesMsg, setTemplatesMsg] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+  const [editingTemplateKey, setEditingTemplateKey] = useState<string | null>(null);
+  const [templateForm, setTemplateForm] = useState({
+    key: '',
+    name: '',
+    subject: '',
+    body: '',
+    category: '',
+  });
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [promptTemplateText, setPromptTemplateText] = useState('');
   const [isGeneratingTemplate, setIsGeneratingTemplate] = useState(false);
+  const [generatedDraft, setGeneratedDraft] = useState<{
+    name: string;
+    subject: string;
+    body: string;
+  } | null>(null);
 
-  const handleGenerateTemplateWithAI = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (activeTab !== 'TEMPLATES') return;
+    let cancelled = false;
+    setIsLoadingTemplates(true);
+    apiFetch<EmailTemplate[]>('/api/v1/email-templates')
+      .then((res) => {
+        if (!cancelled) setTemplates(Array.isArray(res) ? res : []);
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        setTemplatesMsg({
+          type: 'error',
+          message: err.message || 'Vorlagen konnten nicht geladen werden.',
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingTemplates(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
+  const reloadTemplates = async () => {
+    setIsLoadingTemplates(true);
+    try {
+      const res = await apiFetch<EmailTemplate[]>('/api/v1/email-templates');
+      setTemplates(Array.isArray(res) ? res : []);
+    } catch (err: any) {
+      setTemplatesMsg({
+        type: 'error',
+        message: err.message || 'Vorlagen konnten nicht geladen werden.',
+      });
+    } finally {
+      setIsLoadingTemplates(false);
+    }
+  };
+
+  const startNewTemplate = () => {
+    setEditingTemplateKey(null);
+    setGeneratedDraft(null);
+    setTemplateForm({ key: '', name: '', subject: '', body: '', category: '' });
+  };
+
+  const startEditTemplate = (tpl: EmailTemplate) => {
+    setEditingTemplateKey(tpl.key);
+    setGeneratedDraft(null);
+    setTemplateForm({
+      key: tpl.key,
+      name: tpl.name,
+      subject: tpl.subject,
+      body: tpl.body,
+      category: tpl.category,
+    });
+  };
+
+  // handleGenerateTemplateWithAI calls the real generator. It never adds a
+  // template: the model answer is a draft that the admin must save explicitly.
+  const handleGenerateTemplateWithAI = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!promptTemplateText.trim()) return;
     setIsGeneratingTemplate(true);
-
-    setTimeout(() => {
-      const generated = {
-        id: 'tpl-' + Date.now(),
-        name: `KI-Vorlage: ${promptTemplateText.slice(0, 30)}...`,
-        subject: `Wichtiges Update zu Ihrem Energie-Projekt für {{contact_name}}`,
-        body: `Guten Tag {{contact_name}},\n\nbasierend auf unserer Beratung bezüglich {{company_name}} möchten wir Ihnen die nächsten Schritte vorschlagen.\n\nDas geplante Projektvolumen beläuft sich auf {{deal_amount}} €.\n\nHerzliche Grüße,\n{{user_name}}`,
-      };
-      setTemplates([generated, ...templates]);
+    setGeneratedDraft(null);
+    setTemplatesMsg(null);
+    try {
+      const res = await apiFetch<{ generated: { name: string; subject: string; body: string } }>(
+        '/api/v1/email-templates/generate',
+        {
+          method: 'POST',
+          body: JSON.stringify({ prompt: promptTemplateText.trim() }),
+        },
+      );
+      setGeneratedDraft(res.generated);
+      setEditingTemplateKey(null);
+      setTemplateForm({
+        key: '',
+        name: res.generated.name,
+        subject: res.generated.subject,
+        body: res.generated.body,
+        category: '',
+      });
+      setTemplatesMsg({
+        type: 'success',
+        message:
+          'Entwurf erzeugt. Noch nichts gespeichert - bitte prüfen und unten mit "Vorlage speichern" ablegen.',
+      });
+    } catch (err: any) {
+      setTemplatesMsg({
+        type: 'error',
+        message: err.message || 'Die Vorlage konnte nicht erzeugt werden.',
+      });
+    } finally {
       setIsGeneratingTemplate(false);
       setPromptTemplateText('');
-    }, 1000);
+    }
   };
 
-  const [connectorToken, setConnectorToken] = useState('demo-connector-token');
+  const handleSaveTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!templateForm.name.trim() || !templateForm.subject.trim() || !templateForm.body.trim()) {
+      setTemplatesMsg({
+        type: 'error',
+        message: 'Bitte Name, Betreff und Text ausfüllen.',
+      });
+      return;
+    }
+    if (!editingTemplateKey && !templateForm.key.trim()) {
+      setTemplatesMsg({ type: 'error', message: 'Bitte einen Schlüssel angeben.' });
+      return;
+    }
+
+    setIsSavingTemplate(true);
+    setTemplatesMsg(null);
+    try {
+      const payload = {
+        name: templateForm.name,
+        subject: templateForm.subject,
+        body: templateForm.body,
+        category: templateForm.category,
+      };
+      if (editingTemplateKey) {
+        await apiFetch(`/api/v1/email-templates/${encodeURIComponent(editingTemplateKey)}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+        setTemplatesMsg({ type: 'success', message: 'Vorlage aktualisiert.' });
+      } else {
+        await apiFetch('/api/v1/email-templates', {
+          method: 'POST',
+          body: JSON.stringify({ ...payload, key: templateForm.key }),
+        });
+        setTemplatesMsg({ type: 'success', message: 'Vorlage gespeichert.' });
+      }
+      startNewTemplate();
+      await reloadTemplates();
+    } catch (err: any) {
+      setTemplatesMsg({
+        type: 'error',
+        message: err.message || 'Vorlage konnte nicht gespeichert werden.',
+      });
+    } finally {
+      setIsSavingTemplate(false);
+    }
+  };
+
+  const handleDeleteTemplate = async (tpl: EmailTemplate) => {
+    if (!window.confirm(`Vorlage "${tpl.name}" wirklich löschen?`)) return;
+    setTemplatesMsg(null);
+    try {
+      await apiFetch(`/api/v1/email-templates/${encodeURIComponent(tpl.key)}`, {
+        method: 'DELETE',
+      });
+      setTemplatesMsg({ type: 'success', message: `Vorlage "${tpl.name}" gelöscht.` });
+      if (editingTemplateKey === tpl.key) startNewTemplate();
+      await reloadTemplates();
+    } catch (err: any) {
+      setTemplatesMsg({
+        type: 'error',
+        message: err.message || 'Vorlage konnte nicht gelöscht werden.',
+      });
+    }
+  };
+
+  // The connector token lives only in component state for the current test. It
+  // is never persisted, and there is no production or demo default value.
+  const [connectorToken, setConnectorToken] = useState('');
   const webhookUrl = `${window.location.origin}/api/v1/connectors/lead-intake`;
 
   const copyToClipboard = (text: string) => {
@@ -671,37 +973,52 @@ export const SettingsPage: React.FC = () => {
   };
 
   const handleTestWebhook = async () => {
+    if (!connectorToken.trim()) {
+      setTestWebhookStatus(
+        'Bitte geben Sie den Connector-Token ein. Der Token wird nicht gespeichert und nur für diesen Test verwendet.',
+      );
+      return;
+    }
     try {
       setTestWebhookStatus('Sende Test-Lead an Webhook...');
+      // A schema-valid LeadIntakePayload: the Go struct requires first_name,
+      // last_name and a *string* deal_value.
       const payload = {
-        name: 'Sabine Mustermann (Test-Lead)',
+        first_name: 'Sabine',
+        last_name: 'Mustermann',
         email: `sabine.mustermann+${Date.now()}@example.de`,
         phone: '+49 89 12345678',
-        company: 'Mustermann Solar GmbH',
-        source: 'Website-Kontaktformular',
-        notes: 'Interesse an PV-Anlage und Wärmepumpe.',
-        deal_value: 18500,
+        street: 'Teststraße 1',
+        city: 'München',
+        zip: '80331',
+        deal_title: 'PV-Anlage Test',
+        deal_value: '18500.00',
+        source: 'settings-webhook-test',
       };
       const res = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Connector-Token': connectorToken,
+          Authorization: `Bearer ${connectorToken.trim()}`,
         },
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `HTTP ${res.status}`);
+        throw new Error(errData.message || errData.error || `HTTP ${res.status}`);
       }
       const data = await res.json();
+      // The contact_id comes from the real response. A payload accepted without
+      // creating a contact says so instead of inventing an id.
       setTestWebhookStatus(
-        `Test-Lead erfolgreich über Webhook eingespeist! Kontakt-ID: ${data.contact_id || 'angelegt'}.`,
+        data.contact_id
+          ? `Test-Lead über Webhook eingespeist. Kontakt-ID: ${data.contact_id}.`
+          : `Antwort des Webhooks: ${JSON.stringify(data)}`,
       );
     } catch (err: any) {
       setTestWebhookStatus(`Fehler beim Senden des Test-Leads: ${err.message}`);
     }
-    setTimeout(() => setTestWebhookStatus(null), 7000);
+    setTimeout(() => setTestWebhookStatus(null), 10000);
   };
 
   return (
@@ -894,7 +1211,7 @@ export const SettingsPage: React.FC = () => {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-semibold text-slate-300">
-                    Connector API Secret Bearer-Token (X-Connector-Token)
+                    Connector API Secret Bearer-Token
                   </label>
                   <span className="text-[10px] text-slate-500">
                     Konfigurierbar via CONNECTOR_API_TOKEN
@@ -902,22 +1219,30 @@ export const SettingsPage: React.FC = () => {
                 </div>
                 <div className="flex gap-2">
                   <input
+                    type="password"
+                    aria-label="Connector API Bearer-Token"
                     value={connectorToken}
                     onChange={(e) => {
                       setConnectorToken(e.target.value);
                     }}
-                    placeholder="Connector API Token (z.B. demo-connector-token)"
+                    placeholder=""
                     className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-300 focus:outline-none focus:border-emerald-500"
                   />
                   <button
                     type="button"
                     onClick={() => copyToClipboard(connectorToken)}
-                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
+                    disabled={!connectorToken}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
                   >
                     <Copy className="w-3.5 h-3.5" />
                     Kopieren
                   </button>
                 </div>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Der Token wird nicht gespeichert und nicht angezeigt. Er wird ausschließlich für
+                  diesen Test als <code className="text-slate-400">Authorization: Bearer</code> an
+                  Ihren eigenen Konnektor gesendet.
+                </p>
               </div>
             </div>
           </div>
@@ -1165,8 +1490,8 @@ export const SettingsPage: React.FC = () => {
                   KI-Template-Generator per Chat (§5.1)
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Lassen Sie Gemma 12B fertige Vorlagen mit Platzhaltern nach Ihren Wünschen
-                  erstellen
+                  Der konfigurierte KI-Provider erzeugt einen Entwurf. Es wird nichts gespeichert,
+                  bis Sie ihn unten ausdrücklich ablegen.
                 </p>
               </div>
             </div>
@@ -1190,22 +1515,175 @@ export const SettingsPage: React.FC = () => {
             </form>
           </div>
 
+          {templatesMsg && (
+            <div
+              data-testid="template-status"
+              className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                templatesMsg.type === 'success'
+                  ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300'
+                  : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
+              }`}
+            >
+              {templatesMsg.type === 'success' ? (
+                <Check className="w-4 h-4" />
+              ) : (
+                <AlertCircle className="w-4 h-4" />
+              )}
+              {templatesMsg.message}
+            </div>
+          )}
+
+          {/* Create / edit form. Every save is a real POST or PUT. */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-emerald-400" />
+                  {editingTemplateKey
+                    ? `Vorlage bearbeiten: ${editingTemplateKey}`
+                    : 'Neue Vorlage'}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Platzhalter: {'{{contact_name}}'} {'{{company_name}}'} {'{{deal_amount}}'}{' '}
+                  {'{{user_name}}'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={startNewTemplate}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Neu
+              </button>
+            </div>
+
+            {generatedDraft && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300">
+                KI-Entwurf geladen — noch nicht gespeichert. Bitte prüfen und unten ablegen.
+              </div>
+            )}
+
+            <form onSubmit={handleSaveTemplate} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Schlüssel
+                  </label>
+                  <input
+                    type="text"
+                    value={templateForm.key}
+                    onChange={(e) => setTemplateForm({ ...templateForm, key: e.target.value })}
+                    placeholder="pv-first-offer"
+                    readOnly={Boolean(editingTemplateKey)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-slate-100 focus:outline-none focus:border-emerald-500 read-only:opacity-60"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Anzeigename
+                  </label>
+                  <input
+                    type="text"
+                    value={templateForm.name}
+                    onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })}
+                    placeholder="PV 10 kWp Erstangebot"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Kategorie
+                  </label>
+                  <input
+                    type="text"
+                    value={templateForm.category}
+                    onChange={(e) => setTemplateForm({ ...templateForm, category: e.target.value })}
+                    placeholder="vertrieb"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Betreff</label>
+                <input
+                  type="text"
+                  value={templateForm.subject}
+                  onChange={(e) => setTemplateForm({ ...templateForm, subject: e.target.value })}
+                  placeholder="Ihr Angebot für {{contact_name}}"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Text</label>
+                <textarea
+                  rows={6}
+                  value={templateForm.body}
+                  onChange={(e) => setTemplateForm({ ...templateForm, body: e.target.value })}
+                  placeholder="Sehr geehrte(r) {{contact_name}}, ..."
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSavingTemplate}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-colors"
+              >
+                <Check className="w-3.5 h-3.5" />
+                {isSavingTemplate ? 'Speichert...' : 'Vorlage speichern'}
+              </button>
+            </form>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {isLoadingTemplates && (
+              <p className="text-xs text-slate-400 col-span-full">Lade Vorlagen...</p>
+            )}
+            {!isLoadingTemplates && templates.length === 0 && (
+              <p className="text-xs text-slate-400 col-span-full">
+                Noch keine Vorlagen gespeichert
+              </p>
+            )}
             {templates.map((tpl) => (
               <div
-                key={tpl.id}
+                key={tpl.key}
+                data-testid="template-card"
                 className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3"
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <h4 className="text-sm font-bold text-slate-100">{tpl.name}</h4>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
-                    Aktiv
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
+                      {tpl.key}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => startEditTemplate(tpl)}
+                      aria-label={`Vorlage ${tpl.key} bearbeiten`}
+                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[10px] font-semibold flex items-center gap-1"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTemplate(tpl)}
+                      aria-label={`Vorlage ${tpl.key} löschen`}
+                      className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg text-[10px] font-semibold flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
                 <div className="text-xs text-slate-400 font-semibold">
                   Betreff: <span className="text-slate-200">{tpl.subject}</span>
                 </div>
-                <pre className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">
+                <div className="text-[10px] text-slate-500 font-mono">
+                  Kategorie: {tpl.category || '-'} · Sprache: {tpl.locale}
+                </div>
+                <pre className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 font-mono whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
                   {tpl.body}
                 </pre>
               </div>
@@ -1223,9 +1701,7 @@ export const SettingsPage: React.FC = () => {
               <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 <Lock className="w-4 h-4 text-emerald-400" /> Eigenes Passwort ändern (§2.2)
               </h3>
-              <p className="text-xs text-slate-400">
-                Regeln: Mindestens 8 Zeichen, mindestens 1 Zahl und 1 Sonderzeichen
-              </p>
+              <p className="text-xs text-slate-400">Regeln: Mindestens 8 Zeichen</p>
             </div>
 
             {passwordStatus && (
@@ -1267,7 +1743,7 @@ export const SettingsPage: React.FC = () => {
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Min. 8 Zeichen + Zahl + Sonderzeichen"
+                  placeholder="Mindestens 8 Zeichen"
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -1307,15 +1783,74 @@ export const SettingsPage: React.FC = () => {
                   Schützen Sie den Zugang zu Ihrem Single-Tenant CRM mit Authenticator-Apps
                 </p>
               </div>
+              {/* This button reports the server state. It never toggles: a click
+                  opens the password confirmation, and only a successful
+                  POST /api/v1/auth/totp/disable changes what is displayed. */}
               <button
-                onClick={() => setTotpEnabled(!totpEnabled)}
+                onClick={() => {
+                  if (totpEnabled === true) {
+                    setDisablePassword('');
+                    setShowDisableModal(true);
+                  }
+                }}
+                disabled={totpEnabled !== true}
+                title={
+                  totpEnabled === null
+                    ? 'Der 2FA-Status konnte nicht vom Server gelesen werden.'
+                    : totpEnabled
+                      ? '2FA mit Passwortbestätigung deaktivieren'
+                      : '2FA ist nicht aktiv'
+                }
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  totpEnabled ? 'bg-emerald-600 text-slate-950' : 'bg-slate-800 text-slate-400'
-                }`}
+                  totpEnabled
+                    ? 'bg-emerald-600 text-slate-950 hover:bg-emerald-500'
+                    : 'bg-slate-800 text-slate-400'
+                } ${totpEnabled === null ? 'opacity-60' : ''}`}
               >
-                {totpEnabled ? '2FA Aktiviert' : '2FA Deaktiviert'}
+                {totpEnabled === null
+                  ? '2FA Status unbekannt'
+                  : totpEnabled
+                    ? '2FA Aktiviert'
+                    : '2FA Deaktiviert'}
               </button>
             </div>
+
+            {showDisableModal && (
+              <form
+                onSubmit={handleDisableTotp}
+                data-testid="totp-disable-modal"
+                className="p-4 bg-slate-950 border border-amber-500/30 rounded-xl space-y-3"
+              >
+                <p className="text-xs font-semibold text-amber-300">
+                  2FA deaktivieren — Bestätigung mit Ihrem aktuellen Passwort erforderlich
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="password"
+                    aria-label="Passwort zur Bestätigung"
+                    value={disablePassword}
+                    onChange={(e) => setDisablePassword(e.target.value)}
+                    placeholder="Aktuelles Passwort"
+                    autoComplete="current-password"
+                    className="flex-1 px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isDisablingTotp}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-slate-950 font-bold rounded-lg text-xs transition-colors"
+                  >
+                    {isDisablingTotp ? 'Wird deaktiviert...' : '2FA jetzt deaktivieren'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowDisableModal(false)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs transition-colors"
+                  >
+                    Abbrechen
+                  </button>
+                </div>
+              </form>
+            )}
 
             {totpStatus && (
               <div
@@ -1414,8 +1949,9 @@ export const SettingsPage: React.FC = () => {
                   <UserPlus className="w-4 h-4 text-emerald-400" /> Neuen Benutzer einladen (§2.3)
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Einladungslink ist 7 Tage gültig. Benutzer vergibt beim Erstlogin eigenes Passwort
-                  (min. 8 Zeichen).
+                  Der Einladungslink ist 72 Stunden gültig. Der eingeladene Benutzer vergibt beim
+                  Annehmen der Einladung sein eigenes Passwort (min. 8 Zeichen). Es wird keine
+                  E-Mail versendet — bitte den Link kopieren und persönlich weitergeben.
                 </p>
               </div>
             </div>
@@ -1493,10 +2029,51 @@ export const SettingsPage: React.FC = () => {
                   className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors"
                 >
                   <UserPlus className="w-3.5 h-3.5" />
-                  <span>Einladung senden</span>
+                  <span>Einladung erstellen</span>
                 </button>
               </div>
             </form>
+
+            {/* The link is the one-time artefact: only its SHA-256 hash is stored,
+                so it cannot be shown again. It must be copied now. */}
+            {inviteLink && (
+              <div
+                data-testid="invite-link-panel"
+                className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-3"
+              >
+                <p className="text-xs font-semibold text-emerald-300">
+                  Einladungslink — nur jetzt abrufbar
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    readOnly
+                    aria-label="Einladungslink"
+                    value={inviteLink}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-200"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Einladungslink kopieren"
+                    onClick={() => copyToClipboard(inviteLink)}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs flex items-center gap-1.5 transition-colors shrink-0"
+                  >
+                    {copied ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    Kopieren
+                  </button>
+                </div>
+                {inviteExpiresAt && (
+                  <p className="text-[10px] text-emerald-200/70">
+                    Gültig bis {new Date(inviteExpiresAt).toLocaleString('de-DE')}. Der Token wird
+                    ausschließlich als SHA-256-Hash gespeichert.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Active Users List */}
@@ -1559,7 +2136,7 @@ export const SettingsPage: React.FC = () => {
                           {u.status === 'ACTIVE'
                             ? 'Aktiv'
                             : u.status === 'INVITED'
-                              ? 'Eingeladen (7 Tage)'
+                              ? 'Eingeladen (72 Stunden)'
                               : 'Deaktiviert'}
                         </span>
                       </td>
@@ -1615,20 +2192,33 @@ export const SettingsPage: React.FC = () => {
               </div>
             )}
 
+            {backupStatus && (
+              <div
+                data-testid="backup-status"
+                className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-200"
+              >
+                {backupStatus}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
                 <div className="text-xs font-bold text-slate-200 flex items-center gap-2">
                   <Database className="w-4 h-4 text-emerald-400" /> PostgreSQL Datenbank-Backup
                 </div>
                 <p className="text-xs text-slate-400">
-                  Erstellt einen vollständigen SQL-Dump aller Kontakte, Deals, Notizen und
-                  Audit-Logs.
+                  Streamt alle 24 Tabellen (inkl. E-Mails, Notizen, Audit-Logs und Wissensdatenbank)
+                  als versioniertes JSON. Der Download startet erst, wenn die Datei vollständig
+                  angekommen ist.
                 </p>
                 <button
                   onClick={() => handleDownloadBackup('db')}
-                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors"
+                  disabled={isDownloadingBackup}
+                  data-testid="download-backup"
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
                 >
-                  <Download className="w-3.5 h-3.5" /> SQL Dump herunterladen
+                  <Download className="w-3.5 h-3.5" />
+                  {isDownloadingBackup ? 'Lädt herunter...' : 'JSON-Backup herunterladen'}
                 </button>
               </div>
 
@@ -1637,13 +2227,17 @@ export const SettingsPage: React.FC = () => {
                   <Archive className="w-4 h-4 text-blue-400" /> Dateispeicher-Backup
                 </div>
                 <p className="text-xs text-slate-400">
-                  Sichert alle hochgeladenen E-Mail-Anhänge, Angebote und Dokumente als Archiv.
+                  Derselbe JSON-Backupstrom enthält die Speicherpfade aller hochgeladenen
+                  E-Mail-Anhänge, Angebote und Dokumente. Anhänge selbst liegen in der
+                  konfigurierten Speicherung und gehören zum Dateisystem-Backup des Hosts.
                 </p>
                 <button
                   onClick={() => handleDownloadBackup('storage')}
-                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors"
+                  disabled={isDownloadingBackup}
+                  data-testid="download-backup-storage"
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
                 >
-                  <Download className="w-3.5 h-3.5" /> Archiv herunterladen
+                  <Download className="w-3.5 h-3.5" /> Archiv-Metadaten herunterladen
                 </button>
               </div>
 
@@ -1663,6 +2257,63 @@ export const SettingsPage: React.FC = () => {
                   <ShieldCheck className="w-3.5 h-3.5" />{' '}
                   {isDrilling ? 'Prüfung läuft...' : 'Restore-Drill ausführen'}
                 </button>
+              </div>
+            </div>
+
+            {/* Restore: uploads the real envelope, no simulated success (§8.7) */}
+            <div className="border-t border-slate-800 pt-6">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                    <RotateCcw className="w-4 h-4 text-amber-400" /> Backup wiederherstellen
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Standard ist Zusammenführen (Merge, wiederholbar). Ersetzen leert vorher alle 24
+                    Tabellen in einer Transaktion und ist nicht wiederholbar.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col md:flex-row md:items-center gap-3">
+                <label className="flex items-center gap-2 text-xs text-slate-300">
+                  <input
+                    type="radio"
+                    name="backup-restore-mode"
+                    value="merge"
+                    checked={restoreMode === 'merge'}
+                    onChange={() => setRestoreMode('merge')}
+                    data-testid="restore-mode-merge"
+                  />
+                  Zusammenführen (Merge)
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-300">
+                  <input
+                    type="radio"
+                    name="backup-restore-mode"
+                    value="replace"
+                    checked={restoreMode === 'replace'}
+                    onChange={() => setRestoreMode('replace')}
+                    data-testid="restore-mode-replace"
+                  />
+                  Ersetzen (Replace)
+                </label>
+                <label
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    isRestoring
+                      ? 'bg-slate-800 text-slate-500'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                  }`}
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    className="hidden"
+                    onChange={handleRestoreBackup}
+                    disabled={isRestoring}
+                    data-testid="restore-file-input"
+                  />
+                  {isRestoring ? 'Wiederherstellung läuft...' : 'Backup-Datei auswählen'}
+                </label>
               </div>
             </div>
 

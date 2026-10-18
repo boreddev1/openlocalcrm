@@ -10,8 +10,9 @@ var (
 	ibanRegex = regexp.MustCompile(`\b[A-Z]{2}[0-9]{2}(?:[ ]?[0-9]{4}){4,7}(?:[ ]?[0-9]{1,2})?\b`)
 	// Regex for Credit Cards
 	creditCardRegex = regexp.MustCompile(`\b(?:\d{4}[ -]?){3}\d{4}\b`)
-	// Regex for German Tax ID (Steuer-ID / 11 digits)
-	taxIDRegex = regexp.MustCompile(`\b\d{11}\b`)
+	// Regex for German Tax ID (Steuer-ID / IdNr / TIN) requiring contextual prefix or standard 2-3-3-3 formatting (F-48)
+	taxIDPrefixedRegex  = regexp.MustCompile(`(?i)\b(?:steuer[- ]?id(?:nr)?|idnr|tin|steuer[- ]?identifikationsnummer|steuernummer)(?:[\s:=]+(?:ist|lautet|nr|nummer|:|-)?)*[\s:=]+(?:\d{2}[ -]?\d{3}[ -]?\d{3}[ -]?\d{3}|\d{11})\b`)
+	taxIDFormattedRegex = regexp.MustCompile(`\b\d{2}\s\d{3}\s\d{3}\s\d{3}\b`)
 	// Regex for German VAT ID (USt-IdNr. e.g. DE123456789)
 	vatIDRegex = regexp.MustCompile(`\bDE[0-9]{9}\b`)
 	// Regex for sensitive passwords or API keys
@@ -39,9 +40,12 @@ func (g *Guard) SanitizeInputWithCount(text string) (string, int) {
 	count += len(creditCardRegex.FindAllStringIndex(sanitized, -1))
 	sanitized = creditCardRegex.ReplaceAllString(sanitized, "[REDACTED_CREDIT_CARD]")
 
-	// Finding #4: Steuer-ID & USt-IdNr Maskierung
-	count += len(taxIDRegex.FindAllStringIndex(sanitized, -1))
-	sanitized = taxIDRegex.ReplaceAllString(sanitized, "[REDACTED_TAX_ID]")
+	// Finding #4 / F-48: Steuer-ID & USt-IdNr Maskierung mit Kontextprüfung
+	count += len(taxIDPrefixedRegex.FindAllStringIndex(sanitized, -1))
+	sanitized = taxIDPrefixedRegex.ReplaceAllString(sanitized, "[REDACTED_TAX_ID]")
+
+	count += len(taxIDFormattedRegex.FindAllStringIndex(sanitized, -1))
+	sanitized = taxIDFormattedRegex.ReplaceAllString(sanitized, "[REDACTED_TAX_ID]")
 
 	count += len(vatIDRegex.FindAllStringIndex(sanitized, -1))
 	sanitized = vatIDRegex.ReplaceAllString(sanitized, "[REDACTED_VAT_ID]")

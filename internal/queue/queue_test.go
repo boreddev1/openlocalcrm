@@ -11,6 +11,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/openlocalcrm/openlocalcrm/internal/queue"
@@ -237,5 +238,122 @@ func TestEmailTriageWorker_MessageNotFound(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for missing message")
+	}
+}
+
+type fakeAutomationTrigger struct {
+	calls []struct {
+		TriggerType string
+		TargetID    string
+		TargetType  string
+		TargetName  string
+	}
+	err error
+}
+
+func (f *fakeAutomationTrigger) TriggerEvent(ctx context.Context, triggerType, targetID, targetType, targetName string) ([]automation.WorkflowRun, error) {
+	f.calls = append(f.calls, struct {
+		TriggerType string
+		TargetID    string
+		TargetType  string
+		TargetName  string
+	}{
+		TriggerType: triggerType,
+		TargetID:    targetID,
+		TargetType:  targetType,
+		TargetName:  targetName,
+	})
+	return nil, f.err
+}
+
+type mockInactivityQuerier struct {
+	db.Querier
+	contacts []db.Contact
+	err      error
+}
+
+func (m *mockInactivityQuerier) ListInactiveContacts(ctx context.Context, arg db.ListInactiveContactsParams) ([]db.Contact, error) {
+	return m.contacts, m.err
+}
+
+func TestInactivityScanWorker_TriggersInactivityTimeout(t *testing.T) {
+	ctx := context.Background()
+	c1ID := newTestUUID(t, "11111111-1111-1111-1111-111111111111")
+	c2ID := newTestUUID(t, "22222222-2222-2222-2222-222222222222")
+
+	q := &mockInactivityQuerier{
+		contacts: []db.Contact{
+			{
+				ID:        c1ID,
+				FirstName: "Hans",
+				LastName:  "Inaktiv",
+			},
+			{
+				ID:        c2ID,
+				FirstName: "Greta",
+				LastName:  "Alt",
+			},
+		},
+	}
+
+	trigger := &fakeAutomationTrigger{}
+	worker := queue.NewInactivityScanWorkerForTest(queue.Deps{
+		Queries:       q,
+		AutomationSvc: trigger,
+	})
+
+	err := worker.Work(ctx, &river.Job[queue.InactivityScanArgs]{
+		Args: queue.InactivityScanArgs{},
+	})
+	if err != nil {
+		t.Fatalf("InactivityScanWorker failed: %v", err)
+	}
+
+	if len(trigger.calls) != 2 {
+		t.Fatalf("expected 2 trigger calls, got %d", len(trigger.calls))
+	}
+
+	call1 := trigger.calls[0]
+	if call1.TriggerType != "INACTIVITY_TIMEOUT" {
+		t.Errorf("expected INACTIVITY_TIMEOUT, got %s", call1.TriggerType)
+	}
+	if call1.TargetType != "CONTACT" {
+		t.Errorf("expected CONTACT, got %s", call1.TargetType)
+	}
+	if call1.TargetID != uuidStr(c1ID) {
+		t.Errorf("expected %s, got %s", uuidStr(c1ID), call1.TargetID)
+	}
+	if call1.TargetName != "Hans Inaktiv" {
+		t.Errorf("expected 'Hans Inaktiv', got %q", call1.TargetName)
+	}
+
+	call2 := trigger.calls[1]
+	if call2.TargetID != uuidStr(c2ID) || call2.TargetName != "Greta Alt" {
+		t.Errorf("unexpected call2: %+v", call2)
+	}
+}
+
+func TestInactivityScanWorker_DatabaseError(t *testing.T) {
+	q := &mockInactivityQuerier{
+		err: context.DeadlineExceeded,
+	}
+	trigger := &fakeAutomationTrigger{}
+	worker := queue.NewInactivityScanWorkerForTest(queue.Deps{
+		Queries:       q,
+		AutomationSvc: trigger,
+	})
+
+	err := worker.Work(context.Background(), &river.Job[queue.InactivityScanArgs]{
+		Args: queue.InactivityScanArgs{},
+	})
+	if err == nil {
+		t.Fatal("expected error from InactivityScanWorker when query fails")
+	}
+}
+
+func TestInactivityScanArgs_Kind(t *testing.T) {
+	args := queue.InactivityScanArgs{}
+	if args.Kind() != "inactivity_scan" {
+		t.Fatalf("expected inactivity_scan, got %s", args.Kind())
 	}
 }

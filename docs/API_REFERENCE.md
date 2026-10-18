@@ -67,7 +67,8 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
     "role": "ADMIN",
     "first_name": "Max",
     "last_name": "Administrator",
-    "totp_enabled": true
+    "totp_enabled": true,
+    "must_change_password": false
   }
 }
 ```
@@ -75,22 +76,32 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 *Hinweis:* Falls 2FA aktiv ist und kein `totp_code` übergeben wird, antwortet die API mit `401 Unauthorized` und `{ "error": "TOTP code required", "code": "TOTP_REQUIRED" }`.
 
 #### Token erneuern (`/refresh`)
-Verlängert die Sitzung und gibt ein frisches JWT-Token aus.
+Verlängert die Sitzung via Single-Use Refresh Token Rotation. Aus Sicherheitsgründen wird der Refresh-Token ausschließlich über das HttpOnly-Cookie `refresh_token` übergeben (kein Bearer-Header). Erzeugt ein neues Access-Token und rotiert den Refresh-Token.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/refresh \
-  -H "Authorization: Bearer <token>"
+  --cookie "refresh_token=<token>"
+```
+
+#### Alle Sitzungen abmelden (`/auth/logout-all`)
+Meldet alle aktiven Sitzungen des Benutzers auf allen Geräten sofort ab, indem die `token_version` des Benutzers inkrementiert und alle Refresh-Tokens der Token-Familie revidiert werden.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/logout-all \
+  -H "Authorization: Bearer <token>" \
+  -H "X-CSRF-Token: <csrf_token>"
 ```
 
 #### Passwort ändern (`/change-password`)
-Aktualisiert das Passwort mittels Argon2id Hash nach Prüfung des aktuellen Passworts.
+Aktualisiert das Passwort mittels Argon2id Hash nach Prüfung des aktuellen Passworts (Mindestlänge 8 Zeichen). Setzt `must_change_password` auf `false` und invalidiert bestehende Sessions durch Hochzählen der `token_version`.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/change-password \
   -H "Authorization: Bearer <token>" \
+  -H "X-CSRF-Token: <csrf_token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "current_password": "AltesPasswort123!",
+    "old_password": "AltesPasswort123!",
     "new_password": "NeuesSicheresPasswort456!"
   }'
 ```
@@ -107,7 +118,7 @@ curl -X POST http://localhost:8080/api/v1/auth/totp/setup \
 ```json
 {
   "secret": "JBSWY3DPEHPK3PXP",
-  "qr_uri": "otpauth://totp/OpenLocalCRM:admin@openlocalcrm.local?secret=JBSWY3DPEHPK3PXP&issuer=OpenLocalCRM"
+  "url": "otpauth://totp/OpenLocalCRM:admin@openlocalcrm.local?secret=JBSWY3DPEHPK3PXP&issuer=OpenLocalCRM"
 }
 ```
 
@@ -119,7 +130,8 @@ curl -X POST http://localhost:8080/api/v1/auth/totp/verify \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "code": "123456"
+    "code": "123456",
+    "secret": "JBSWY3DPEHPK3PXP"
   }'
 ```
 
@@ -141,14 +153,49 @@ curl -X GET http://localhost:8080/api/v1/me \
   -H "Authorization: Bearer <token>"
 ```
 
-#### Abmelden (Logout)
-```bash
-curl -X POST http://localhost:8080/api/v1/auth/logout
+##### Response (`200 OK`)
+```json
+{
+  "user_id": "00000000-0000-0000-0000-000000000001",
+  "email": "admin@openlocalcrm.local",
+  "role": "ADMIN",
+  "first_name": "Max",
+  "last_name": "Administrator",
+  "totp_enabled": false,
+  "must_change_password": false
+}
 ```
 
 ---
 
-### 3. Lead-Intake Webhook (Website-Formulare & Portale)
+#### Abmelden (Logout)
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/logout \
+  -H "Authorization: Bearer <token>" \
+  -H "X-CSRF-Token: <csrf_token>"
+```
+
+---
+
+### 3. Datensatz-Eigentümerschaft & Neuzuweisung (`/api/v1/admin/ownership`)
+
+Administrativer Endpunkt zur Massen-Neuzuweisung von CRM-Datensätzen (Kontakte, Firmen, Deals, Termine, Aufgaben, Notizen) von einem Vorbesitzer auf einen neuen Eigentümer.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/ownership/bulk-assign \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "X-CSRF-Token: <csrf_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from_user_id": "11111111-1111-1111-1111-111111111111",
+    "to_user_id": "22222222-2222-2222-2222-222222222222",
+    "entity_types": ["contacts", "companies", "deals", "appointments", "todos", "notes"]
+  }'
+```
+
+---
+
+### 4. Lead-Intake Webhook (Website-Formulare & Portale)
 
 Nimmt externe Leads entgegen, führt Deduplizierung durch und legt automatisch Kontakte/Deals an.
 

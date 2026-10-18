@@ -11,6 +11,12 @@ import (
 )
 
 type Querier interface {
+	// One statement locks the active invite, consumes it and activates the
+	// referenced user. The FOR UPDATE lock plus the active predicates make a
+	// concurrent second acceptance match zero rows instead of reactivating the
+	// account. No raw token is stored or returned: the caller supplies the hash.
+	AcceptUserInvite(ctx context.Context, arg AcceptUserInviteParams) (User, error)
+	ConsumeRefreshToken(ctx context.Context, tokenHash string) (ConsumeRefreshTokenRow, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// internal/db/queries/ai_research_jobs.sql
 	CreateAIResearchJob(ctx context.Context, arg CreateAIResearchJobParams) (AiResearchJob, error)
@@ -26,10 +32,18 @@ type Querier interface {
 	CreateContact(ctx context.Context, arg CreateContactParams) (Contact, error)
 	// internal/db/queries/deals.sql
 	CreateDeal(ctx context.Context, arg CreateDealParams) (Deal, error)
+	CreateDraftEmailMessage(ctx context.Context, arg CreateDraftEmailMessageParams) (EmailMessage, error)
 	// internal/db/queries/emails.sql
 	CreateEmailAccount(ctx context.Context, arg CreateEmailAccountParams) (EmailAccount, error)
 	CreateEmailAttachment(ctx context.Context, arg CreateEmailAttachmentParams) (EmailAttachment, error)
 	CreateEmailMessage(ctx context.Context, arg CreateEmailMessageParams) (EmailMessage, error)
+	// internal/db/queries/email_templates.sql
+	CreateEmailTemplate(ctx context.Context, arg CreateEmailTemplateParams) (EmailTemplate, error)
+	// One statement creates the INVITED user and its invite so a half-created
+	// account can never exist. The user gets a real but discarded Argon2id hash:
+	// the account cannot log in until AcceptUserInvite replaces it.
+	// Positional parameters keep role a plain string, like db.CreateUserParams.
+	CreateInvitedUserWithInvite(ctx context.Context, arg CreateInvitedUserWithInviteParams) (UserInvite, error)
 	// internal/db/queries/knowledge_base.sql
 	CreateKBArticle(ctx context.Context, arg CreateKBArticleParams) (CreateKBArticleRow, error)
 	// internal/db/queries/notes.sql
@@ -42,19 +56,76 @@ type Querier interface {
 	CreateTodo(ctx context.Context, arg CreateTodoParams) (Todo, error)
 	// internal/db/queries/users.sql
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// internal/db/queries/invites.sql
+	CreateUserInvite(ctx context.Context, arg CreateUserInviteParams) (UserInvite, error)
 	// internal/db/queries/workflows.sql
 	CreateWorkflow(ctx context.Context, arg CreateWorkflowParams) (Workflow, error)
 	CreateWorkflowRun(ctx context.Context, arg CreateWorkflowRunParams) (WorkflowRun, error)
+	CurrentTokenVersion(ctx context.Context, id pgtype.UUID) (int32, error)
 	DeleteAppointment(ctx context.Context, id pgtype.UUID) error
 	DeleteCompany(ctx context.Context, id pgtype.UUID) error
 	DeleteContact(ctx context.Context, id pgtype.UUID) error
-	DeleteDeal(ctx context.Context, id pgtype.UUID) error
+	DeleteDeal(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	DeleteEmailAccount(ctx context.Context, id pgtype.UUID) error
+	DeleteEmailTemplate(ctx context.Context, key string) error
+	DeleteExpiredAndSpentRefreshTokens(ctx context.Context) error
 	DeleteKBArticle(ctx context.Context, id pgtype.UUID) error
 	DeleteNote(ctx context.Context, id pgtype.UUID) error
 	DeleteRefreshToken(ctx context.Context, tokenHash string) error
+	DeleteRefreshTokenFamily(ctx context.Context, familyID pgtype.UUID) error
 	DeleteTodo(ctx context.Context, id pgtype.UUID) error
 	DeleteUserRefreshTokens(ctx context.Context, userID pgtype.UUID) error
+	EnableTOTPWithSecret(ctx context.Context, arg EnableTOTPWithSecretParams) error
+	ExportAIAuditLogsRows(ctx context.Context) ([][]byte, error)
+	ExportAIResearchJobsRows(ctx context.Context) ([][]byte, error)
+	ExportAppointmentsRows(ctx context.Context) ([][]byte, error)
+	ExportAuditLogsRows(ctx context.Context) ([][]byte, error)
+	ExportCallActivitiesRows(ctx context.Context) ([][]byte, error)
+	ExportCompaniesRows(ctx context.Context) ([][]byte, error)
+	ExportCompanyResearchRows(ctx context.Context) ([][]byte, error)
+	ExportContactsRows(ctx context.Context) ([][]byte, error)
+	ExportDealsRows(ctx context.Context) ([][]byte, error)
+	ExportEmailAccountsRows(ctx context.Context) ([][]byte, error)
+	ExportEmailAttachmentsRows(ctx context.Context) ([][]byte, error)
+	ExportEmailMessagesRows(ctx context.Context) ([][]byte, error)
+	ExportEmailTemplatesRows(ctx context.Context) ([][]byte, error)
+	ExportIntakeFormsRows(ctx context.Context) ([][]byte, error)
+	ExportKnowledgeBaseArticlesRows(ctx context.Context) ([][]byte, error)
+	ExportNotesRows(ctx context.Context) ([][]byte, error)
+	ExportNotificationsRows(ctx context.Context) ([][]byte, error)
+	ExportRefreshTokensRows(ctx context.Context) ([][]byte, error)
+	ExportTodosRows(ctx context.Context) ([][]byte, error)
+	ExportUserInvitesRows(ctx context.Context) ([][]byte, error)
+	// internal/db/queries/backup.sql
+	//
+	// B1/B2: canonical SQL for the bounded-memory backup export, the static
+	// restore upserts, and the reverse-ordered replace-mode truncation.
+	//
+	// Contract rules that this file is the single source of truth for:
+	//
+	//   * Every selector returns `row_to_json(t)` ordered by primary key, so the
+	//     wire format keeps JSONB/array/vector columns as JSON values instead of
+	//     base64 strings.
+	//   * Every restore statement is `:exec` and takes exactly one bind parameter,
+	//     `sqlc.arg(row)::jsonb`. No identifier is ever assembled from request
+	//     data.
+	//   * Restore uses typed `jsonb_to_record` fields, never `r->>'field'`: a JSON
+	//     null must yield SQL NULL, which `''::uuid` would turn into a cast error.
+	//   * TEXT[] columns are rebuilt with
+	//     `ARRAY(SELECT jsonb_array_elements_text(COALESCE(r.col, '[]'::jsonb)))`
+	//     and the embedding is cast back to `vector(1024)`. The 1024-dimensional
+	//     embedding contract is never reduced to the obsolete 768 contract.
+	//   * `workflows`, `workflow_runs` and `workflow_steps` keep text primary and
+	//     foreign keys, so `r.id`, `r.workflow_id` and `r.run_id` stay uncast.
+	//   * Enum and vector types are schema-qualified with `public.`. The scratch
+	//     restore drill pins `search_path` to the scratch schema only, so an
+	//     unqualified `user_role` or `vector` would be unresolvable there. Only the
+	//     *types* are qualified; table names stay unqualified on purpose, so a
+	//     missing scratch table fails instead of silently resolving to public.
+	ExportUsersRows(ctx context.Context) ([][]byte, error)
+	ExportWorkflowRunsRows(ctx context.Context) ([][]byte, error)
+	ExportWorkflowStepsRows(ctx context.Context) ([][]byte, error)
+	ExportWorkflowsRows(ctx context.Context) ([][]byte, error)
 	GetAIResearchJobByID(ctx context.Context, id pgtype.UUID) (AiResearchJob, error)
 	GetAppointmentByID(ctx context.Context, id pgtype.UUID) (Appointment, error)
 	GetCompanyByID(ctx context.Context, id pgtype.UUID) (Company, error)
@@ -62,56 +133,79 @@ type Querier interface {
 	GetDealByID(ctx context.Context, id pgtype.UUID) (Deal, error)
 	GetEmailAccountByID(ctx context.Context, id pgtype.UUID) (EmailAccount, error)
 	GetEmailMessageByID(ctx context.Context, id pgtype.UUID) (EmailMessage, error)
+	GetEmailTemplateByKey(ctx context.Context, key string) (EmailTemplate, error)
 	GetKBArticleByID(ctx context.Context, id pgtype.UUID) (GetKBArticleByIDRow, error)
+	GetLatestAuditLogHash(ctx context.Context) (pgtype.Text, error)
 	GetNoteByID(ctx context.Context, id pgtype.UUID) (Note, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error)
+	// Deliberately ignores expiry and used_at: the replay path needs to see a spent
+	// token in order to detect the replay.
+	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetTodoByID(ctx context.Context, id pgtype.UUID) (Todo, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	GetUserInviteByTokenHash(ctx context.Context, tokenHash string) (UserInvite, error)
 	GetWorkflowByID(ctx context.Context, id string) (Workflow, error)
 	GetWorkflowRunByID(ctx context.Context, id string) (WorkflowRun, error)
+	// Invalidates every access token already issued to this user.
+	IncrementUserTokenVersion(ctx context.Context, id pgtype.UUID) (int32, error)
 	ListAIResearchJobs(ctx context.Context) ([]AiResearchJob, error)
 	ListAllNotifications(ctx context.Context, arg ListAllNotificationsParams) ([]Notification, error)
-	ListAppointments(ctx context.Context) ([]Appointment, error)
+	ListAppointments(ctx context.Context, userID pgtype.UUID) ([]Appointment, error)
+	ListAuditLogsAsc(ctx context.Context) ([]AuditLog, error)
 	ListAuditLogsByEntity(ctx context.Context, arg ListAuditLogsByEntityParams) ([]AuditLog, error)
 	ListCallActivitiesByContact(ctx context.Context, contactID pgtype.UUID) ([]CallActivity, error)
 	ListCompanies(ctx context.Context, arg ListCompaniesParams) ([]Company, error)
 	ListContacts(ctx context.Context, arg ListContactsParams) ([]Contact, error)
 	ListContactsByCompany(ctx context.Context, companyID pgtype.UUID) ([]Contact, error)
 	ListDeals(ctx context.Context, arg ListDealsParams) ([]Deal, error)
-	ListDealsByStage(ctx context.Context, stage string) ([]Deal, error)
-	ListEmailAccounts(ctx context.Context) ([]EmailAccount, error)
+	ListDealsByStage(ctx context.Context, arg ListDealsByStageParams) ([]Deal, error)
+	ListEmailAccounts(ctx context.Context, ownerUserID pgtype.UUID) ([]EmailAccount, error)
 	ListEmailAttachmentsByMessage(ctx context.Context, messageID pgtype.UUID) ([]EmailAttachment, error)
 	ListEmailMessages(ctx context.Context, arg ListEmailMessagesParams) ([]EmailMessage, error)
 	ListEmailMessagesByThread(ctx context.Context, threadID string) ([]EmailMessage, error)
+	ListEmailTemplates(ctx context.Context) ([]EmailTemplate, error)
+	ListInactiveContacts(ctx context.Context, arg ListInactiveContactsParams) ([]Contact, error)
 	ListKBArticles(ctx context.Context) ([]ListKBArticlesRow, error)
-	ListNotes(ctx context.Context) ([]Note, error)
+	ListNotes(ctx context.Context, userID pgtype.UUID) ([]Note, error)
 	ListNotesByEntity(ctx context.Context, arg ListNotesByEntityParams) ([]Note, error)
 	ListRecentAuditLogs(ctx context.Context, arg ListRecentAuditLogsParams) ([]AuditLog, error)
 	ListRecentCallActivities(ctx context.Context, limit int32) ([]CallActivity, error)
 	ListTodos(ctx context.Context, arg ListTodosParams) ([]Todo, error)
 	ListTodosByAssignee(ctx context.Context, assignedTo pgtype.UUID) ([]Todo, error)
+	ListUnownedCompanies(ctx context.Context) ([]Company, error)
+	ListUnownedContacts(ctx context.Context) ([]Contact, error)
 	ListUnreadNotifications(ctx context.Context, arg ListUnreadNotificationsParams) ([]Notification, error)
+	ListUserInvites(ctx context.Context) ([]UserInvite, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ListWorkflowRuns(ctx context.Context) ([]WorkflowRun, error)
 	ListWorkflows(ctx context.Context) ([]Workflow, error)
 	MarkAllNotificationsAsRead(ctx context.Context, userID pgtype.UUID) error
 	MarkEmailMessageRead(ctx context.Context, id pgtype.UUID) error
 	MarkNotificationAsRead(ctx context.Context, id pgtype.UUID) error
+	RevokeDeal(ctx context.Context, arg RevokeDealParams) (Deal, error)
+	RevokeUserInvite(ctx context.Context, id pgtype.UUID) error
 	SearchCompanies(ctx context.Context, arg SearchCompaniesParams) ([]Company, error)
 	SearchContacts(ctx context.Context, arg SearchContactsParams) ([]Contact, error)
 	SearchKBArticlesByEmbedding(ctx context.Context, arg SearchKBArticlesByEmbeddingParams) ([]SearchKBArticlesByEmbeddingRow, error)
+	SetCompanyOwner(ctx context.Context, arg SetCompanyOwnerParams) (Company, error)
+	SetContactOwner(ctx context.Context, arg SetContactOwnerParams) (Contact, error)
+	SetUserMustChangePassword(ctx context.Context, arg SetUserMustChangePasswordParams) error
+	TruncateBackupTables(ctx context.Context) error
 	UpdateAIResearchJobStatus(ctx context.Context, arg UpdateAIResearchJobStatusParams) (AiResearchJob, error)
 	UpdateAppointment(ctx context.Context, arg UpdateAppointmentParams) (Appointment, error)
 	UpdateAppointmentPushStatus(ctx context.Context, arg UpdateAppointmentPushStatusParams) (Appointment, error)
 	UpdateCompany(ctx context.Context, arg UpdateCompanyParams) (Company, error)
 	UpdateContact(ctx context.Context, arg UpdateContactParams) (Contact, error)
+	UpdateContactTags(ctx context.Context, arg UpdateContactTagsParams) (Contact, error)
 	UpdateDeal(ctx context.Context, arg UpdateDealParams) (Deal, error)
 	UpdateDealStage(ctx context.Context, arg UpdateDealStageParams) (Deal, error)
+	UpdateDealTags(ctx context.Context, arg UpdateDealTagsParams) (Deal, error)
 	UpdateEmailAccount(ctx context.Context, arg UpdateEmailAccountParams) (EmailAccount, error)
 	UpdateEmailAccountLastSynced(ctx context.Context, arg UpdateEmailAccountLastSyncedParams) error
 	UpdateEmailAccountSyncState(ctx context.Context, arg UpdateEmailAccountSyncStateParams) error
 	UpdateEmailMessageTags(ctx context.Context, arg UpdateEmailMessageTagsParams) (EmailMessage, error)
+	UpdateEmailTemplate(ctx context.Context, arg UpdateEmailTemplateParams) (EmailTemplate, error)
 	UpdateKBArticleEmbedding(ctx context.Context, arg UpdateKBArticleEmbeddingParams) error
 	UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, error)
 	UpdateTodo(ctx context.Context, arg UpdateTodoParams) (Todo, error)
@@ -123,6 +217,30 @@ type Querier interface {
 	UpdateUserTOTP(ctx context.Context, arg UpdateUserTOTPParams) error
 	UpdateUserTOTPLastUsedStep(ctx context.Context, arg UpdateUserTOTPLastUsedStepParams) error
 	UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) (WorkflowRun, error)
+	UpsertAIAuditLogsRow(ctx context.Context, row []byte) error
+	UpsertAIResearchJobsRow(ctx context.Context, row []byte) error
+	UpsertAppointmentsRow(ctx context.Context, row []byte) error
+	UpsertAuditLogsRow(ctx context.Context, row []byte) error
+	UpsertCallActivitiesRow(ctx context.Context, row []byte) error
+	UpsertCompaniesRow(ctx context.Context, row []byte) error
+	UpsertCompanyResearchRow(ctx context.Context, row []byte) error
+	UpsertContactsRow(ctx context.Context, row []byte) error
+	UpsertDealsRow(ctx context.Context, row []byte) error
+	UpsertEmailAccountsRow(ctx context.Context, row []byte) error
+	UpsertEmailAttachmentsRow(ctx context.Context, row []byte) error
+	UpsertEmailMessagesRow(ctx context.Context, row []byte) error
+	UpsertEmailTemplatesRow(ctx context.Context, dollar_1 []byte) error
+	UpsertIntakeFormsRow(ctx context.Context, row []byte) error
+	UpsertKnowledgeBaseArticlesRow(ctx context.Context, row []byte) error
+	UpsertNotesRow(ctx context.Context, row []byte) error
+	UpsertNotificationsRow(ctx context.Context, row []byte) error
+	UpsertRefreshTokensRow(ctx context.Context, row []byte) error
+	UpsertTodosRow(ctx context.Context, row []byte) error
+	UpsertUserInvitesRow(ctx context.Context, dollar_1 []byte) error
+	UpsertUsersRow(ctx context.Context, row []byte) error
+	UpsertWorkflowRunsRow(ctx context.Context, row []byte) error
+	UpsertWorkflowStepsRow(ctx context.Context, row []byte) error
+	UpsertWorkflowsRow(ctx context.Context, row []byte) error
 }
 
 var _ Querier = (*Queries)(nil)

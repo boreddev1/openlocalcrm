@@ -415,7 +415,7 @@ function onAIProviderChange() {
     box.classList.remove('hidden');
     keyGroup.classList.add('hidden');
     urlInput.value = 'http://localhost:11434';
-    modelInput.value = 'gemma4:12b';
+    modelInput.value = 'gemma2:12b';
     embeddingInput.value = 'qwen3-embedding:0.6b';
   } else {
     box.classList.remove('hidden');

@@ -105,11 +105,11 @@ make check-coverage  # same gate as coverage
 ```bash
 make check           # THE canonical local gate: setup-hooks + fmt + lint + check-licenses + test
 make fmt             # gofmt -s -w .
-make lint            # go vet ./...  +  (cd web && pnpm lint && pnpm typecheck)
+make lint            # go vet ./...  +  golangci-lint run ./...  +  (cd web && pnpm lint && pnpm typecheck)
 make check-licenses  # 100% permissive-only license audit
 ```
 
-- **Go:** `gofmt -s` (tabs), `go vet`, and `golangci-lint` (see `.golangci.yml`: errcheck, gosimple, govet nilness+shadow, ineffassign, staticcheck, unused, gosec, bodyclose, misspell, unconvert).
+- **Go:** `gofmt -s` (tabs), `go vet`, and `golangci-lint` v2.x (see `.golangci.yml`: errcheck, govet nilness+shadow, ineffassign, staticcheck, unused, gosec, bodyclose, misspell, unconvert). CI runs it with the pinned version; use `//nolint:gosec // <reason>` only for narrow, justified false positives.
 - **Web:** ESLint (`web/eslint.config.js`), Prettier, `tsc` typecheck.
 - **Formatting rules** (`.editorconfig`): LF line endings, UTF-8, final newline, trim trailing whitespace. Go = tabs; web/shell = 2/4 spaces; Markdown may keep trailing spaces.
 
@@ -183,17 +183,26 @@ Copy `.env.example` to `.env` (gitignored). Key variables (see `docs/CONFIGURATI
 - This repo has undergone multiple security & compliance review rounds (see `docs/SECURITY_REVIEW_*.md`, `docs/REPO_REVIEW_*.md`, `SECURITY.md`). Follow `SECURITY.md` for reporting issues; do not weaken existing hardening.
 - Keep the RAM budget in mind — avoid heavy in-memory caches or unbounded allocations.
 
+## Autonomous Execution & In-Depth Self-Review Protocol
+
+- **Mandatory in-depth self-review before asking:** The agent must ALWAYS perform a thorough, critical in-depth self-review against requirements, architectural designs, code invariants, security guidelines, and test gates before asking the user questions or requesting confirmation.
+- **Autonomous resolution:** Resolve ambiguities and edge cases by adhering to approved design specs, established repo patterns, and secure defaults without unnecessary back-and-forth interruptions.
+- **Verification before assertion:** Never claim an issue is resolved or a design is ready without checking actual code, running verification commands, and confirming zero contradictions or gaps.
+
 ## Do / Don't
 
 **Do**
+- Perform an in-depth self-review before asking questions or reporting status.
 - Follow existing per-domain structure (`internal/core/<domain>` + `internal/server/handlers/<domain>.go` + `*_test.go`).
 - Add tests for new behavior; keep `make check` green.
 - Use the Makefile targets and Conventional Commits.
 - Keep SQL in `queries/` and regenerate with sqlc.
 
 **Don't**
+- Don't ask the user for clarification or confirmation without first performing an exhaustive self-review and exploring all codebase evidence.
 - Don't commit secrets, binaries, `bin/`, `coverage/`, `node_modules/`, or local data (`data/`, `backups/`).
 - Don't add an ORM or bypass sqlc.
 - Don't break the `migrations` symlink or the web-embed ordering.
 - Don't skip or edit git hooks to force a bad commit through.
 - Don't add copyleft-licensed dependencies.
+

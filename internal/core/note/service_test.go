@@ -62,7 +62,7 @@ func TestNoteServiceCRUD(t *testing.T) {
 	}
 
 	// 6. Delete note
-	if err := svc.Delete(ctx, created.ID); err != nil {
+	if err = svc.Delete(ctx, created.ID); err != nil {
 		t.Fatalf("failed to delete note: %v", err)
 	}
 

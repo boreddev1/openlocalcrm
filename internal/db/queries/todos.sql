@@ -20,6 +20,7 @@ WHERE id = $1 LIMIT 1;
 
 -- name: ListTodos :many
 SELECT * FROM todos
+WHERE (sqlc.narg('assigned_to')::uuid IS NULL OR assigned_to = sqlc.narg('assigned_to')::uuid)
 ORDER BY due_date ASC NULLS LAST, created_at DESC
 LIMIT $1 OFFSET $2;
 

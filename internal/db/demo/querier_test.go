@@ -55,7 +55,7 @@ func TestDemoQuerierSeedAndUsers(t *testing.T) {
 	if err != nil || fetched.Name != "Test AG" {
 		t.Fatalf("get company failed: %v", err)
 	}
-	if err := q.DeleteCompany(ctx, comp.ID); err != nil {
+	if err = q.DeleteCompany(ctx, comp.ID); err != nil {
 		t.Fatalf("delete company failed: %v", err)
 	}
 	_, err = q.GetCompanyByID(ctx, comp.ID)
@@ -126,7 +126,7 @@ func TestDemoQuerierEmailAccountLifecycle(t *testing.T) {
 	}
 
 	syncTime := pgtype.Timestamptz{Time: updated.CreatedAt.Time, Valid: true}
-	if err := q.UpdateEmailAccountSyncState(ctx, db.UpdateEmailAccountSyncStateParams{
+	if err = q.UpdateEmailAccountSyncState(ctx, db.UpdateEmailAccountSyncStateParams{
 		ID:         acc.ID,
 		LastSyncAt: syncTime,
 		LastUid:    42,
@@ -185,5 +185,48 @@ func TestDemoQuerierUpdateEmailMessageTags(t *testing.T) {
 	}
 	if string(updated.Tags) != `["wichtig","angebot"]` {
 		t.Fatalf("expected tags to be persisted, got %s", updated.Tags)
+	}
+}
+
+func TestDemoQuerier_CreateDraftEmailMessage(t *testing.T) {
+	q := demo.NewEmptyInMemoryQuerier()
+	ctx := context.Background()
+
+	var accID, contactID pgtype.UUID
+	_ = accID.Scan("11111111-1111-1111-1111-111111111111")
+	_ = contactID.Scan("22222222-2222-2222-2222-222222222222")
+
+	draft, err := q.CreateDraftEmailMessage(ctx, db.CreateDraftEmailMessageParams{
+		AccountID:       accID,
+		ThreadID:        "<draft-thread-1>",
+		MessageID:       "<draft-msg-1>",
+		SenderEmail:     "vertrieb@openlocalcrm.local",
+		SenderName:      pgtype.Text{String: "Vertrieb", Valid: true},
+		RecipientEmails: []byte(`["kunde@example.de"]`),
+		Subject:         "Angebot Photovoltaik",
+		BodyText:        pgtype.Text{String: "Guten Tag Herr Schmidt...", Valid: true},
+		ContactID:       contactID,
+	})
+	if err != nil {
+		t.Fatalf("CreateDraftEmailMessage failed: %v", err)
+	}
+
+	if !draft.IsDraft {
+		t.Errorf("expected draft.IsDraft == true, got false")
+	}
+	if draft.IsRead {
+		t.Errorf("expected draft.IsRead == false for unread draft, got true")
+	}
+	if draft.Direction != "OUTBOUND" {
+		t.Errorf("expected direction OUTBOUND, got %s", draft.Direction)
+	}
+
+	// Verify message can be retrieved from in-memory map
+	retrieved, err := q.GetEmailMessageByID(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("GetEmailMessageByID failed: %v", err)
+	}
+	if retrieved.Subject != "Angebot Photovoltaik" {
+		t.Errorf("expected retrieved subject 'Angebot Photovoltaik', got %q", retrieved.Subject)
 	}
 }

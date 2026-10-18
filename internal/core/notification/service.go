@@ -48,7 +48,7 @@ func (s *Service) Create(ctx context.Context, input CreateNotificationInput) (db
 	}
 
 	if s.sseHub != nil {
-		s.sseHub.Broadcast(sse.Event{
+		evt := sse.Event{
 			Type: "notification_created",
 			Data: map[string]any{
 				"id":         n.ID,
@@ -58,7 +58,12 @@ func (s *Service) Create(ctx context.Context, input CreateNotificationInput) (db
 				"link":       n.Link.String,
 				"created_at": n.CreatedAt.Time,
 			},
-		})
+		}
+		if input.UserID != nil && input.UserID.Valid {
+			s.sseHub.SendToUser(input.UserID.Bytes, evt)
+		} else {
+			s.sseHub.Broadcast(evt)
+		}
 	}
 
 	return n, nil
@@ -79,7 +84,10 @@ func (s *Service) ListUnread(ctx context.Context, userID *pgtype.UUID, limit int
 }
 
 func (s *Service) MarkAsRead(ctx context.Context, id pgtype.UUID, userID *pgtype.UUID) error {
-	if userID != nil && s.queries != nil {
+	if userID == nil || !userID.Valid {
+		return fmt.Errorf("user_id required")
+	}
+	if s.queries != nil {
 		notifications, err := s.queries.ListAllNotifications(ctx, db.ListAllNotificationsParams{
 			UserID: *userID,
 			Limit:  1000,

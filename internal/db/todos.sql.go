@@ -103,17 +103,19 @@ func (q *Queries) GetTodoByID(ctx context.Context, id pgtype.UUID) (Todo, error)
 
 const listTodos = `-- name: ListTodos :many
 SELECT id, title, description, due_date, status, priority, assigned_to, contact_id, deal_id, created_at, updated_at FROM todos
+WHERE ($3::uuid IS NULL OR assigned_to = $3::uuid)
 ORDER BY due_date ASC NULLS LAST, created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListTodosParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit      int32       `json:"limit"`
+	Offset     int32       `json:"offset"`
+	AssignedTo pgtype.UUID `json:"assigned_to"`
 }
 
 func (q *Queries) ListTodos(ctx context.Context, arg ListTodosParams) ([]Todo, error) {
-	rows, err := q.db.Query(ctx, listTodos, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listTodos, arg.Limit, arg.Offset, arg.AssignedTo)
 	if err != nil {
 		return nil, err
 	}

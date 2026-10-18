@@ -399,8 +399,8 @@ func TestSendMail_ImplicitTLS(t *testing.T) {
 
 	srv := &fakeSMTPServer{ln: ln, username: "user@example.com", password: "s3cret"}
 	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
+		conn, acceptErr := ln.Accept()
+		if acceptErr != nil {
 			return
 		}
 		srv.handleConnAlreadySecure(conn)

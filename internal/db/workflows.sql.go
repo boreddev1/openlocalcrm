@@ -237,16 +237,18 @@ const updateWorkflowRunStatus = `-- name: UpdateWorkflowRunStatus :one
 UPDATE workflow_runs
 SET status = $2,
     current_step = $3,
-    completed_at = $4
+    completed_at = $4,
+    snapshot_json = $5
 WHERE id = $1
 RETURNING id, workflow_id, target_id, target_type, target_name, status, current_step, snapshot_json, started_at, completed_at
 `
 
 type UpdateWorkflowRunStatusParams struct {
-	ID          string             `json:"id"`
-	Status      string             `json:"status"`
-	CurrentStep int32              `json:"current_step"`
-	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	ID           string             `json:"id"`
+	Status       string             `json:"status"`
+	CurrentStep  int32              `json:"current_step"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+	SnapshotJson []byte             `json:"snapshot_json"`
 }
 
 func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflowRunStatusParams) (WorkflowRun, error) {
@@ -255,6 +257,7 @@ func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflo
 		arg.Status,
 		arg.CurrentStep,
 		arg.CompletedAt,
+		arg.SnapshotJson,
 	)
 	var i WorkflowRun
 	err := row.Scan(

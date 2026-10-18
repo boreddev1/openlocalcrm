@@ -18,6 +18,9 @@ func NewExportHandler(service *export.Service) *ExportHandler {
 	return &ExportHandler{service: service}
 }
 
+// maxImportBytes bounds an import request body (10 MB payload plus multipart overhead).
+const maxImportBytes = 10<<20 + 1<<20
+
 func (h *ExportHandler) ExportContactsCSV(w http.ResponseWriter, r *http.Request) {
 	data, err := h.service.ExportContactsCSV(r.Context())
 	if err != nil {
@@ -39,24 +42,25 @@ func (h *ExportHandler) ImportContactsCSV(w http.ResponseWriter, r *http.Request
 		_ = actorID.Scan(claims.UserID)
 	}
 
-	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10 MB limit
-		http.Error(w, `{"error":"file too large or invalid form"}`, http.StatusBadRequest)
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
+	if err := r.ParseMultipartForm(maxImportBytes); err != nil { //nolint:gosec // G120: request body is capped with http.MaxBytesReader on the line above; limit is 10 MB plus multipart overhead
+		writeJSONError(w, http.StatusBadRequest, "file_too_large", "Datei zu groß oder ungültiges Formular")
 		return
 	}
 
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, `{"error":"missing file field"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing_file", "Dateifeld 'file' fehlt")
 		return
 	}
 	defer file.Close()
 
 	importedCount, err := h.service.ImportContactsCSV(r.Context(), actorID, file)
 	if err != nil {
-		http.Error(w, `{"error":"failed to import csv: `+err.Error()+`"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "import_failed", "CSV-Import fehlgeschlagen: "+err.Error())
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"success","imported_count":%d}`, importedCount)))
+	_, _ = fmt.Fprintf(w, `{"status":"success","imported_count":%d}`, importedCount)
 }

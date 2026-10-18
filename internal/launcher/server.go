@@ -250,8 +250,8 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 		}()
 		go func() {
 			defer close(logChan)
-			if err := s.engine.Update(context.Background(), logChan); err != nil {
-				s.appendLog(fmt.Sprintf("[FEHLER] Update fehlgeschlagen: %v", err))
+			if updateErr := s.engine.Update(context.Background(), logChan); updateErr != nil {
+				s.appendLog(fmt.Sprintf("[FEHLER] Update fehlgeschlagen: %v", updateErr))
 			}
 		}()
 	case "reset":
@@ -326,13 +326,18 @@ func (s *Server) handleBackupsList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// maxBackupUploadBytes bounds a backup upload request body (500 MB payload plus
+// multipart overhead).
+const maxBackupUploadBytes = 500<<20 + 1<<20
+
 func (s *Server) handleBackupUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	if err := r.ParseMultipartForm(500 << 20); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBackupUploadBytes)
+	if err := r.ParseMultipartForm(maxBackupUploadBytes); err != nil { //nolint:gosec // G120: request body is capped with http.MaxBytesReader on the line above
 		http.Error(w, fmt.Sprintf("failed parsing upload: %v", err), http.StatusBadRequest)
 		return
 	}

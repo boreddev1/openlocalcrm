@@ -18,11 +18,12 @@ INSERT INTO notes (
     entity_id,
     type,
     author,
-    content
+    content,
+    user_id
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6
 )
-RETURNING id, entity_type, entity_id, type, author, content, created_at, updated_at
+RETURNING id, entity_type, entity_id, type, author, content, created_at, updated_at, user_id
 `
 
 type CreateNoteParams struct {
@@ -31,6 +32,7 @@ type CreateNoteParams struct {
 	Type       string      `json:"type"`
 	Author     string      `json:"author"`
 	Content    string      `json:"content"`
+	UserID     pgtype.UUID `json:"user_id"`
 }
 
 // internal/db/queries/notes.sql
@@ -41,6 +43,7 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 		arg.Type,
 		arg.Author,
 		arg.Content,
+		arg.UserID,
 	)
 	var i Note
 	err := row.Scan(
@@ -52,6 +55,7 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 		&i.Content,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserID,
 	)
 	return i, err
 }
@@ -67,7 +71,7 @@ func (q *Queries) DeleteNote(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getNoteByID = `-- name: GetNoteByID :one
-SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at FROM notes
+SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at, user_id FROM notes
 WHERE id = $1 LIMIT 1
 `
 
@@ -83,17 +87,19 @@ func (q *Queries) GetNoteByID(ctx context.Context, id pgtype.UUID) (Note, error)
 		&i.Content,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const listNotes = `-- name: ListNotes :many
-SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at FROM notes
+SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at, user_id FROM notes
+WHERE ($1::uuid IS NULL OR user_id = $1::uuid)
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListNotes(ctx context.Context) ([]Note, error) {
-	rows, err := q.db.Query(ctx, listNotes)
+func (q *Queries) ListNotes(ctx context.Context, userID pgtype.UUID) ([]Note, error) {
+	rows, err := q.db.Query(ctx, listNotes, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +116,7 @@ func (q *Queries) ListNotes(ctx context.Context) ([]Note, error) {
 			&i.Content,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.UserID,
 		); err != nil {
 			return nil, err
 		}
@@ -122,18 +129,20 @@ func (q *Queries) ListNotes(ctx context.Context) ([]Note, error) {
 }
 
 const listNotesByEntity = `-- name: ListNotesByEntity :many
-SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at FROM notes
+SELECT id, entity_type, entity_id, type, author, content, created_at, updated_at, user_id FROM notes
 WHERE entity_type = $1 AND entity_id = $2
+  AND ($3::uuid IS NULL OR user_id = $3::uuid)
 ORDER BY created_at DESC
 `
 
 type ListNotesByEntityParams struct {
 	EntityType string      `json:"entity_type"`
 	EntityID   pgtype.UUID `json:"entity_id"`
+	UserID     pgtype.UUID `json:"user_id"`
 }
 
 func (q *Queries) ListNotesByEntity(ctx context.Context, arg ListNotesByEntityParams) ([]Note, error) {
-	rows, err := q.db.Query(ctx, listNotesByEntity, arg.EntityType, arg.EntityID)
+	rows, err := q.db.Query(ctx, listNotesByEntity, arg.EntityType, arg.EntityID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -150,6 +159,7 @@ func (q *Queries) ListNotesByEntity(ctx context.Context, arg ListNotesByEntityPa
 			&i.Content,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.UserID,
 		); err != nil {
 			return nil, err
 		}
@@ -167,7 +177,7 @@ SET content = $2,
     type = $3,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, entity_type, entity_id, type, author, content, created_at, updated_at
+RETURNING id, entity_type, entity_id, type, author, content, created_at, updated_at, user_id
 `
 
 type UpdateNoteParams struct {
@@ -188,6 +198,7 @@ func (q *Queries) UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, e
 		&i.Content,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserID,
 	)
 	return i, err
 }

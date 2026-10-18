@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/appointment"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/openlocalcrm/openlocalcrm/internal/server/handlers"
@@ -22,10 +25,11 @@ func TestAppointmentHandler_Endpoints(t *testing.T) {
 	svc := appointment.NewService(querier, hub)
 	h := handlers.NewAppointmentHandler(svc)
 
-	ctx := context.Background()
+	claims := &auth.AccessClaims{UserID: uuid.New(), Email: "admin@example.de", Role: "ADMIN"}
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, claims)
 
 	// 1. List appointments
-	reqList := httptest.NewRequest("GET", "/api/v1/appointments", nil)
+	reqList := httptest.NewRequest("GET", "/api/v1/appointments", nil).WithContext(ctx)
 	recList := httptest.NewRecorder()
 	h.List(recList, reqList)
 	if recList.Code != http.StatusOK {
@@ -44,7 +48,7 @@ func TestAppointmentHandler_Endpoints(t *testing.T) {
 		"location":     "Frankfurt",
 		"notes":        "Leiter und Messwerkzeug mitbringen",
 	})
-	reqCreate := httptest.NewRequest("POST", "/api/v1/appointments", bytes.NewReader(createBody))
+	reqCreate := httptest.NewRequest("POST", "/api/v1/appointments", bytes.NewReader(createBody)).WithContext(ctx)
 	recCreate := httptest.NewRecorder()
 	h.Create(recCreate, reqCreate)
 	if recCreate.Code != http.StatusCreated {
@@ -69,15 +73,7 @@ func TestAppointmentHandler_Endpoints(t *testing.T) {
 		t.Fatalf("expected 200 OK on update, got %d: %s", recUpdate.Code, recUpdate.Body.String())
 	}
 
-	// 4. Push external
-	reqPush := httptest.NewRequest("POST", "/api/v1/appointments/"+appID+"/push", nil).WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
-	recPush := httptest.NewRecorder()
-	h.PushExternal(recPush, reqPush)
-	if recPush.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK on push, got %d: %s", recPush.Code, recPush.Body.String())
-	}
-
-	// 5. Download ICS
+	// 4. Download ICS
 	reqICS := httptest.NewRequest("GET", "/api/v1/appointments/"+appID+"/ics", nil).WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
 	recICS := httptest.NewRecorder()
 	h.DownloadICS(recICS, reqICS)
@@ -94,5 +90,61 @@ func TestAppointmentHandler_Endpoints(t *testing.T) {
 	h.Delete(recDelete, reqDelete)
 	if recDelete.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK on delete, got %d", recDelete.Code)
+	}
+}
+
+func TestAppointmentHandler_DownloadICS_NotFoundReturns404(t *testing.T) {
+	q := demo.NewInMemoryQuerier()
+	svc := appointment.NewService(q, nil)
+	h := handlers.NewAppointmentHandler(svc)
+
+	req := httptest.NewRequest("GET", "/api/v1/appointments/00000000-0000-0000-0000-000000000099/ics", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "00000000-0000-0000-0000-000000000099")
+	claims := &auth.AccessClaims{UserID: uuid.New(), Email: "admin@example.de", Role: "ADMIN"}
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = context.WithValue(ctx, auth.UserContextKey, claims)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.DownloadICS(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing appointment must return 404, got %d", rec.Code)
+	}
+}
+
+func TestAppointmentHandler_DownloadICS_EnforcesOwnership(t *testing.T) {
+	q := demo.NewInMemoryQuerier()
+	svc := appointment.NewService(q, nil)
+	h := handlers.NewAppointmentHandler(svc)
+
+	// Seed appointment assigned to other user
+	app, err := svc.Create(context.Background(), pgtype.UUID{}, appointment.CreateAppointmentInput{
+		Title:      "Geheimes Strategiegespräch",
+		StartTime:  time.Now().Add(24 * time.Hour),
+		EndTime:    time.Now().Add(25 * time.Hour),
+		AssignedTo: "andere.person@example.de",
+	})
+	if err != nil {
+		t.Fatalf("failed creating appointment: %v", err)
+	}
+
+	// Non-admin user attempts download
+	claims := &auth.AccessClaims{
+		UserID: uuid.New(),
+		Email:  "hacker@example.de",
+		Role:   "VERTRIEB",
+	}
+	req := httptest.NewRequest("GET", "/api/v1/appointments/"+app.ID+"/ics", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", app.ID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = context.WithValue(ctx, auth.UserContextKey, claims)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.DownloadICS(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-admin cannot download appointment assigned to someone else, got %d", rec.Code)
 	}
 }

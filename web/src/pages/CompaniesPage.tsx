@@ -21,8 +21,11 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { ActivityLogDrawer } from '../components/notes/ActivityLogDrawer';
+import { useAuth } from '../context/AuthContext';
+import { OwnerSelect, canModifyRecord, canReassignRecord } from '../components/common/OwnerSelect';
 
 export const CompaniesPage: React.FC = () => {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -108,7 +111,11 @@ export const CompaniesPage: React.FC = () => {
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingCompany) return;
-    updateMutation.mutate(editingCompany);
+    const payload: any = { ...editingCompany };
+    if (!canReassignRecord(user, editingCompany.owner_user_id)) {
+      delete payload.owner_user_id;
+    }
+    updateMutation.mutate(payload);
   };
 
   const handleTriggerResearch = async (comp: any) => {
@@ -323,7 +330,9 @@ export const CompaniesPage: React.FC = () => {
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() =>
+                      disabled={!canModifyRecord(user, comp.owner_user_id)}
+                      onClick={() => {
+                        if (!canModifyRecord(user, comp.owner_user_id)) return;
                         setEditingCompany({
                           ...comp,
                           name,
@@ -334,19 +343,39 @@ export const CompaniesPage: React.FC = () => {
                           address_zip: zip,
                           address_city: city,
                           lifecycle_status: status,
-                        })
+                        });
+                      }}
+                      className={`p-1.5 rounded-lg text-xs transition-colors ${
+                        canModifyRecord(user, comp.owner_user_id)
+                          ? 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                          : 'bg-slate-800/40 text-slate-600 cursor-not-allowed opacity-50'
+                      }`}
+                      title={
+                        canModifyRecord(user, comp.owner_user_id)
+                          ? 'Firma bearbeiten'
+                          : 'Keine Berechtigung: Nur der Eigentümer oder Administrator kann diese Firma bearbeiten'
                       }
-                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-colors"
-                      title="Firma bearbeiten"
                       aria-label="Bearbeiten"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
                     </button>
                     <button
                       type="button"
-                      onClick={() => setDeletingCompany({ ...comp, name })}
-                      className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg text-xs transition-colors"
-                      title="Firma löschen"
+                      disabled={!canModifyRecord(user, comp.owner_user_id)}
+                      onClick={() => {
+                        if (!canModifyRecord(user, comp.owner_user_id)) return;
+                        setDeletingCompany({ ...comp, name });
+                      }}
+                      className={`p-1.5 rounded-lg text-xs transition-colors ${
+                        canModifyRecord(user, comp.owner_user_id)
+                          ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20'
+                          : 'bg-slate-800/40 text-slate-600 border border-slate-800/20 cursor-not-allowed opacity-50'
+                      }`}
+                      title={
+                        canModifyRecord(user, comp.owner_user_id)
+                          ? 'Firma löschen'
+                          : 'Keine Berechtigung: Nur der Eigentümer oder Administrator kann diese Firma löschen'
+                      }
                       aria-label="Löschen"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -672,6 +701,15 @@ export const CompaniesPage: React.FC = () => {
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
+              </div>
+
+              <div className="pt-2">
+                <OwnerSelect
+                  value={editingCompany.owner_user_id}
+                  onChange={(ownerId) =>
+                    setEditingCompany({ ...editingCompany, owner_user_id: ownerId || null })
+                  }
+                />
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">

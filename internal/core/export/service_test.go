@@ -2,8 +2,10 @@ package export_test
 
 import (
 	"context"
+	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
@@ -73,4 +75,151 @@ func TestImportContactsCSV_Streaming(t *testing.T) {
 	if imported != 2 {
 		t.Fatalf("expected 2 contacts imported, got %d", imported)
 	}
+}
+
+func TestExportContactsCSV_AllColumns(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	auditSvc := audit.NewService(querier)
+	contactSvc := contact.NewService(querier, auditSvc)
+	exportSvc := export.NewService(querier, contactSvc)
+
+	var strom, gas pgtype.Numeric
+	_ = strom.Scan("3500.00")
+	_ = gas.Scan("11000.00")
+
+	_, err := querier.CreateContact(ctx, db.CreateContactParams{
+		FirstName:         "Sabine",
+		LastName:          "Sonnenschein",
+		Email:             pgtype.Text{String: "sabine@sonne.de", Valid: true},
+		Phone:             pgtype.Text{String: "+496912345", Valid: true},
+		ConsentPhone:      true,
+		ConsentEmail:      true,
+		ConsentUpdatedAt:  pgtype.Timestamptz{Time: time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC), Valid: true},
+		StromverbrauchKwh: strom,
+		GasverbrauchKwh:   gas,
+		Zaehlernummer:     pgtype.Text{String: "1EMH998877", Valid: true},
+		EigentuemerStatus: pgtype.Text{String: "EIGENTUEMER", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("failed creating contact: %v", err)
+	}
+
+	csvBytes, err := exportSvc.ExportContactsCSV(ctx)
+	if err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+
+	content := string(csvBytes)
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected header and row, got: %s", content)
+	}
+
+	header := lines[0]
+	expectedCols := []string{
+		"ID", "Vorname", "Nachname", "Email", "Telefon", "Position", "Strasse", "PLZ", "Ort",
+		"Einwilligung_Telefon", "Einwilligung_Email", "Einwilligung_Aktualisiert_Am",
+		"Stromverbrauch_kWh", "Gasverbrauch_kWh", "Zaehlernummer", "Eigentuemer_Status", "Erstellt_Am",
+	}
+	for _, col := range expectedCols {
+		if !strings.Contains(header, col) {
+			t.Errorf("missing column %s in header: %s", col, header)
+		}
+	}
+
+	var foundRow string
+	for _, l := range lines[1:] {
+		if strings.Contains(l, "Sonnenschein") {
+			foundRow = l
+			break
+		}
+	}
+	if foundRow == "" {
+		t.Fatalf("created contact Sonnenschein not found in CSV output: %s", content)
+	}
+
+	if !strings.Contains(foundRow, "Sabine") || !strings.Contains(foundRow, "1EMH998877") || !strings.Contains(foundRow, "EIGENTUEMER") {
+		t.Errorf("unexpected data row: %s", foundRow)
+	}
+	if !strings.Contains(foundRow, "3500.00") || !strings.Contains(foundRow, "11000.00") {
+		t.Errorf("energy consumption values missing in row: %s", foundRow)
+	}
+}
+
+func TestExportContactsCSV_EnergyConversionErrorIsReturned(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	exportSvc := export.NewService(querier, contact.NewService(querier, nil))
+	invalidEnergy := pgtype.Numeric{Int: big.NewInt(1), Exp: 4000, Valid: true}
+	_, err := querier.CreateContact(ctx, db.CreateContactParams{
+		FirstName:         "Invalid",
+		LastName:          "Energy",
+		StromverbrauchKwh: invalidEnergy,
+	})
+	if err != nil {
+		t.Fatalf("failed creating contact: %v", err)
+	}
+
+	if _, err := exportSvc.ExportContactsCSV(ctx); err == nil {
+		t.Fatal("expected energy conversion error")
+	}
+}
+
+func TestImportContactsCSV_DynamicHeadersAndValidation(t *testing.T) {
+	ctx := context.Background()
+	querier := demo.NewInMemoryQuerier()
+	auditSvc := audit.NewService(querier)
+	contactSvc := contact.NewService(querier, auditSvc)
+	exportSvc := export.NewService(querier, contactSvc)
+
+	var actorID pgtype.UUID
+	_ = actorID.Scan("11111111-1111-1111-1111-111111111111")
+
+	t.Run("Reordered headers with English/German mixed", func(t *testing.T) {
+		csvData := "Email,Last_Name,first-name,Telefon,Stadt\nclara@test.de,Schmidt,Clara,+491234567,Berlin\n"
+		imported, err := exportSvc.ImportContactsCSV(ctx, actorID, strings.NewReader(csvData))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if imported != 1 {
+			t.Fatalf("expected 1 imported, got %d", imported)
+		}
+
+		contacts, err := contactSvc.List(ctx, 50, 0, actorID)
+		if err != nil || len(contacts) == 0 {
+			t.Fatalf("failed listing contacts: %v", err)
+		}
+		found := false
+		for _, c := range contacts {
+			if c.LastName == "Schmidt" && c.FirstName == "Clara" && c.Email.String == "clara@test.de" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("imported contact Schmidt not found with correct mapped fields")
+		}
+	})
+
+	t.Run("Missing required lastName header returns error", func(t *testing.T) {
+		csvData := "Vorname,Email,Telefon\nMax,max@test.de,+49111\n"
+		_, err := exportSvc.ImportContactsCSV(ctx, actorID, strings.NewReader(csvData))
+		if err == nil {
+			t.Fatal("expected error for missing lastName header, got nil")
+		}
+		if !strings.Contains(err.Error(), "Nachname") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("Empty CSV returns zero count", func(t *testing.T) {
+		imported, err := exportSvc.ImportContactsCSV(ctx, actorID, strings.NewReader(""))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if imported != 0 {
+			t.Fatalf("expected 0 imported, got %d", imported)
+		}
+	})
 }

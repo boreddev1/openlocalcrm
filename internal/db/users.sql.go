@@ -33,7 +33,7 @@ INSERT INTO users (
 ) VALUES (
     $1, $2, $3, $4, $5, $6
 )
-RETURNING id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step
+RETURNING id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step, token_version, must_change_password
 `
 
 type CreateUserParams struct {
@@ -70,12 +70,42 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TotpLastUsedStep,
+		&i.TokenVersion,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
+const currentTokenVersion = `-- name: CurrentTokenVersion :one
+SELECT token_version FROM users
+WHERE id = $1
+`
+
+func (q *Queries) CurrentTokenVersion(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, currentTokenVersion, id)
+	var token_version int32
+	err := row.Scan(&token_version)
+	return token_version, err
+}
+
+const enableTOTPWithSecret = `-- name: EnableTOTPWithSecret :exec
+UPDATE users
+SET totp_secret_encrypted = $2, totp_enabled = TRUE, totp_last_used_step = 0, updated_at = NOW()
+WHERE id = $1
+`
+
+type EnableTOTPWithSecretParams struct {
+	ID                  pgtype.UUID `json:"id"`
+	TotpSecretEncrypted pgtype.Text `json:"totp_secret_encrypted"`
+}
+
+func (q *Queries) EnableTOTPWithSecret(ctx context.Context, arg EnableTOTPWithSecretParams) error {
+	_, err := q.db.Exec(ctx, enableTOTPWithSecret, arg.ID, arg.TotpSecretEncrypted)
+	return err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step FROM users
+SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step, token_version, must_change_password FROM users
 WHERE email = $1 LIMIT 1
 `
 
@@ -96,12 +126,14 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TotpLastUsedStep,
+		&i.TokenVersion,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step FROM users
+SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step, token_version, must_change_password FROM users
 WHERE id = $1 LIMIT 1
 `
 
@@ -122,12 +154,122 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TotpLastUsedStep,
+		&i.TokenVersion,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
+const incrementUserTokenVersion = `-- name: IncrementUserTokenVersion :one
+UPDATE users
+SET token_version = token_version + 1, updated_at = NOW()
+WHERE id = $1
+RETURNING token_version
+`
+
+// Invalidates every access token already issued to this user.
+func (q *Queries) IncrementUserTokenVersion(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementUserTokenVersion, id)
+	var token_version int32
+	err := row.Scan(&token_version)
+	return token_version, err
+}
+
+const listUnownedCompanies = `-- name: ListUnownedCompanies :many
+SELECT id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at, owner_user_id FROM companies
+WHERE owner_user_id IS NULL
+ORDER BY created_at, id
+`
+
+func (q *Queries) ListUnownedCompanies(ctx context.Context) ([]Company, error) {
+	rows, err := q.db.Query(ctx, listUnownedCompanies)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Company
+	for rows.Next() {
+		var i Company
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Domain,
+			&i.Phone,
+			&i.Email,
+			&i.AddressStreet,
+			&i.AddressZip,
+			&i.AddressCity,
+			&i.AddressCountry,
+			&i.CustomFields,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnownedContacts = `-- name: ListUnownedContacts :many
+SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
+WHERE owner_user_id IS NULL
+ORDER BY created_at, id
+`
+
+func (q *Queries) ListUnownedContacts(ctx context.Context) ([]Contact, error) {
+	rows, err := q.db.Query(ctx, listUnownedContacts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Contact
+	for rows.Next() {
+		var i Contact
+		if err := rows.Scan(
+			&i.ID,
+			&i.CompanyID,
+			&i.FirstName,
+			&i.LastName,
+			&i.Email,
+			&i.Phone,
+			&i.Mobile,
+			&i.Position,
+			&i.LeadSource,
+			&i.AddressStreet,
+			&i.AddressZip,
+			&i.AddressCity,
+			&i.Latitude,
+			&i.Longitude,
+			&i.CustomFields,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ConsentPhone,
+			&i.ConsentEmail,
+			&i.ConsentUpdatedAt,
+			&i.StromverbrauchKwh,
+			&i.GasverbrauchKwh,
+			&i.Zaehlernummer,
+			&i.EigentuemerStatus,
+			&i.Tags,
+			&i.OwnerUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step FROM users
+SELECT id, email, password_hash, first_name, last_name, role, status, totp_secret_encrypted, totp_enabled, last_login_at, created_at, updated_at, totp_last_used_step, token_version, must_change_password FROM users
 ORDER BY created_at ASC
 `
 
@@ -154,6 +296,8 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.TotpLastUsedStep,
+			&i.TokenVersion,
+			&i.MustChangePassword,
 		); err != nil {
 			return nil, err
 		}
@@ -163,6 +307,101 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setCompanyOwner = `-- name: SetCompanyOwner :one
+UPDATE companies
+SET owner_user_id = $2, updated_at = NOW()
+WHERE id = $1
+RETURNING id, name, domain, phone, email, address_street, address_zip, address_city, address_country, custom_fields, created_at, updated_at, owner_user_id
+`
+
+type SetCompanyOwnerParams struct {
+	ID          pgtype.UUID `json:"id"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) SetCompanyOwner(ctx context.Context, arg SetCompanyOwnerParams) (Company, error) {
+	row := q.db.QueryRow(ctx, setCompanyOwner, arg.ID, arg.OwnerUserID)
+	var i Company
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Domain,
+		&i.Phone,
+		&i.Email,
+		&i.AddressStreet,
+		&i.AddressZip,
+		&i.AddressCity,
+		&i.AddressCountry,
+		&i.CustomFields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerUserID,
+	)
+	return i, err
+}
+
+const setContactOwner = `-- name: SetContactOwner :one
+UPDATE contacts
+SET owner_user_id = $2, updated_at = NOW()
+WHERE id = $1
+RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id
+`
+
+type SetContactOwnerParams struct {
+	ID          pgtype.UUID `json:"id"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) SetContactOwner(ctx context.Context, arg SetContactOwnerParams) (Contact, error) {
+	row := q.db.QueryRow(ctx, setContactOwner, arg.ID, arg.OwnerUserID)
+	var i Contact
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.Phone,
+		&i.Mobile,
+		&i.Position,
+		&i.LeadSource,
+		&i.AddressStreet,
+		&i.AddressZip,
+		&i.AddressCity,
+		&i.Latitude,
+		&i.Longitude,
+		&i.CustomFields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ConsentPhone,
+		&i.ConsentEmail,
+		&i.ConsentUpdatedAt,
+		&i.StromverbrauchKwh,
+		&i.GasverbrauchKwh,
+		&i.Zaehlernummer,
+		&i.EigentuemerStatus,
+		&i.Tags,
+		&i.OwnerUserID,
+	)
+	return i, err
+}
+
+const setUserMustChangePassword = `-- name: SetUserMustChangePassword :exec
+UPDATE users
+SET must_change_password = $2, updated_at = NOW()
+WHERE id = $1
+`
+
+type SetUserMustChangePasswordParams struct {
+	ID                 pgtype.UUID `json:"id"`
+	MustChangePassword bool        `json:"must_change_password"`
+}
+
+func (q *Queries) SetUserMustChangePassword(ctx context.Context, arg SetUserMustChangePasswordParams) error {
+	_, err := q.db.Exec(ctx, setUserMustChangePassword, arg.ID, arg.MustChangePassword)
+	return err
 }
 
 const updateUserLastLogin = `-- name: UpdateUserLastLogin :exec

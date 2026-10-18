@@ -16,12 +16,12 @@ func TestEnsureComposeAndCaddyFiles(t *testing.T) {
 	}
 
 	composeFile := filepath.Join(tmpDir, "docker-compose.yml")
-	if _, err := os.Stat(composeFile); err != nil {
+	if _, err = os.Stat(composeFile); err != nil {
 		t.Errorf("docker-compose.yml was not created in target dir")
 	}
 
 	caddyFile := filepath.Join(tmpDir, "Caddyfile")
-	if _, err := os.Stat(caddyFile); err != nil {
+	if _, err = os.Stat(caddyFile); err != nil {
 		t.Errorf("Caddyfile was not created in target dir")
 	}
 
@@ -40,7 +40,7 @@ func TestEnsureComposeAndCaddyFiles(t *testing.T) {
 func TestPatchComposeEmbeddingDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "docker-compose.yml")
-	content := "services:\n  crm-server:\n    environment:\n      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:12b}\n      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:0.6b}\n      - AI_EMBEDDING_MODEL=${AI_EMBEDDING_MODEL:-}\n"
+	content := "services:\n  crm-server:\n    environment:\n      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma2:12b}\n      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:0.6b}\n      - AI_EMBEDDING_MODEL=${AI_EMBEDDING_MODEL:-}\n"
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestPatchComposeEmbeddingDefaults(t *testing.T) {
 	if !strings.Contains(string(got), "OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-}") {
 		t.Errorf("expected empty default form, got:\n%s", got)
 	}
-	if !strings.Contains(string(got), "OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:12b}") {
+	if !strings.Contains(string(got), "OLLAMA_MODEL=${OLLAMA_MODEL:-gemma2:12b}") {
 		t.Errorf("chat model line must remain untouched, got:\n%s", got)
 	}
 
@@ -66,7 +66,7 @@ func TestPatchComposeEmbeddingDefaults(t *testing.T) {
 	if string(again) != string(got) {
 		t.Errorf("patch must be idempotent")
 	}
-	plain := "services:\n  crm-server:\n    environment:\n      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:12b}\n"
+	plain := "services:\n  crm-server:\n    environment:\n      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma2:12b}\n"
 	if err := os.WriteFile(path, []byte(plain), 0644); err != nil {
 		t.Fatal(err)
 	}

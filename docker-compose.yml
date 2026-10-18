@@ -17,6 +17,8 @@ services:
     networks:
       - crm-net
 
+  # Internal backend services (server, worker, db) are strictly isolated within
+  # crm-net with no exposed host ports. All external traffic must pass through Caddy.
   server:
     image: ${CRM_SERVER_IMAGE:-crm-server:local}
     build:
@@ -34,7 +36,7 @@ services:
       - INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD:-}
       - AI_PROVIDER=${AI_PROVIDER:-ollama}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:12b}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma2:12b}
       - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-}
       - AI_EMBEDDING_MODEL=${AI_EMBEDDING_MODEL:-}
       - AI_API_KEY=${AI_API_KEY:-}

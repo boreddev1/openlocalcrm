@@ -2,19 +2,21 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/launcher"
 )
 
 type SettingsHandler struct {
 	baseDir string
+	audit   *audit.Service
 }
 
 func NewSettingsHandler(baseDir ...string) *SettingsHandler {
@@ -23,6 +25,11 @@ func NewSettingsHandler(baseDir ...string) *SettingsHandler {
 		dir = baseDir[0]
 	}
 	return &SettingsHandler{baseDir: dir}
+}
+
+func (h *SettingsHandler) WithAudit(auditSvc *audit.Service) *SettingsHandler {
+	h.audit = auditSvc
+	return h
 }
 
 // ExportSettings exports current system configuration (AI settings, Admin, Port, Connector token) without full database dump.
@@ -63,7 +70,7 @@ func (h *SettingsHandler) ExportSettings(w http.ResponseWriter, r *http.Request)
 
 		aiModel := os.Getenv("OLLAMA_MODEL")
 		if aiModel == "" {
-			aiModel = "gemma4:12b"
+			aiModel = "gemma2:12b"
 		}
 
 		exported = &launcher.ExportedSettings{
@@ -89,6 +96,13 @@ func (h *SettingsHandler) ExportSettings(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	if h.audit != nil {
+		actingUserID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
+		_ = h.audit.Log(r.Context(), actingUserID, "SYSTEM", pgtype.UUID{}, "SETTINGS_EXPORTED", map[string]any{
+			"action": "export",
+		}, auth.ClientIP(r), r.UserAgent())
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="openlocalcrm-settings.json"`)
 	_ = json.NewEncoder(w).Encode(exported.RedactSecrets())
@@ -108,28 +122,35 @@ func (h *SettingsHandler) ImportSettings(w http.ResponseWriter, r *http.Request)
 	if strings.Contains(contentType, "multipart/form-data") {
 		file, _, err := r.FormFile("settings")
 		if err != nil {
-			http.Error(w, `{"error":"missing_file","message":"Einstellungsdatei erforderlich"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "missing_file", "Einstellungsdatei erforderlich")
 			return
 		}
 		defer file.Close()
 		if err := json.NewDecoder(file).Decode(&settings); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"invalid_json","message":"%s"}`, err.Error()), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "invalid_json", "Ungültiges JSON-Format")
 			return
 		}
 	} else {
 		if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"invalid_body","message":"%s"}`, err.Error()), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "invalid_body", "Ungültiger Anfrageinhalt")
 			return
 		}
 	}
 
 	if err := launcher.ImportSettingsToEnv(h.baseDir, &settings, true); err != nil {
 		if strings.Contains(err.Error(), "invalid control characters") || strings.Contains(err.Error(), "cannot be nil") {
-			http.Error(w, fmt.Sprintf(`{"error":"bad_request","message":"%s"}`, err.Error()), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "bad_request", err.Error())
 			return
 		}
-		http.Error(w, fmt.Sprintf(`{"error":"import_failed","message":"%s"}`, err.Error()), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "import_failed", "Einstellungen konnten nicht importiert werden")
 		return
+	}
+
+	if h.audit != nil {
+		actingUserID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
+		_ = h.audit.Log(r.Context(), actingUserID, "SYSTEM", pgtype.UUID{}, "SETTINGS_IMPORTED", map[string]any{
+			"action": "import",
+		}, auth.ClientIP(r), r.UserAgent())
 	}
 
 	w.Header().Set("Content-Type", "application/json")

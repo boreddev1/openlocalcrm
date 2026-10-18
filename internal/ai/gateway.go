@@ -112,7 +112,7 @@ func NewGateway(cfg GatewayConfig) *Gateway {
 		if envModel := os.Getenv("OLLAMA_MODEL"); envModel != "" {
 			cfg.OllamaModel = envModel
 		} else {
-			cfg.OllamaModel = "gemma4:12b"
+			cfg.OllamaModel = "gemma2:12b"
 		}
 	}
 	if cfg.EmbeddingModel == "" && !cfg.DisableEnvFallback {
@@ -184,7 +184,7 @@ func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstructi
 		model = aiModel
 	} else if openAIModel := os.Getenv("OPENAI_MODEL"); openAIModel != "" {
 		model = openAIModel
-	} else if model == "" || model == "gemma4:12b" {
+	} else if model == "" || model == "gemma2:12b" {
 		model = "gpt-4o-mini"
 	}
 
@@ -275,7 +275,7 @@ func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstructi
 	var res struct {
 		Response string `json:"response"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&res); err != nil {
 		return "", fmt.Errorf("%w: ollama response decode failed: %v", ErrUpstreamUnavailable, err)
 	}
 

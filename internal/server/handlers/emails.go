@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/email"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
@@ -34,7 +36,7 @@ func (h *EmailHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(limitStr)
 	offset, _ := strconv.Atoi(offsetStr)
 
-	messages, err := h.service.ListMessages(r.Context(), int32(limit), int32(offset))
+	messages, err := h.service.ListMessages(r.Context(), clampInt32(limit), clampInt32(offset))
 	if err != nil {
 		http.Error(w, `{"error":"failed to list email messages"}`, http.StatusInternalServerError)
 		return
@@ -161,6 +163,14 @@ type EmailAccountRequest struct {
 }
 
 func (h *EmailHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var ownerID pgtype.UUID
+	_ = ownerID.Scan(claims.UserID.String())
+
 	var req EmailAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
@@ -169,6 +179,11 @@ func (h *EmailHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	if req.EmailAddress == "" {
 		http.Error(w, `{"error":"email_address is required"}`, http.StatusBadRequest)
 		return
+	}
+
+	accType := req.AccountType
+	if claims.Role == "BENUTZER" || accType == "" {
+		accType = "personal"
 	}
 
 	acc, err := h.service.CreateAccount(r.Context(), email.AccountInput{
@@ -181,7 +196,8 @@ func (h *EmailHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		SmtpPort:     req.SmtpPort,
 		Username:     req.Username,
 		Password:     req.Password,
-		AccountType:  req.AccountType,
+		AccountType:  accType,
+		OwnerUserID:  ownerID,
 	})
 	if err != nil {
 		http.Error(w, `{"error":"failed to create email account: `+err.Error()+`"}`, http.StatusInternalServerError)
@@ -194,7 +210,18 @@ func (h *EmailHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *EmailHandler) ListAccounts(w http.ResponseWriter, r *http.Request) {
-	accounts, err := h.service.ListAccounts(r.Context())
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	var ownerID pgtype.UUID
+	if claims.Role == "BENUTZER" {
+		ownerID = pgtype.UUID{Bytes: claims.UserID, Valid: true}
+	}
+
+	accounts, err := h.service.ListAccounts(r.Context(), ownerID)
 	if err != nil {
 		http.Error(w, `{"error":"failed to list email accounts"}`, http.StatusInternalServerError)
 		return
@@ -202,6 +229,11 @@ func (h *EmailHandler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]EmailAccountResponse, 0, len(accounts))
 	for _, acc := range accounts {
+		if claims.Role == "BENUTZER" {
+			if !acc.OwnerUserID.Valid || uuid.UUID(acc.OwnerUserID.Bytes) != claims.UserID {
+				continue
+			}
+		}
 		resp = append(resp, toAccountResponse(acc))
 	}
 
@@ -218,14 +250,40 @@ func parseAccountID(r *http.Request) (pgtype.UUID, bool) {
 }
 
 func (h *EmailHandler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	id, ok := parseAccountID(r)
 	if !ok {
 		http.Error(w, `{"error":"invalid_id"}`, http.StatusBadRequest)
 		return
 	}
 
+	existing, err := h.service.GetAccount(r.Context(), id)
+	if err != nil {
+		if err == email.ErrAccountNotFound {
+			http.Error(w, `{"error":"email account not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"failed to get account"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if strings.ToLower(existing.AccountType) == "personal" {
+		if !canModifyPersonal(claims, existing.OwnerUserID) {
+			http.Error(w, `{"error":"forbidden","message":"insufficient permissions to modify personal email account"}`, http.StatusForbidden)
+			return
+		}
+	} else if claims.Role == "BENUTZER" {
+		http.Error(w, `{"error":"forbidden","message":"insufficient permissions to modify team email account"}`, http.StatusForbidden)
+		return
+	}
+
 	var req EmailAccountRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
 		return
 	}
@@ -254,9 +312,35 @@ func (h *EmailHandler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *EmailHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	id, ok := parseAccountID(r)
 	if !ok {
 		http.Error(w, `{"error":"invalid_id"}`, http.StatusBadRequest)
+		return
+	}
+
+	existing, err := h.service.GetAccount(r.Context(), id)
+	if err != nil {
+		if err == email.ErrAccountNotFound {
+			http.Error(w, `{"error":"email account not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"failed to get account"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if strings.ToLower(existing.AccountType) == "personal" {
+		if !canModifyPersonal(claims, existing.OwnerUserID) {
+			http.Error(w, `{"error":"forbidden","message":"insufficient permissions to delete personal email account"}`, http.StatusForbidden)
+			return
+		}
+	} else if claims.Role != "ADMIN" {
+		http.Error(w, `{"error":"forbidden","message":"deleting team email accounts requires admin role"}`, http.StatusForbidden)
 		return
 	}
 
@@ -270,9 +354,35 @@ func (h *EmailHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *EmailHandler) TestAccountConnection(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	id, ok := parseAccountID(r)
 	if !ok {
 		http.Error(w, `{"error":"invalid_id"}`, http.StatusBadRequest)
+		return
+	}
+
+	existing, err := h.service.GetAccount(r.Context(), id)
+	if err != nil {
+		if err == email.ErrAccountNotFound {
+			http.Error(w, `{"error":"email account not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"failed to get account"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if strings.ToLower(existing.AccountType) == "personal" {
+		if !canModifyPersonal(claims, existing.OwnerUserID) {
+			http.Error(w, `{"error":"forbidden","message":"insufficient permissions for personal email account"}`, http.StatusForbidden)
+			return
+		}
+	} else if claims.Role == "BENUTZER" {
+		http.Error(w, `{"error":"forbidden","message":"insufficient permissions for team email account"}`, http.StatusForbidden)
 		return
 	}
 
@@ -292,9 +402,35 @@ func (h *EmailHandler) TestAccountConnection(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *EmailHandler) SyncAccount(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	id, ok := parseAccountID(r)
 	if !ok {
 		http.Error(w, `{"error":"invalid_id"}`, http.StatusBadRequest)
+		return
+	}
+
+	existing, err := h.service.GetAccount(r.Context(), id)
+	if err != nil {
+		if err == email.ErrAccountNotFound {
+			http.Error(w, `{"error":"email account not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"failed to get account"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if strings.ToLower(existing.AccountType) == "personal" {
+		if !canModifyPersonal(claims, existing.OwnerUserID) {
+			http.Error(w, `{"error":"forbidden","message":"insufficient permissions for personal email account"}`, http.StatusForbidden)
+			return
+		}
+	} else if claims.Role == "BENUTZER" {
+		http.Error(w, `{"error":"forbidden","message":"insufficient permissions for team email account"}`, http.StatusForbidden)
 		return
 	}
 
@@ -326,6 +462,12 @@ type SendEmailRequest struct {
 }
 
 func (h *EmailHandler) SendEmail(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	var req SendEmailRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
@@ -341,6 +483,26 @@ func (h *EmailHandler) SendEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	existing, err := h.service.GetAccount(r.Context(), accountID)
+	if err != nil {
+		if err == email.ErrAccountNotFound {
+			http.Error(w, `{"error":"email account not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"failed to get account"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if strings.ToLower(existing.AccountType) == "personal" {
+		if !canModifyPersonal(claims, existing.OwnerUserID) {
+			http.Error(w, `{"error":"forbidden","message":"insufficient permissions to send from personal email account"}`, http.StatusForbidden)
+			return
+		}
+	} else if claims.Role == "BENUTZER" {
+		http.Error(w, `{"error":"forbidden","message":"insufficient permissions to send from team email account"}`, http.StatusForbidden)
+		return
+	}
+
 	msg, err := h.service.SendMessage(r.Context(), accountID, mailclient.OutgoingMessage{
 		From:      req.From,
 		To:        req.To,
@@ -351,10 +513,6 @@ func (h *EmailHandler) SendEmail(w http.ResponseWriter, r *http.Request) {
 		InReplyTo: req.InReplyTo,
 	})
 	if err != nil {
-		if err == email.ErrAccountNotFound {
-			http.Error(w, `{"error":"email account not found"}`, http.StatusNotFound)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "send_failed", "message": err.Error()})

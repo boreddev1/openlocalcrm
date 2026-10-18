@@ -264,7 +264,7 @@ func TestServerAIModelsEndpoint(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`{"models":[{"name":"gemma4:12b"},{"name":"qwen3-embedding:0.6b"}]}`))
+		_, _ = w.Write([]byte(`{"models":[{"name":"gemma2:12b"},{"name":"qwen3-embedding:0.6b"}]}`))
 	}))
 	defer ts.Close()
 
@@ -280,7 +280,7 @@ func TestServerAIModelsEndpoint(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, `"success":true`) || !strings.Contains(body, "gemma4:12b") {
+	if !strings.Contains(body, `"success":true`) || !strings.Contains(body, "gemma2:12b") {
 		t.Errorf("expected model list response, got: %s", body)
 	}
 

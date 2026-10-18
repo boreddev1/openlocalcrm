@@ -111,6 +111,7 @@ type AiAuditLog struct {
 	PiiRedactionsCount int32              `json:"pii_redactions_count"`
 	HumanApproved      pgtype.Bool        `json:"human_approved"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UserID             pgtype.UUID        `json:"user_id"`
 }
 
 type AiResearchJob struct {
@@ -143,6 +144,7 @@ type Appointment struct {
 	IsPrivate  bool               `json:"is_private"`
 	IsPushed   bool               `json:"is_pushed"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	UserID     pgtype.UUID        `json:"user_id"`
 }
 
 type AuditLog struct {
@@ -155,6 +157,10 @@ type AuditLog struct {
 	IpAddress  pgtype.Text        `json:"ip_address"`
 	UserAgent  pgtype.Text        `json:"user_agent"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	OldValues  []byte             `json:"old_values"`
+	NewValues  []byte             `json:"new_values"`
+	PrevHash   pgtype.Text        `json:"prev_hash"`
+	Hash       pgtype.Text        `json:"hash"`
 }
 
 type CallActivity struct {
@@ -179,6 +185,7 @@ type Company struct {
 	CustomFields   []byte             `json:"custom_fields"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	OwnerUserID    pgtype.UUID        `json:"owner_user_id"`
 }
 
 type CompanyResearch struct {
@@ -217,6 +224,8 @@ type Contact struct {
 	GasverbrauchKwh   pgtype.Numeric     `json:"gasverbrauch_kwh"`
 	Zaehlernummer     pgtype.Text        `json:"zaehlernummer"`
 	EigentuemerStatus pgtype.Text        `json:"eigentuemer_status"`
+	Tags              json.RawMessage    `json:"tags"`
+	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
 }
 
 type Deal struct {
@@ -235,6 +244,7 @@ type Deal struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	WiderrufenAt  pgtype.Timestamptz `json:"widerrufen_at"`
 	WiderrufGrund pgtype.Text        `json:"widerruf_grund"`
+	Tags          json.RawMessage    `json:"tags"`
 }
 
 type EmailAccount struct {
@@ -287,6 +297,19 @@ type EmailMessage struct {
 	DealID          pgtype.UUID        `json:"deal_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	Tags            json.RawMessage    `json:"tags"`
+	IsDraft         bool               `json:"is_draft"`
+}
+
+type EmailTemplate struct {
+	ID        pgtype.UUID        `json:"id"`
+	Key       string             `json:"key"`
+	Name      string             `json:"name"`
+	Subject   string             `json:"subject"`
+	Body      string             `json:"body"`
+	Category  string             `json:"category"`
+	Locale    string             `json:"locale"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type IntakeForm struct {
@@ -320,6 +343,7 @@ type Note struct {
 	Content    string             `json:"content"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	UserID     pgtype.UUID        `json:"user_id"`
 }
 
 type Notification struct {
@@ -341,6 +365,8 @@ type RefreshToken struct {
 	IpAddress pgtype.Text        `json:"ip_address"`
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	FamilyID  pgtype.UUID        `json:"family_id"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
 }
 
 type Todo struct {
@@ -371,6 +397,19 @@ type User struct {
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	TotpLastUsedStep    int64              `json:"totp_last_used_step"`
+	TokenVersion        int32              `json:"token_version"`
+	MustChangePassword  bool               `json:"must_change_password"`
+}
+
+type UserInvite struct {
+	ID         pgtype.UUID        `json:"id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	TokenHash  string             `json:"token_hash"`
+	CreatedBy  pgtype.UUID        `json:"created_by"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type Workflow struct {

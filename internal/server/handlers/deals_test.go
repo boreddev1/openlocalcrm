@@ -4,18 +4,25 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/deal"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/openlocalcrm/openlocalcrm/internal/server/handlers"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDealHandler_Endpoints(t *testing.T) {
@@ -100,4 +107,503 @@ func TestDealHandler_Endpoints(t *testing.T) {
 	if recDelete.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK on delete, got %d: %s", recDelete.Code, recDelete.Body.String())
 	}
+}
+
+type MockDealTrigger struct {
+	calls []struct {
+		TriggerType string
+		TargetID    string
+		TargetType  string
+		TargetName  string
+	}
+}
+
+func (m *MockDealTrigger) TriggerEvent(ctx context.Context, triggerType, targetID, targetType, targetName string) ([]automation.WorkflowRun, error) {
+	m.calls = append(m.calls, struct {
+		TriggerType string
+		TargetID    string
+		TargetType  string
+		TargetName  string
+	}{
+		TriggerType: triggerType,
+		TargetID:    targetID,
+		TargetType:  targetType,
+		TargetName:  targetName,
+	})
+	return nil, nil
+}
+
+func TestDealHandler_TriggersDealWonWorkflow(t *testing.T) {
+	querier := demo.NewInMemoryQuerier()
+	auditService := audit.NewService(querier)
+	svc := deal.NewService(querier, auditService)
+	trigger := &MockDealTrigger{}
+	h := handlers.NewDealHandler(svc, trigger)
+
+	adminUUID := uuid.New()
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: adminUUID,
+		Role:   "ADMIN",
+	})
+
+	// Create deal in QUALIFIED stage
+	created, err := svc.Create(ctx, pgtype.UUID{Bytes: adminUUID, Valid: true}, deal.CreateDealInput{
+		Title:       "Gewerbe PV 100 kWp",
+		Stage:       "QUALIFIED",
+		Currency:    "EUR",
+		Probability: 40,
+	})
+	if err != nil {
+		t.Fatalf("failed to create deal: %v", err)
+	}
+	dealIDStr := uuid.UUID(created.ID.Bytes).String()
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", dealIDStr)
+
+	// 1. Update stage to WON -> must trigger DEAL_WON
+	updateBody, _ := json.Marshal(map[string]any{
+		"stage": "WON",
+	})
+	reqUpdate := httptest.NewRequest("PUT", "/api/v1/deals/"+dealIDStr, bytes.NewReader(updateBody)).WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
+	recUpdate := httptest.NewRecorder()
+	h.Update(recUpdate, reqUpdate)
+	if recUpdate.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", recUpdate.Code, recUpdate.Body.String())
+	}
+
+	if len(trigger.calls) != 1 {
+		t.Fatalf("expected 1 trigger call on WON, got %d", len(trigger.calls))
+	}
+	if trigger.calls[0].TriggerType != "DEAL_WON" {
+		t.Errorf("expected DEAL_WON, got %s", trigger.calls[0].TriggerType)
+	}
+	if trigger.calls[0].TargetType != "DEAL" {
+		t.Errorf("expected DEAL, got %s", trigger.calls[0].TargetType)
+	}
+	if trigger.calls[0].TargetID != dealIDStr {
+		t.Errorf("expected target ID %s, got %s", dealIDStr, trigger.calls[0].TargetID)
+	}
+
+	// 2. Updating title when stage is ALREADY WON -> must NOT re-trigger DEAL_WON
+	updateBody2, _ := json.Marshal(map[string]any{
+		"title": "Gewerbe PV 100 kWp - Final",
+	})
+	reqUpdate2 := httptest.NewRequest("PUT", "/api/v1/deals/"+dealIDStr, bytes.NewReader(updateBody2)).WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
+	recUpdate2 := httptest.NewRecorder()
+	h.Update(recUpdate2, reqUpdate2)
+	if recUpdate2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", recUpdate2.Code)
+	}
+
+	if len(trigger.calls) != 1 {
+		t.Fatalf("expected still 1 trigger call (no duplicate on non-stage change), got %d", len(trigger.calls))
+	}
+}
+
+func TestDealHandler_Create_RejectsWiderrufenStage(t *testing.T) {
+	querier := demo.NewInMemoryQuerier()
+	auditService := audit.NewService(querier)
+	svc := deal.NewService(querier, auditService)
+	h := handlers.NewDealHandler(svc)
+
+	adminUUID := uuid.New()
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: adminUUID,
+		Role:   "ADMIN",
+	})
+
+	body, _ := json.Marshal(handlers.CreateDealRequest{
+		Title: "Direct Widerruf Test",
+		Stage: "WIDERRUFEN",
+	})
+	req := httptest.NewRequest("POST", "/api/v1/deals", bytes.NewReader(body)).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.Create(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "WIDERRUFEN")
+}
+
+func TestDealHandler_Update_RejectsWiderrufenStage(t *testing.T) {
+	querier := demo.NewInMemoryQuerier()
+	auditService := audit.NewService(querier)
+	svc := deal.NewService(querier, auditService)
+	h := handlers.NewDealHandler(svc)
+
+	adminUUID := uuid.New()
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: adminUUID,
+		Role:   "ADMIN",
+	})
+
+	d, err := svc.Create(ctx, pgtype.UUID{Bytes: adminUUID, Valid: true}, deal.CreateDealInput{
+		Title: "Direct Widerruf Update Test",
+		Stage: "LEAD",
+	})
+	require.NoError(t, err)
+	dealIDStr := uuid.UUID(d.ID.Bytes).String()
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", dealIDStr)
+
+	body, _ := json.Marshal(map[string]any{
+		"stage": "WIDERRUFEN",
+	})
+	req := httptest.NewRequest("PUT", "/api/v1/deals/"+dealIDStr, bytes.NewReader(body)).WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
+	rec := httptest.NewRecorder()
+	h.Update(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "WIDERRUFEN")
+}
+
+func TestDealHandler_Revoke(t *testing.T) {
+	querier := demo.NewInMemoryQuerier()
+	auditService := audit.NewService(querier)
+	dealService := deal.NewService(querier, auditService)
+	dealH := handlers.NewDealHandler(dealService)
+
+	adminUUID := uuid.New()
+	benutzerUUID := uuid.New()
+
+	// Seed deal
+	d, err := dealService.Create(context.Background(), pgtype.UUID{Bytes: adminUUID, Valid: true}, deal.CreateDealInput{
+		Title:       "PV Anlage Widerruf Test",
+		Stage:       "WON",
+		Probability: 100,
+	})
+	require.NoError(t, err)
+	dealIDStr := uuid.UUID(d.ID.Bytes).String()
+
+	r := chi.NewRouter()
+	r.Route("/deals", func(dr chi.Router) {
+		dr.With(auth.RequireAnyRole("ADMIN", "VERTRIEB", "BACKOFFICE")).Post("/{id}/revoke", dealH.Revoke)
+	})
+
+	revokeBody, _ := json.Marshal(handlers.RevokeDealRequest{
+		WiderrufGrund: "Fristgerechter Widerruf nach Haustürgeschäft",
+	})
+
+	// 1. BENUTZER role receives 403 Forbidden
+	reqBenutzer := httptest.NewRequest("POST", "/deals/"+dealIDStr+"/revoke", bytes.NewReader(revokeBody))
+	reqBenutzer = reqBenutzer.WithContext(context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: benutzerUUID,
+		Role:   "BENUTZER",
+	}))
+	recBenutzer := httptest.NewRecorder()
+	r.ServeHTTP(recBenutzer, reqBenutzer)
+	require.Equal(t, http.StatusForbidden, recBenutzer.Code)
+
+	// 2. ADMIN role succeeds with 200 OK
+	reqAdmin := httptest.NewRequest("POST", "/deals/"+dealIDStr+"/revoke", bytes.NewReader(revokeBody))
+	reqAdmin = reqAdmin.WithContext(context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: adminUUID,
+		Role:   "ADMIN",
+	}))
+	recAdmin := httptest.NewRecorder()
+	r.ServeHTTP(recAdmin, reqAdmin)
+	require.Equal(t, http.StatusOK, recAdmin.Code)
+
+	var revoked db.Deal
+	_ = json.NewDecoder(recAdmin.Body).Decode(&revoked)
+	require.Equal(t, "WIDERRUFEN", revoked.Stage)
+	require.Equal(t, int32(0), revoked.Probability)
+	require.True(t, revoked.WiderrufenAt.Valid)
+}
+
+type failingRevokeQuerier struct {
+	db.Querier
+	deal db.Deal
+}
+
+func (q *failingRevokeQuerier) GetDealByID(context.Context, pgtype.UUID) (db.Deal, error) {
+	return q.deal, nil
+}
+
+func (q *failingRevokeQuerier) RevokeDeal(context.Context, db.RevokeDealParams) (db.Deal, error) {
+	return db.Deal{}, errors.New("database secret: connection reset")
+}
+
+func TestDealHandler_RevokeErrorSemantics(t *testing.T) {
+	claims := &auth.AccessClaims{UserID: uuid.New(), Role: "ADMIN"}
+	t.Run("missing", func(t *testing.T) {
+		querier := demo.NewInMemoryQuerier()
+		h := handlers.NewDealHandler(deal.NewService(querier, nil))
+		id := uuid.New().String()
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", id)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/deals/"+id+"/revoke", bytes.NewBufferString(`{}`))
+		ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+		ctx = context.WithValue(ctx, auth.UserContextKey, claims)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+		h.Revoke(rec, req)
+		require.Equal(t, http.StatusNotFound, rec.Code)
+		require.NotContains(t, rec.Body.String(), "record not found")
+	})
+
+	t.Run("unexpected", func(t *testing.T) {
+		id := uuid.New()
+		querier := &failingRevokeQuerier{deal: db.Deal{ID: pgtype.UUID{Bytes: id, Valid: true}, Stage: "WON"}}
+		h := handlers.NewDealHandler(deal.NewService(querier, nil))
+		idString := id.String()
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", idString)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/deals/"+idString+"/revoke", bytes.NewBufferString(`{}`))
+		ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+		ctx = context.WithValue(ctx, auth.UserContextKey, claims)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+		h.Revoke(rec, req)
+		require.Equal(t, http.StatusInternalServerError, rec.Code)
+		require.NotContains(t, rec.Body.String(), "database secret")
+		require.NotContains(t, rec.Body.String(), "connection reset")
+	})
+}
+
+func TestDealHandler_RevokedDealsReturnConflict(t *testing.T) {
+	for _, operation := range []string{"update", "attach", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			querier := demo.NewInMemoryQuerier()
+			svc := deal.NewService(querier, audit.NewService(querier))
+			h := handlers.NewDealHandler(svc)
+			adminID := uuid.New()
+			created, err := svc.Create(context.Background(), pgtype.UUID{Bytes: adminID, Valid: true}, deal.CreateDealInput{
+				Title:       "Terminal handler test",
+				Stage:       "WON",
+				Probability: 100,
+			})
+			require.NoError(t, err)
+			_, err = svc.Revoke(context.Background(), pgtype.UUID{Bytes: adminID, Valid: true}, created.ID, time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC), "Original")
+			require.NoError(t, err)
+
+			id := uuid.UUID(created.ID.Bytes).String()
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", id)
+			ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, auth.UserContextKey, &auth.AccessClaims{UserID: adminID, Role: "ADMIN"})
+			var req *http.Request
+			switch operation {
+			case "update":
+				req = httptest.NewRequest(http.MethodPut, "/api/v1/deals/"+id, bytes.NewBufferString(`{"stage":"LEAD"}`)).WithContext(ctx)
+			case "attach":
+				req = httptest.NewRequest(http.MethodPost, "/api/v1/deals/"+id+"/solar-calculation", bytes.NewBufferString(`{}`)).WithContext(ctx)
+			case "delete":
+				req = httptest.NewRequest(http.MethodDelete, "/api/v1/deals/"+id, nil).WithContext(ctx)
+			}
+			rec := httptest.NewRecorder()
+			switch operation {
+			case "update":
+				h.Update(rec, req)
+			case "attach":
+				h.AttachSolarCalculation(rec, req)
+			case "delete":
+				h.Delete(rec, req)
+			}
+			require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+func newDealTestHandler(t *testing.T) (*handlers.DealHandler, context.Context, uuid.UUID) {
+	t.Helper()
+	querier := demo.NewInMemoryQuerier()
+	svc := deal.NewService(querier, audit.NewService(querier))
+	h := handlers.NewDealHandler(svc)
+	actor := uuid.New()
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		UserID: actor,
+		Role:   "VERTRIEB",
+	})
+	return h, ctx, actor
+}
+
+func TestDealHandler_Create_PersistsValueLinksAndOwner(t *testing.T) {
+	h, ctx, actor := newDealTestHandler(t)
+	companyID, contactID := uuid.New(), uuid.New()
+
+	for name, value := range map[string]string{
+		"string": `"5000.50"`,
+		"number": `5000.5`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"title":"PV","stage":"LEAD","currency":"EUR","probability":10,"value":%s,"company_id":%q,"contact_id":%q}`,
+				value, companyID, contactID)
+			req := httptest.NewRequest("POST", "/api/v1/deals", strings.NewReader(body)).WithContext(ctx)
+			rec := httptest.NewRecorder()
+			h.Create(rec, req)
+			require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+			var created db.Deal
+			require.NoError(t, json.NewDecoder(rec.Body).Decode(&created))
+			require.True(t, created.Value.Valid, "value must be stored, not NULL")
+			f, err := created.Value.Float64Value()
+			require.NoError(t, err)
+			require.InDelta(t, 5000.5, f.Float64, 0.001)
+			require.Equal(t, companyID, uuid.UUID(created.CompanyID.Bytes))
+			require.Equal(t, contactID, uuid.UUID(created.ContactID.Bytes))
+			require.True(t, created.AssignedTo.Valid, "new deal must be owned by its creator")
+			require.Equal(t, actor, uuid.UUID(created.AssignedTo.Bytes))
+		})
+	}
+}
+
+func TestDealHandler_Create_MissingValueDefaultsToZero(t *testing.T) {
+	h, ctx, _ := newDealTestHandler(t)
+	req := httptest.NewRequest("POST", "/api/v1/deals",
+		strings.NewReader(`{"title":"Ohne Volumen","stage":"LEAD","currency":"EUR","probability":10}`)).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.Create(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+	var created db.Deal
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&created))
+	require.True(t, created.Value.Valid)
+	f, err := created.Value.Float64Value()
+	require.NoError(t, err)
+	require.InDelta(t, 0.0, f.Float64, 0.001)
+}
+
+func TestDealHandler_Create_RejectsInvalidValueAndIDs(t *testing.T) {
+	h, ctx, _ := newDealTestHandler(t)
+	for name, body := range map[string]string{
+		"text value":     `{"title":"x","value":"abc"}`,
+		"bad company id": `{"title":"x","company_id":"nope"}`,
+		"bad contact id": `{"title":"x","contact_id":"nope"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/v1/deals", strings.NewReader(body)).WithContext(ctx)
+			rec := httptest.NewRecorder()
+			h.Create(rec, req)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+func TestDealHandler_Update_AcceptsNumericValue(t *testing.T) {
+	h, ctx, _ := newDealTestHandler(t)
+	create := httptest.NewRecorder()
+	h.Create(create, httptest.NewRequest("POST", "/api/v1/deals",
+		strings.NewReader(`{"title":"PV","stage":"LEAD","currency":"EUR","probability":10,"value":"1000"}`)).WithContext(ctx))
+	require.Equal(t, http.StatusCreated, create.Code, create.Body.String())
+	var created db.Deal
+	require.NoError(t, json.NewDecoder(create.Body).Decode(&created))
+
+	r := chi.NewRouter()
+	r.Put("/api/v1/deals/{id}", h.Update)
+	req := httptest.NewRequest("PUT", "/api/v1/deals/"+uuid.UUID(created.ID.Bytes).String(),
+		strings.NewReader(`{"title":"PV","stage":"LEAD","currency":"EUR","probability":10,"value":6000}`)).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var updated db.Deal
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&updated))
+	f, err := updated.Value.Float64Value()
+	require.NoError(t, err)
+	require.InDelta(t, 6000.0, f.Float64, 0.001)
+}
+
+func dealValueOf(t *testing.T, body *bytes.Buffer) float64 {
+	t.Helper()
+	var d db.Deal
+	require.NoError(t, json.NewDecoder(body).Decode(&d))
+	require.True(t, d.Value.Valid)
+	f, err := d.Value.Float64Value()
+	require.NoError(t, err)
+	return f.Float64
+}
+
+func TestDealHandler_ValueBounds_CreateAndUpdate(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		ok    bool
+		want  float64
+	}{
+		{"NaN", `"NaN"`, false, 0},
+		{"Infinity", `"Infinity"`, false, 0},
+		{"-Infinity", `"-Infinity"`, false, 0},
+		{"negative string", `"-5000"`, false, 0},
+		{"negative number", `-3.5`, false, 0},
+		{"1e13 string", `"10000000000000"`, false, 0},
+		{"rounds up to 1e13", `"9999999999999.999"`, false, 0},
+		{"1e15 number", `1e15`, false, 0},
+		{"zero string", `"0"`, true, 0},
+		{"max string", `"9999999999999.99"`, true, 9999999999999.99},
+		{"number 5000.5", `5000.5`, true, 5000.5},
+	}
+	for _, tc := range cases {
+		t.Run("create/"+tc.name, func(t *testing.T) {
+			h, ctx, _ := newDealTestHandler(t)
+			body := `{"title":"x","stage":"LEAD","currency":"EUR","probability":10,"value":` + tc.value + `}`
+			rec := httptest.NewRecorder()
+			h.Create(rec, httptest.NewRequest("POST", "/api/v1/deals", strings.NewReader(body)).WithContext(ctx))
+			if !tc.ok {
+				require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+				require.Contains(t, rec.Body.String(), "invalid_value")
+				return
+			}
+			require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+			require.InDelta(t, tc.want, dealValueOf(t, rec.Body), 0.001)
+		})
+		t.Run("update/"+tc.name, func(t *testing.T) {
+			h, ctx, _ := newDealTestHandler(t)
+			create := httptest.NewRecorder()
+			h.Create(create, httptest.NewRequest("POST", "/api/v1/deals",
+				strings.NewReader(`{"title":"x","stage":"LEAD","currency":"EUR","probability":10,"value":"1000"}`)).WithContext(ctx))
+			require.Equal(t, http.StatusCreated, create.Code, create.Body.String())
+			var created db.Deal
+			require.NoError(t, json.NewDecoder(create.Body).Decode(&created))
+
+			r := chi.NewRouter()
+			r.Put("/api/v1/deals/{id}", h.Update)
+			body := `{"title":"x","stage":"LEAD","probability":10,"value":` + tc.value + `}`
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, httptest.NewRequest("PUT", "/api/v1/deals/"+uuid.UUID(created.ID.Bytes).String(),
+				strings.NewReader(body)).WithContext(ctx))
+			if !tc.ok {
+				require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+				require.Contains(t, rec.Body.String(), "invalid_value")
+				return
+			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.InDelta(t, tc.want, dealValueOf(t, rec.Body), 0.001)
+		})
+	}
+}
+
+func TestDealHandler_Update_EmptyValueKeepsExisting(t *testing.T) {
+	for _, empty := range []string{`""`, `"   "`} {
+		h, ctx, _ := newDealTestHandler(t)
+		create := httptest.NewRecorder()
+		h.Create(create, httptest.NewRequest("POST", "/api/v1/deals",
+			strings.NewReader(`{"title":"x","stage":"LEAD","currency":"EUR","probability":10,"value":"1234.50"}`)).WithContext(ctx))
+		require.Equal(t, http.StatusCreated, create.Code, create.Body.String())
+		var created db.Deal
+		require.NoError(t, json.NewDecoder(create.Body).Decode(&created))
+
+		r := chi.NewRouter()
+		r.Put("/api/v1/deals/{id}", h.Update)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest("PUT", "/api/v1/deals/"+uuid.UUID(created.ID.Bytes).String(),
+			strings.NewReader(`{"title":"y","stage":"LEAD","probability":10,"value":`+empty+`}`)).WithContext(ctx))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.InDelta(t, 1234.5, dealValueOf(t, rec.Body), 0.001)
+	}
+}
+
+func TestDealHandler_Create_NumberAndStringStoreSameValue(t *testing.T) {
+	h, ctx, _ := newDealTestHandler(t)
+	var got []float64
+	for _, v := range []string{`5000.5`, `"5000.50"`, `0.1`, `"0.10"`} {
+		rec := httptest.NewRecorder()
+		h.Create(rec, httptest.NewRequest("POST", "/api/v1/deals",
+			strings.NewReader(`{"title":"x","stage":"LEAD","currency":"EUR","probability":10,"value":`+v+`}`)).WithContext(ctx))
+		require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+		got = append(got, dealValueOf(t, rec.Body))
+	}
+	require.Equal(t, got[0], got[1])
+	require.Equal(t, got[2], got[3])
 }

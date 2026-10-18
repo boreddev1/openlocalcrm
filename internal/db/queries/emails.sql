@@ -21,6 +21,7 @@ RETURNING *;
 -- name: ListEmailAccounts :many
 SELECT * FROM email_accounts
 WHERE is_active = TRUE
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR owner_user_id = sqlc.narg('owner_user_id')::uuid)
 ORDER BY name ASC;
 
 -- name: GetEmailAccountByID :one
@@ -118,3 +119,26 @@ RETURNING *;
 SELECT * FROM email_attachments
 WHERE message_id = $1
 ORDER BY created_at ASC;
+
+-- name: CreateDraftEmailMessage :one
+INSERT INTO email_messages (
+    account_id,
+    thread_id,
+    message_id,
+    direction,
+    sender_email,
+    sender_name,
+    recipient_emails,
+    subject,
+    body_text,
+    body_html,
+    received_at,
+    is_read,
+    is_draft,
+    contact_id,
+    deal_id
+) VALUES (
+    $1, $2, $3, 'OUTBOUND', $4, $5, $6, $7, $8, $9, NOW(), FALSE, TRUE, $10, $11
+)
+RETURNING *;
+

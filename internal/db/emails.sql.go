@@ -12,6 +12,82 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createDraftEmailMessage = `-- name: CreateDraftEmailMessage :one
+INSERT INTO email_messages (
+    account_id,
+    thread_id,
+    message_id,
+    direction,
+    sender_email,
+    sender_name,
+    recipient_emails,
+    subject,
+    body_text,
+    body_html,
+    received_at,
+    is_read,
+    is_draft,
+    contact_id,
+    deal_id
+) VALUES (
+    $1, $2, $3, 'OUTBOUND', $4, $5, $6, $7, $8, $9, NOW(), FALSE, TRUE, $10, $11
+)
+RETURNING id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft
+`
+
+type CreateDraftEmailMessageParams struct {
+	AccountID       pgtype.UUID `json:"account_id"`
+	ThreadID        string      `json:"thread_id"`
+	MessageID       string      `json:"message_id"`
+	SenderEmail     string      `json:"sender_email"`
+	SenderName      pgtype.Text `json:"sender_name"`
+	RecipientEmails []byte      `json:"recipient_emails"`
+	Subject         string      `json:"subject"`
+	BodyText        pgtype.Text `json:"body_text"`
+	BodyHtml        pgtype.Text `json:"body_html"`
+	ContactID       pgtype.UUID `json:"contact_id"`
+	DealID          pgtype.UUID `json:"deal_id"`
+}
+
+func (q *Queries) CreateDraftEmailMessage(ctx context.Context, arg CreateDraftEmailMessageParams) (EmailMessage, error) {
+	row := q.db.QueryRow(ctx, createDraftEmailMessage,
+		arg.AccountID,
+		arg.ThreadID,
+		arg.MessageID,
+		arg.SenderEmail,
+		arg.SenderName,
+		arg.RecipientEmails,
+		arg.Subject,
+		arg.BodyText,
+		arg.BodyHtml,
+		arg.ContactID,
+		arg.DealID,
+	)
+	var i EmailMessage
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.ThreadID,
+		&i.MessageID,
+		&i.InReplyTo,
+		&i.Direction,
+		&i.SenderEmail,
+		&i.SenderName,
+		&i.RecipientEmails,
+		&i.Subject,
+		&i.BodyText,
+		&i.BodyHtml,
+		&i.ReceivedAt,
+		&i.IsRead,
+		&i.ContactID,
+		&i.DealID,
+		&i.CreatedAt,
+		&i.Tags,
+		&i.IsDraft,
+	)
+	return i, err
+}
+
 const createEmailAccount = `-- name: CreateEmailAccount :one
 INSERT INTO email_accounts (
     name,
@@ -149,7 +225,7 @@ INSERT INTO email_messages (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
-RETURNING id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags
+RETURNING id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft
 `
 
 type CreateEmailMessageParams struct {
@@ -208,6 +284,7 @@ func (q *Queries) CreateEmailMessage(ctx context.Context, arg CreateEmailMessage
 		&i.DealID,
 		&i.CreatedAt,
 		&i.Tags,
+		&i.IsDraft,
 	)
 	return i, err
 }
@@ -254,7 +331,7 @@ func (q *Queries) GetEmailAccountByID(ctx context.Context, id pgtype.UUID) (Emai
 }
 
 const getEmailMessageByID = `-- name: GetEmailMessageByID :one
-SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags FROM email_messages
+SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft FROM email_messages
 WHERE id = $1 LIMIT 1
 `
 
@@ -280,6 +357,7 @@ func (q *Queries) GetEmailMessageByID(ctx context.Context, id pgtype.UUID) (Emai
 		&i.DealID,
 		&i.CreatedAt,
 		&i.Tags,
+		&i.IsDraft,
 	)
 	return i, err
 }
@@ -287,11 +365,12 @@ func (q *Queries) GetEmailMessageByID(ctx context.Context, id pgtype.UUID) (Emai
 const listEmailAccounts = `-- name: ListEmailAccounts :many
 SELECT id, name, email_address, provider, imap_host, imap_port, smtp_host, smtp_port, username, password_encrypted, is_active, last_synced_at, created_at, updated_at, account_type, owner_user_id, last_sync_at, last_uid FROM email_accounts
 WHERE is_active = TRUE
+  AND ($1::uuid IS NULL OR owner_user_id = $1::uuid)
 ORDER BY name ASC
 `
 
-func (q *Queries) ListEmailAccounts(ctx context.Context) ([]EmailAccount, error) {
-	rows, err := q.db.Query(ctx, listEmailAccounts)
+func (q *Queries) ListEmailAccounts(ctx context.Context, ownerUserID pgtype.UUID) ([]EmailAccount, error) {
+	rows, err := q.db.Query(ctx, listEmailAccounts, ownerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +443,7 @@ func (q *Queries) ListEmailAttachmentsByMessage(ctx context.Context, messageID p
 }
 
 const listEmailMessages = `-- name: ListEmailMessages :many
-SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags FROM email_messages
+SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft FROM email_messages
 ORDER BY received_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -402,6 +481,7 @@ func (q *Queries) ListEmailMessages(ctx context.Context, arg ListEmailMessagesPa
 			&i.DealID,
 			&i.CreatedAt,
 			&i.Tags,
+			&i.IsDraft,
 		); err != nil {
 			return nil, err
 		}
@@ -414,7 +494,7 @@ func (q *Queries) ListEmailMessages(ctx context.Context, arg ListEmailMessagesPa
 }
 
 const listEmailMessagesByThread = `-- name: ListEmailMessagesByThread :many
-SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags FROM email_messages
+SELECT id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft FROM email_messages
 WHERE thread_id = $1
 ORDER BY received_at ASC
 `
@@ -447,6 +527,7 @@ func (q *Queries) ListEmailMessagesByThread(ctx context.Context, threadID string
 			&i.DealID,
 			&i.CreatedAt,
 			&i.Tags,
+			&i.IsDraft,
 		); err != nil {
 			return nil, err
 		}
@@ -569,7 +650,7 @@ const updateEmailMessageTags = `-- name: UpdateEmailMessageTags :one
 UPDATE email_messages
 SET tags = $2
 WHERE id = $1
-RETURNING id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags
+RETURNING id, account_id, thread_id, message_id, in_reply_to, direction, sender_email, sender_name, recipient_emails, subject, body_text, body_html, received_at, is_read, contact_id, deal_id, created_at, tags, is_draft
 `
 
 type UpdateEmailMessageTagsParams struct {
@@ -599,6 +680,7 @@ func (q *Queries) UpdateEmailMessageTags(ctx context.Context, arg UpdateEmailMes
 		&i.DealID,
 		&i.CreatedAt,
 		&i.Tags,
+		&i.IsDraft,
 	)
 	return i, err
 }

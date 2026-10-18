@@ -139,11 +139,11 @@ func SendMail(cfg SMTPConfig, msg OutgoingMessage) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	if err := client.Mail(msg.From); err != nil {
+	if err = client.Mail(msg.From); err != nil {
 		return fmt.Errorf("mailclient: MAIL FROM failed: %w", err)
 	}
 	for _, rcpt := range recipients {
-		if err := client.Rcpt(rcpt); err != nil {
+		if err = client.Rcpt(rcpt); err != nil {
 			return fmt.Errorf("mailclient: RCPT TO %s failed: %w", rcpt, err)
 		}
 	}
@@ -179,9 +179,9 @@ func writeMIME(w io.Writer, msg OutgoingMessage) error {
 	h.SetAddressList("To", to)
 
 	if len(msg.Cc) > 0 {
-		cc, err := mail.ParseAddressList(strings.Join(msg.Cc, ","))
-		if err != nil {
-			return fmt.Errorf("invalid cc address: %w", err)
+		cc, ccErr := mail.ParseAddressList(strings.Join(msg.Cc, ","))
+		if ccErr != nil {
+			return fmt.Errorf("invalid cc address: %w", ccErr)
 		}
 		h.SetAddressList("Cc", cc)
 	}
@@ -192,7 +192,7 @@ func writeMIME(w io.Writer, msg OutgoingMessage) error {
 	msgID := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(msg.MessageID), "<"), ">")
 	if msgID != "" {
 		h.SetMessageID(msgID)
-	} else if err := h.GenerateMessageID(); err != nil {
+	} else if err = h.GenerateMessageID(); err != nil {
 		return fmt.Errorf("failed to generate message id: %w", err)
 	}
 

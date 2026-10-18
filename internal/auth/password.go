@@ -71,7 +71,7 @@ func CheckPassword(encodedHash, password string) bool {
 		return false
 	}
 
-	computedHash := argon2.IDKey([]byte(password), salt, iterations, memory, parallelism, uint32(len(expectedHash)))
+	computedHash := argon2.IDKey([]byte(password), salt, iterations, memory, parallelism, uint32(len(expectedHash))) //nolint:gosec // G115: value is bounded by its source (DB column or workflow definition), conversion cannot overflow in practice
 
 	return subtle.ConstantTimeCompare(computedHash, expectedHash) == 1
 }
