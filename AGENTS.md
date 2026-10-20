@@ -57,7 +57,13 @@ docs/                architecture, deployment, API, security & audit reports
 ## Prerequisites
 
 - **Go 1.26+**
-- **Node.js 20+** (CI) / pnpm 9+ (CONTRIBUTING targets Node 22 / pnpm 9)
+- **Node.js 20+** (CI) / **pnpm 12.4.1** — the same version pinned in `ci.yml`,
+  `docker-publish.yml` and `Dockerfile.server`. Do not reintroduce `version: latest` or a `pnpm@9`
+  install: the audit `overrides` live in `web/pnpm-workspace.yaml`, which pnpm 9 cannot read
+  (measured: 9.15.9 ❌, 12.4.1 ✅), and an unpinned version let CI, Docker and local machines drift
+  apart — that combination broke the container image build on `main` on 2026-10-20.
+- Do not add `packageManager` to `web/package.json` without regenerating `web/pnpm-lock.yaml`:
+  pnpm 12.4 refuses `--frozen-lockfile` until the lockfile records the pm dependencies.
 - **Docker + Docker Compose** (for the full stack)
 - `sqlc` (only when changing SQL queries)
 
