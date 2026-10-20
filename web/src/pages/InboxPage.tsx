@@ -253,6 +253,10 @@ export const InboxPage: React.FC = () => {
   };
 
   const sendReplyMutation = useMutation({
+    // Sending an email is not idempotent: silently retrying a failed SMTP POST
+    // can deliver the same reply multiple times. One attempt; the operator
+    // retries explicitly.
+    retry: 0,
     mutationFn: () => {
       const subject = (selectedMessage.subject || '').startsWith('Re:')
         ? selectedMessage.subject

@@ -453,9 +453,13 @@ export interface SendEmailInput {
 }
 
 export function sendEmail(input: SendEmailInput): Promise<any> {
+  // A synchronous SMTP send must never leave the composer pending forever:
+  // if the connection dies silently (no RST, no response), the request is
+  // aborted at a bounded 20s and the operator sees an honest failure.
   return apiFetch<any>('/api/v1/emails/send', {
     method: 'POST',
     body: JSON.stringify(input),
+    signal: AbortSignal.timeout(20000),
   });
 }
 
