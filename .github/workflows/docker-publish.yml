@@ -39,7 +39,7 @@ jobs:
       # Extract metadata (tags, labels) for Server Image
       - name: Extract Docker metadata for Server
         id: meta-server
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.SERVER_IMAGE }}
           tags: |
@@ -63,7 +63,7 @@ jobs:
       # Extract metadata for Worker Image
       - name: Extract Docker metadata for Worker
         id: meta-worker
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.WORKER_IMAGE }}
           tags: |
