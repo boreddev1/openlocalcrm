@@ -59,13 +59,19 @@ type LLMClient interface {
 	Generate(ctx context.Context, prompt string, systemInstruction string) (string, error)
 }
 
+// DefaultOllamaModel is the Ollama tag used when nothing is configured. It must be a
+// tag that actually exists: the previous default "gemma2:12b" was never published
+// (the library offers 2b/9b/27b), so every AI path silently had no model. Changing
+// this tag also changes the OpenAI fallback comparison in Gateway, which keys on it.
+const DefaultOllamaModel = "gemma4:12b"
+
 type GatewayConfig struct {
 	DefaultProvider Provider
 	OllamaBaseURL   string
 	// AIBaseURL overrides the embeddings base URL for OpenAI-compatible
 	// providers (OpenAI, Mistral, Nebius, ...). Resolved from AI_BASE_URL.
 	AIBaseURL   string
-	OllamaModel string // e.g. "gemma2:12b"
+	OllamaModel string // defaults to DefaultOllamaModel when unset
 	// EmbeddingModel is the embedding model used for semantic search. Resolved
 	// from config, then AI_EMBEDDING_MODEL, then OLLAMA_EMBEDDING_MODEL, then
 	// the per-provider default. OpenAI-compatible providers have no default:
@@ -112,7 +118,7 @@ func NewGateway(cfg GatewayConfig) *Gateway {
 		if envModel := os.Getenv("OLLAMA_MODEL"); envModel != "" {
 			cfg.OllamaModel = envModel
 		} else {
-			cfg.OllamaModel = "gemma2:12b"
+			cfg.OllamaModel = DefaultOllamaModel
 		}
 	}
 	if cfg.EmbeddingModel == "" && !cfg.DisableEnvFallback {
@@ -184,7 +190,7 @@ func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstructi
 		model = aiModel
 	} else if openAIModel := os.Getenv("OPENAI_MODEL"); openAIModel != "" {
 		model = openAIModel
-	} else if model == "" || model == "gemma2:12b" {
+	} else if model == "" || model == DefaultOllamaModel {
 		model = "gpt-4o-mini"
 	}
 

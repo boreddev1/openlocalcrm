@@ -3,6 +3,7 @@ package launcher
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,7 +114,7 @@ func ExportSettingsFromEnv(baseDir string) (*ExportedSettings, error) {
 
 	aiModel := envMap["OLLAMA_MODEL"]
 	if aiModel == "" {
-		aiModel = "gemma2:12b"
+		aiModel = ai.DefaultOllamaModel
 	}
 
 	adminEmail := envMap["INITIAL_ADMIN_EMAIL"]
@@ -263,7 +264,7 @@ func ImportSettingsToEnv(baseDir string, s *ExportedSettings, keepExistingSecret
 		cfg.AIBaseURL = "http://host.docker.internal:11434"
 	}
 	if cfg.AIModel == "" {
-		cfg.AIModel = "gemma2:12b"
+		cfg.AIModel = ai.DefaultOllamaModel
 	}
 	if cfg.Version == "" {
 		cfg.Version = DefaultVersion

@@ -22,7 +22,7 @@ Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/) 
   - Verschärfte PII-Erkennung für deutsche Steuer-Identifikationsnummern (`internal/ai/guard.go`) verhindert Über-Redaktion regulärer 11-stelliger Zahlen.
   - Filterung von LLM-Rollenmarkern (`SanitizeRoleMarkers`) zur Abwehr von Prompt-Injection-Angriffen.
 - **Konfigurations-Wahrheit, Demo-Isolation & System-Cleanup (SP9):**
-  - Standardisierung des lokalen Ollama-Sprachmodells auf das reale `gemma2:12b` (Beseitigung inkonsistenter `gemma4:12b`-Referenzen).
+  - Standardisierung des lokalen Ollama-Sprachmodells auf `gemma2:12b`. **Nachtrag/Korrektur:** dieser Tag existiert nicht in der Ollama-Bibliothek (dort 2b/9b/27b); die Änderung hat funktionierende `gemma4:12b`-Referenzen ersetzt und alle KI-Pfade ohne Modell laufen lassen. Heute via `ai.DefaultOllamaModel` an einer Stelle definiert, mit Drift-Wache auf das Compose-Template.
   - Vollständige Isolierung der Live-Simulation: `SimulationWidget` wird per `React.lazy` dynamisch geladen und nur ausgeführt, wenn `demo_mode === true` ist.
   - Produktionssicheres Login: Standardmäßig leere Login-Felder; Demo-Zugangsdaten werden nur im aktiven Demo-Modus bereitgestellt.
   - Erweiterung des Schnellbefehlsmenüs (`CommandPalette`) um Termine und Kalendereinträge.

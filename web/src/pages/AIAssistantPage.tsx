@@ -248,7 +248,9 @@ export const AIAssistantPage: React.FC = () => {
     total_pii_blocked: 0,
     average_latency_ms: 0,
     compliance_standard: 'EU AI Act konform (Art. 50/52 Transparenz & Auditierbarkeit)',
-    active_model: 'gemma2:12b (Ollama On-Premise)',
+    // No data from the API: show nothing rather than name a model this page
+    // cannot know. /api/v1/ai/observability returns the configured model.
+    active_model: '— (nicht verbunden)',
     provider: 'Ollama Local / Isolated Single-Tenant',
   };
 

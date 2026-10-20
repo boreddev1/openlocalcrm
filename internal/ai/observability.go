@@ -178,7 +178,7 @@ func (s *ObservabilityService) GetStats() ObservabilityStats {
 		activeModel = os.Getenv("AI_MODEL")
 	}
 	if activeModel == "" {
-		activeModel = "gemma2:12b"
+		activeModel = DefaultOllamaModel
 	}
 
 	provider := os.Getenv("AI_PROVIDER")
