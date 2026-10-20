@@ -175,12 +175,15 @@ func main() {
 	// provider without an embeddings API — e.g. CI/E2E without a local Ollama —
 	// only warns and disables semantic search, every later embedding call
 	// returns the same honest error.
+	// Demo mode resolves the same deterministic no-network stub as the
+	// runtime gateway (server.Config.DemoMode), so this check passes without
+	// a backend.
 	// 30 s fixed cap: cold Ollama model loads (multi-second first download/load)
 	// must not fail the check falsely, while an unbounded generation timeout
 	// (OLLAMA_TIMEOUT_SECONDS) must never block boot. Timeout is warning-only;
 	// a dimension mismatch remains fatal.
 	embeddingCtx, cancelEmbeddingCheck := context.WithTimeout(ctx, 30*time.Second)
-	embeddingErr := ai.ValidateEmbeddingModelFromEnv(embeddingCtx)
+	embeddingErr := ai.NewGateway(ai.GatewayConfig{DemoMode: isDemoMode}).ValidateEmbeddingModel(embeddingCtx)
 	cancelEmbeddingCheck()
 	if embeddingErr != nil {
 		if errors.Is(embeddingErr, ai.ErrEmbeddingDimensionMismatch) {

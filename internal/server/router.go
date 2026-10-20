@@ -229,6 +229,10 @@ func NewRouter(cfg Config) http.Handler {
 			OllamaModel:     aiModel,
 			EmbeddingModel:  os.Getenv("AI_EMBEDDING_MODEL"),
 			APIKey:          aiAPIKey,
+			// Same DEMO_MODE switch that selected the in-memory querier. The
+			// gateway then serves deterministic, marker-carrying stub answers
+			// with zero network access; with demo off nothing changes.
+			DemoMode: cfg.DemoMode,
 		})
 		triageSvc := ai.NewTriageService(aiGateway, obsSvc)
 		researchSvc := ai.NewResearchService(aiGateway, obsSvc)

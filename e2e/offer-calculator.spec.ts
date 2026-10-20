@@ -12,10 +12,12 @@ test.describe('Deterministic Offer Calculator with AI OCR & Full Manual Sales Re
     // Verify Modal Header
     await expect(page.getByRole('heading', { name: /KI-Dokumentenextraktion & Manuell anpassbarer Angebotsrechner/i })).toBeVisible();
 
-    // 2. Trigger AI OCR extraction on demo bill
-    const parseBillBtn = page.getByRole('button', { name: /Demo-Rechnung einlesen/i });
+    // 2. Trigger AI OCR extraction on demo bill (button renamed from
+    // "Demo-Rechnung einlesen" to "📄 Demo-Mustervorlage laden" in v1.0.6; the
+    // button now feeds the real document_text contract of /api/v1/ai/parse-bill)
+    const parseBillBtn = page.getByRole('button', { name: /Demo-Mustervorlage laden/i });
     await parseBillBtn.click();
-    await expect(page.getByText(/Stromrechnung & Zählerdaten erfolgreich eingelesen/i)).toBeVisible();
+    await expect(page.getByText(/Verbrauchs- & Zählerdaten erfolgreich extrahiert/i)).toBeVisible();
 
     // 3. Switch to Hardware Tab & make manual adjustments
     await page.getByRole('button', { name: /2. Hardware/i }).click();

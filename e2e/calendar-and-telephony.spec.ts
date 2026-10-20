@@ -38,9 +38,13 @@ test.describe('Calendar & Telephony (§3.6 & §7.1a)', () => {
     await expect(phoneBtn).toBeVisible();
     await phoneBtn.click();
 
-    await expect(page.getByText(/Anruf-Protokoll|Click-to-Call/i)).toBeVisible();
+    // "Anruf-Protokoll" is the unique CallModal badge. The old
+    // /Anruf-Protokoll|Click-to-Call/ alternation also matched the always-visible
+    // table header "Kontakt & Click-to-Call (§7.1a)", which made the modal-closed
+    // assertion unsatisfiable.
+    await expect(page.getByText('Anruf-Protokoll', { exact: true })).toBeVisible();
     await page.getByPlaceholder(/Notizen zum Telefonat festhalten/i).fill('Kunde erreicht: Sehr interessiert.');
     await page.getByRole('button', { name: /Anruf protokollieren/i }).click();
-    await expect(page.getByText(/Anruf-Protokoll|Click-to-Call/i)).not.toBeVisible();
+    await expect(page.getByText('Anruf-Protokoll', { exact: true })).not.toBeVisible();
   });
 });
