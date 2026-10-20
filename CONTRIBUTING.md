@@ -8,7 +8,12 @@ Vielen Dank für Ihr Interesse an **OpenLocalCRM**! Wir freuen uns über Beiträ
 
 ### Voraussetzungen:
 - **Go 1.26+**
-- **Node.js 22+** und **pnpm 9+**
+- **Node.js 22+** und **pnpm 12.4.1** — die `overrides` liegen in `web/pnpm-workspace.yaml`,
+  und pnpm 9 liest sie weder dort noch aus den Lockfile-`settings`, die sie dort recorden
+  (gemessen: `9.15.9` ❌ `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, `12.4.1` ✅). Dieselbe Version nutzen `ci.yml`,
+  `docker-publish.yml` und `Dockerfile.server`. `packageManager` in `web/package.json` ist bewusst
+  **nicht** gesetzt: pnpm 12.4 verweigert mit dem Feld `--frozen-lockfile`, solange der
+  `pnpm-lock.yaml` keine pm-dependencies recordet.
 - **Docker & Docker Compose** (optional für lokalen Komplett-Stack)
 
 ### Repository klonen & Abhängigkeiten installieren:
