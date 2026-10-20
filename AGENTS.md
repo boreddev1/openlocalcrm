@@ -57,7 +57,13 @@ docs/                architecture, deployment, API, security & audit reports
 ## Prerequisites
 
 - **Go 1.26+**
-- **Node.js 20+** (CI) / **pnpm 12.4.1** — the same version pinned in `ci.yml`,
+- **Node.js 22** — the version `ci.yml`, `docker-publish.yml` and `Dockerfile.server`
+  (`node:22-alpine`) all declare, and the floor `CONTRIBUTING.md` promises. It was `20` in both
+  workflows while the image and the docs said 22, so CI compiled and tested on a different runtime
+  than the one that ships. (Note: the runner warning about "Node.js 20 is deprecated" refers to the
+  *actions'* own runtime — `actions/checkout@v4`, `setup-node@v4`, `upload-artifact@v4` — not this
+  input; that needs the action bumps, and `upload-artifact@v4` has no Dependabot PR yet.)
+- **pnpm 12.4.1** — the same version pinned in `ci.yml`,
   `docker-publish.yml` and `Dockerfile.server`. Do not reintroduce `version: latest` or a `pnpm@9`
   install: the audit `overrides` live in `web/pnpm-workspace.yaml`, which pnpm 9 cannot read
   (measured: 9.15.9 ❌, 12.4.1 ✅), and an unpinned version let CI, Docker and local machines drift
