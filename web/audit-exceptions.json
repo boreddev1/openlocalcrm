@@ -1,0 +1,16 @@
+{
+  "$comment": "Bekannte npm-Advisories, die bewusst und befristet hingenommen werden. Dies ist KEINE Ignore-Liste: jede Ausnahme muss passen, sonst scheitert der Check. Siehe docs/WEB_AUDIT_POLICY.md.",
+  "advisories": [
+    {
+      "package": "braces",
+      "vulnerableVersions": "<=3.0.3",
+      "severity": "high",
+      "patchedVersionsExpected": null,
+      "issue": "https://github.com/boreddev1/openlocalcrm/issues/57",
+      "reason": "Transitive Abhaengigkeit von tailwindcss v3. Upstream existiert kein Patch (pnpm audit meldet patched_versions=null). Eine Behebung erfordert die Tailwind-v4-Migration, die web/dist und damit den per //go:embed eingebetteten Binary-Inhalt veraendert - das ist ein eigenes Projekt und kein Nebenprodukt dieses Checks.",
+      "acceptedBy": "ewenwitte",
+      "acceptedOn": "2026-10-20",
+      "reviewBy": "2026-11-20"
+    }
+  ]
+}
