@@ -159,7 +159,7 @@ func trackStream(resp *http.Response, cancel context.CancelFunc) *liveStream {
 
 func openLiveStream(t *testing.T, url string) *liveStream {
 	t.Helper()
-	resp, cancel := dialStream(t, url)
+	resp, cancel := dialStream(t, url) //nolint:bodyclose // trackStream drains and closes this body
 	return trackStream(resp, cancel)
 }
 
@@ -194,7 +194,7 @@ func TestAC_DEFAULTS_FINITE(t *testing.T) {
 }
 
 // AC-INJECTABLE: the small values set through the exported surface govern
-// behaviour: the injected cap holds at the small limit and the injected
+// behavior: the injected cap holds at the small limit and the injected
 // heartbeat interval is the one actually used (the write deadline is driven by
 // the same surface in AC-WRITE-DEADLINE-HUNG).
 func TestAC_INJECTABLE(t *testing.T) {
@@ -246,7 +246,7 @@ func TestAC_INJECTABLE(t *testing.T) {
 	}()
 
 	// The small injected cap governs: a surplus client never raises the count.
-	secondResp, secondCancel, err := tryOpenStream(srv.URL)
+	secondResp, secondCancel, err := tryOpenStream(srv.URL) //nolint:bodyclose // trackStream drains and closes this body
 	if err != nil {
 		t.Fatalf("AC-INJECTABLE: surplus stream request failed: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestAC_CAP_ENFORCED(t *testing.T) {
 		}
 	}()
 
-	thirdResp, thirdCancel, err := tryOpenStream(srv.URL)
+	thirdResp, thirdCancel, err := tryOpenStream(srv.URL) //nolint:bodyclose // trackStream drains and closes this body
 	if err != nil {
 		close(stop)
 		wg.Wait()
@@ -397,7 +397,7 @@ func TestAC_WRITE_DEADLINE_HUNG(t *testing.T) {
 	defer srv.Close()
 
 	// The client never reads its body, so the server's write to it blocks.
-	resp, cancel := dialStream(t, srv.URL)
+	resp, cancel := dialStream(t, srv.URL) //nolint:bodyclose // closed by the defer below; the linter cannot follow the helper
 	defer cancel()
 	defer resp.Body.Close()
 	waitFor(t, 2*time.Second, func() bool { return hub.ClientCount() == 1 }, "client registered")
@@ -439,7 +439,7 @@ func TestAC_BROADCAST_NONBLOCKING(t *testing.T) {
 	defer srv.Close()
 
 	// Healthy client: continuously drain and watch for the marker event.
-	healthyResp, healthyCancel := dialStream(t, srv.URL)
+	healthyResp, healthyCancel := dialStream(t, srv.URL) //nolint:bodyclose // closed by the defer below; the linter cannot follow the helper
 	defer healthyCancel()
 	defer healthyResp.Body.Close()
 	markerSeen := make(chan struct{})
