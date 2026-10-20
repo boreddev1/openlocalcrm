@@ -20,6 +20,9 @@ web/playwright/
 
 # Dependencies
 node_modules/
+# A trailing-slash pattern only matches directories, so a root-level node_modules
+# that is a symlink or a file stays visible to git. Anchor it at the root as well.
+/node_modules
 /vendor/
 
 # Environment and secrets
