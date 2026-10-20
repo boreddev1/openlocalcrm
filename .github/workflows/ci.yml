@@ -88,7 +88,7 @@ jobs:
         run: cd web && pnpm install --frozen-lockfile
 
       - name: Run Security Audit
-        run: cd web && pnpm audit
+        run: cd web && node ../scripts/check-web-audit.mjs
 
       - name: Verify Code Formatting (Prettier)
         run: cd web && pnpm format:check

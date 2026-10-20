@@ -181,6 +181,7 @@ Copy `.env.example` to `.env` (gitignored). Key variables (see `docs/CONFIGURATI
 - Storage: sanitize all paths and block path traversal (`../`); files are content-addressed by SHA-256 (`internal/storage`).
 - AI: PII must pass the guard (`internal/ai/guard.go`) before reaching any external LLM. Do not route raw customer PII to a provider without the guard.
 - This repo has undergone multiple security & compliance review rounds (see `docs/SECURITY_REVIEW_*.md`, `docs/REPO_REVIEW_*.md`, `SECURITY.md`). Follow `SECURITY.md` for reporting issues; do not weaken existing hardening.
+- Web dependency advisories are gated by `scripts/check-web-audit.mjs` (CI step "Run Security Audit"), not a bare `pnpm audit`. Unaccepted advisories fail the build; an accepted one must be a dated, attributed, issue-linked entry in `web/audit-exceptions.json` and is re-printed on every run. Exceptions expire automatically — see `docs/WEB_AUDIT_POLICY.md`. Never lower the severity threshold or add an ignore flag to make the step green.
 - Keep the RAM budget in mind — avoid heavy in-memory caches or unbounded allocations.
 
 ## Autonomous Execution & In-Depth Self-Review Protocol
