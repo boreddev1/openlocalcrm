@@ -89,7 +89,11 @@ func NewRouter(cfg Config) http.Handler {
 		aiModel = os.Getenv("AI_MODEL")
 	}
 	if aiModel == "" {
-		aiModel = "mistral"
+		// Single source of truth: ai.DefaultOllamaModel. The previous literal
+		// "mistral" made the router disagree with the gateway and the launcher,
+		// so an unconfigured instance asked Ollama for a model that is not the
+		// one the rest of the system assumes (and that no setup pulled).
+		aiModel = ai.DefaultOllamaModel
 	}
 	aiAPIKey := os.Getenv("AI_API_KEY")
 
