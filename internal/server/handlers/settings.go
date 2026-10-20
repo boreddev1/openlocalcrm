@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/launcher"
@@ -70,7 +71,7 @@ func (h *SettingsHandler) ExportSettings(w http.ResponseWriter, r *http.Request)
 
 		aiModel := os.Getenv("OLLAMA_MODEL")
 		if aiModel == "" {
-			aiModel = "gemma2:12b"
+			aiModel = ai.DefaultOllamaModel
 		}
 
 		exported = &launcher.ExportedSettings{

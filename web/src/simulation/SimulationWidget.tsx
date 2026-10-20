@@ -112,7 +112,7 @@ export const SimulationWidget: React.FC = () => {
         if (autoNavigate) navigate('/agent');
 
         const startTime = Date.now();
-        let aiModelName = 'Gemma 12B (Lokal)';
+        const aiModelName = 'Gemma 12B (Lokal)';
         let aiSummary = 'PV-Interesse mit Speicherbedarf erkannt, PII maskiert';
 
         // Finding #40: Use backend AI gateway API instead of raw unauthenticated localhost:11434
@@ -131,7 +131,6 @@ export const SimulationWidget: React.FC = () => {
           if (triageRes.summary) {
             aiSummary = triageRes.summary;
           }
-          aiModelName = 'gemma2:12b (AI Gateway)';
         } catch {
           aiSummary = 'Kundenanfrage für 30 kWp PV-Anlage erfasst (PII maskiert).';
         }

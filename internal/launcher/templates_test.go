@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 )
 
 func TestEnsureComposeAndCaddyFiles(t *testing.T) {
@@ -40,7 +42,7 @@ func TestEnsureComposeAndCaddyFiles(t *testing.T) {
 func TestPatchComposeEmbeddingDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "docker-compose.yml")
-	content := "services:\n  crm-server:\n    environment:\n      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma2:12b}\n      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:0.6b}\n      - AI_EMBEDDING_MODEL=${AI_EMBEDDING_MODEL:-}\n"
+	content := "services:\n  crm-server:\n    environment:\n      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:12b}\n      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:0.6b}\n      - AI_EMBEDDING_MODEL=${AI_EMBEDDING_MODEL:-}\n"
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +56,7 @@ func TestPatchComposeEmbeddingDefaults(t *testing.T) {
 	if !strings.Contains(string(got), "OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-}") {
 		t.Errorf("expected empty default form, got:\n%s", got)
 	}
-	if !strings.Contains(string(got), "OLLAMA_MODEL=${OLLAMA_MODEL:-gemma2:12b}") {
+	if !strings.Contains(string(got), "OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:12b}") {
 		t.Errorf("chat model line must remain untouched, got:\n%s", got)
 	}
 
@@ -66,7 +68,7 @@ func TestPatchComposeEmbeddingDefaults(t *testing.T) {
 	if string(again) != string(got) {
 		t.Errorf("patch must be idempotent")
 	}
-	plain := "services:\n  crm-server:\n    environment:\n      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma2:12b}\n"
+	plain := "services:\n  crm-server:\n    environment:\n      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:12b}\n"
 	if err := os.WriteFile(path, []byte(plain), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -88,5 +90,16 @@ func TestDefaultDockerComposeHasEmptyEmbeddingDefaults(t *testing.T) {
 	}
 	if !strings.Contains(defaultDockerCompose, "OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-}") {
 		t.Errorf("template must declare OLLAMA_EMBEDDING_MODEL with empty default")
+	}
+}
+
+// TestDefaultOllamaModelMatchesComposeTemplate keeps the two sources of the
+// default model tag honest: the compose template is a string literal, so a
+// change to ai.DefaultOllamaModel without the matching template edit fails here
+// instead of shipping a compose file that points at a model nobody can pull.
+func TestDefaultOllamaModelMatchesComposeTemplate(t *testing.T) {
+	want := "OLLAMA_MODEL=${OLLAMA_MODEL:-" + ai.DefaultOllamaModel + "}"
+	if !strings.Contains(defaultDockerCompose, want) {
+		t.Errorf("compose template must contain %q; got:\n%s", want, defaultDockerCompose)
 	}
 }
