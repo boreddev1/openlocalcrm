@@ -165,6 +165,37 @@ func (s *ResearchService) ResearchCompany(ctx context.Context, domain string) (C
 		return CompanyResearchResult{}, errors.New("empty domain")
 	}
 
+	// Demo mode: no scraping, no provider, deterministic marked result. Real
+	// web research stays strictly a production-provider capability; the stub
+	// announces itself in every visible field and in the audit log.
+	if s.gateway != nil && s.gateway.cfg.DemoMode {
+		var stub struct {
+			Summary          string   `json:"summary"`
+			IndustryKeywords []string `json:"industry_keywords"`
+		}
+		_ = json.Unmarshal([]byte(s.gateway.demoResearchJSON()), &stub)
+
+		latency := int(time.Since(startTime).Milliseconds())
+		if s.obsSvc != nil {
+			s.obsSvc.Record(ctx, AIAuditLog{
+				ID:                 fmt.Sprintf("res-%d", time.Now().UnixNano()),
+				InteractionType:    "RESEARCH",
+				ModelName:          s.gateway.cfg.OllamaModel,
+				Provider:           string(s.gateway.cfg.DefaultProvider),
+				LatencyMs:          latency,
+				PIIFilterTriggered: false,
+				CreatedAt:          time.Now(),
+			})
+		}
+		return CompanyResearchResult{
+			Domain:           cleanDomain,
+			Title:            cleanDomain + " — DEMO-Recherche (keine Inferenz)",
+			Summary:          stub.Summary,
+			IndustryKeywords: stub.IndustryKeywords,
+			ResearchedAt:     time.Now(),
+		}, nil
+	}
+
 	targetURL := "https://" + cleanDomain
 	title, metaDesc, rawContent := s.scrapeWebsite(ctx, targetURL)
 
