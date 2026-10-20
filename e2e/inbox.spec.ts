@@ -23,15 +23,34 @@ test.describe('E-Mail Inbox, Urgency SLA & Prompt Injection Armor (§4.1–§4.5
     // 3. Verify SLA Alert Banner & Auto-Tagging
     await expect(page.getByText(/Fristgebundene Anfrage bis 28.08.2026/i)).toBeVisible();
     await expect(page.getByText('SLA: < 8 Std.')).toBeVisible();
-    await expect(page.getByText('Dringend / Eilig')).toBeVisible();
+    // The fake triage chip "Dringend / Eilig" was removed in #21; the real,
+    // server-persisted auto-tag is "Dringend". Its 🏷️ chip renders in both the
+    // inbox list row and the detail header, so .first() is intentional: either
+    // occurrence proves the tag persisted.
+    await expect(page.getByText('🏷️ Dringend').first()).toBeVisible();
 
     // 4. Generate AI Draft with Friendly tone
     await page.getByRole('button', { name: /⚡ KI-Entwurf/i }).click();
-    await expect(page.getByText(/Gemma 12B: Antwortentwurf erfolgreich generiert/i)).toBeVisible();
+    await expect(page.getByText(/KI-Antwortentwurf erfolgreich generiert/i)).toBeVisible();
 
-    // 5. Send Reply
+    // 5. Send Reply. The standalone demo has no SMTP transport behind the
+    // seeded account (localhost:587), so the honest product contract is a
+    // visible failure — never a fabricated success banner. This mirrors the
+    // demo-stub doctrine in internal/ai/demo.go (no canned content may
+    // masquerade as a real provider result).
+    //
+    // The 25s window bounds the product's own worst case, it is not masking
+    // a stall: the server answers this request in ~1-100ms measured in
+    // isolation and concurrently under full-suite load (502 within 2ms during
+    // a parallel run). sendEmail() aborts at 20s if a keep-alive connection
+    // dies silently (web/src/api/client.ts), so a visible failure is
+    // guaranteed no later than ~20s + render. CI (playwright workers=1,
+    // retries=2) and isolated runs see the honest error banner within ~1s.
     await page.getByRole('button', { name: /Antwort senden/i }).click();
-    await expect(page.getByText(/Antwort erfolgreich an s.mueller@dachbau-nord.de versendet/i)).toBeVisible();
+    await expect(page.getByText(/Versand fehlgeschlagen/i)).toBeVisible({ timeout: 25000 });
+    await expect(
+      page.getByText(/Antwort erfolgreich an s\.mueller@dachbau-nord\.de versendet/i),
+    ).toHaveCount(0);
   });
 
   test('should detect and neutralize indirect prompt injection attacks from malicious emails (§19.3)', async ({ page }) => {
@@ -51,8 +70,12 @@ test.describe('E-Mail Inbox, Urgency SLA & Prompt Injection Armor (§4.1–§4.5
 
     // 3. Verify Prompt Armor Shield & Neutralization
     await expect(page.getByText('Prompt-Injection-Angriff abgewehrt & isoliert (§19.3 Prompt Armor)')).toBeVisible();
-    await expect(page.getByText('Lead-Score: 10/100 (Sicherheitsrisiko)')).toBeVisible();
-    await expect(page.getByText('Sicherheit / Prompt Armor')).toBeVisible();
+    // The "Lead-Score: 10/100 (Sicherheitsrisiko)" badge and the
+    // "Sicherheit / Prompt Armor" category chip were fabricated UI (hardcoded
+    // numbers, not model output) and were deliberately deleted in the #21
+    // truthfulness cleanup. The real capability — detection, isolation and
+    // neutralization — stays asserted below via the shield banner, the
+    // SECURITY FILTER marker and the safe reply draft.
     await expect(page.getByText(/SECURITY FILTER: Malicious instruction neutralized/i).first()).toBeVisible();
 
     // 4. Verify AI draft remains secure and does not execute the attack

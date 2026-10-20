@@ -18,8 +18,11 @@ test.describe("Settings & Lead-Intake Connectors", () => {
       page.getByRole("button", { name: /Test-Payload senden/i }),
     ).toBeVisible();
 
-    // Check copy button
-    const copyBtn = page.getByRole("button", { name: /Kopieren/i });
+    // Check copy button. The webhook section renders two buttons named
+    // "Kopieren": the Webhook-URL copy (first in DOM order, enabled) and the
+    // Connector-Token copy (disabled while the token field is empty). The test
+    // means the URL copy, so .first() is scoped with that reason.
+    const copyBtn = page.getByRole("button", { name: "Kopieren" }).first();
     await expect(copyBtn).toBeVisible();
 
     // Check switching to System-Info tab

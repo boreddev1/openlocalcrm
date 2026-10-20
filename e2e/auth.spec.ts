@@ -14,6 +14,14 @@ test.describe("Authentication & Navigation Layout", () => {
     const emailInput = page.getByPlaceholder("name@unternehmen.de");
     await expect(emailInput).toBeVisible();
 
+    // This test submits without typing, relying on the demo auto-fill from
+    // /api/v1/health. Wait for that fill to land before clicking, otherwise a
+    // slow first page load (cold vite) clicks "Anmelden" against empty
+    // required inputs, which the browser validation silently blocks.
+    await expect(emailInput).toHaveValue("admin@openlocalcrm.local", {
+      timeout: 10000,
+    });
+
     const loginButton = page.getByRole("button", { name: /Anmelden/i });
     await loginButton.click();
 
