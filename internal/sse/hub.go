@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -29,7 +31,7 @@ type Event struct {
 // Hub manages active SSE client streams and broadcasting
 type Hub struct {
 	mu      sync.RWMutex
-	clients map[chan Event]bool
+	clients map[chan Event]uuid.UUID
 
 	// MaxClients is the maximum number of concurrent streams. Streams beyond
 	// the limit are declined with 503 Service Unavailable. A non-positive
@@ -46,7 +48,7 @@ type Hub struct {
 // NewHub creates a new SSE Hub instance with finite production defaults.
 func NewHub() *Hub {
 	return &Hub{
-		clients:           make(map[chan Event]bool),
+		clients:           make(map[chan Event]uuid.UUID),
 		MaxClients:        DefaultMaxClients,
 		HeartbeatInterval: DefaultHeartbeatInterval,
 		WriteDeadline:     DefaultWriteDeadline,
@@ -113,7 +115,17 @@ func (h *Hub) RevokeUser(userID uuid.UUID) {
 	}
 }
 
+// ServeHTTP streams to a client with no user bound: it receives Broadcast, but
+// SendToUser and RevokeUser cannot reach it. A route that knows the
+// authenticated user must call ServeHTTPFor instead.
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.ServeHTTPFor(w, r, uuid.Nil)
+}
+
+// ServeHTTPFor registers the stream against userID, so SendToUser can deliver to
+// that user and RevokeUser can terminate their streams when a role or status
+// changes. An unauthenticated stream is stored under uuid.Nil.
+func (h *Hub) ServeHTTPFor(w http.ResponseWriter, r *http.Request, userID uuid.UUID) {
 	if _, ok := w.(http.Flusher); !ok {
 		http.Error(w, `{"error":"Streaming unsupported"}`, http.StatusInternalServerError)
 		return
@@ -127,7 +139,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Too many concurrent streams"}`, http.StatusServiceUnavailable)
 		return
 	}
-	h.clients[ch] = true
+	h.clients[ch] = userID
 	h.mu.Unlock()
 
 	defer func() {
