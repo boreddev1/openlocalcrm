@@ -22,6 +22,20 @@ interface OfferCalculatorModalProps {
   onClose: () => void;
 }
 
+// The calculator's "Demo-Mustervorlage laden" button must feed the real
+// /api/v1/ai/parse-bill contract, which rejects empty document_text with 400
+// (internal/server/handlers/ai.go). This sample bill text is the template.
+const DEMO_BILL_TEMPLATE = [
+  'STROMRECHNUNG – Demo-Mustervorlage',
+  'Kunde: Demo Gewerbebetrieb Nord GmbH',
+  'Zählernummer: 1EMH00000000000',
+  'Abrechnungszeitraum: 01.01.2026 – 31.12.2026',
+  'Jahresverbrauch: 6.500 kWh',
+  'Arbeitstpreis: 0,385 €/kWh',
+  'Zählerstand alt: 48.210 kWh',
+  'Zählerstand neu: 54.710 kWh',
+].join('\n');
+
 export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
   initialCustomerName = 'Familie Müller',
   onClose,
@@ -131,7 +145,10 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
     try {
       const res = await apiFetch<any>('/api/v1/ai/parse-bill', {
         method: 'POST',
-        body: JSON.stringify({ customer_name: customerName }),
+        body: JSON.stringify({
+          customer_name: customerName,
+          document_text: DEMO_BILL_TEMPLATE,
+        }),
       });
       if (res.extracted) {
         setCustomerName(res.extracted.customer_name);
@@ -149,6 +166,11 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
         }
         setTimeout(() => setFeedbackBanner(null), 4000);
       }
+    } catch {
+      setFeedbackBanner(
+        'Demo-Mustervorlage konnte nicht eingelesen werden (KI-Dienst nicht erreichbar).',
+      );
+      setTimeout(() => setFeedbackBanner(null), 4000);
     } finally {
       setIsExtracting(false);
     }
