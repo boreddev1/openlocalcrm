@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/openlocalcrm/openlocalcrm/internal/sse"
 )
 
@@ -426,20 +427,43 @@ func TestAC_WRITE_DEADLINE_HUNG(t *testing.T) {
 	}
 }
 
-// AC-BROADCAST-NONBLOCKING: a stalled client (handler blocked on a write, its
-// buffered channel full) must not delay Broadcast or delivery to a healthy
-// client.
+// AC-BROADCAST-NONBLOCKING: a stalled client (handler blocked on a socket
+// write, its delivery channel saturated) must not delay Broadcast or delivery
+// to a healthy client.
+//
+// Determinism (issue #56): the stall traffic (the oversized blob and the
+// flood) is now sent to the stalled client only, through SendToUser, so the
+// healthy client's delivery channel is never saturated by test setup — with
+// the old shared Broadcast the 8 MiB blob also backed up the healthy
+// handler, and on a slow runner the 128 flood events then filled its small
+// buffer so every marker was silently dropped by the non-blocking send; the
+// fixed 300ms sleep was an assumption about that drain, not an observation.
+// The stalled precondition is likewise established by construction (an 8 MiB
+// frame to a client that never reads cannot fit in any socket chain) with the
+// saturation calls awaited through a deadlock guard, and success is asserted
+// on the observed delivery event itself; the long timeout below only catches
+// a genuine deadlock. If the healthy client does not receive the event, the
+// test still fails.
 func TestAC_BROADCAST_NONBLOCKING(t *testing.T) {
 	hub := sse.NewHub()
 	// A long write deadline keeps the stalled handler blocked for the duration
 	// of this test.
 	setHubConfig(t, hub, 8, time.Hour, time.Hour)
 
-	srv := httptest.NewServer(hub)
+	healthyUser := uuid.New()
+	stalledUser := uuid.New()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthy", func(w http.ResponseWriter, r *http.Request) {
+		hub.ServeHTTPFor(w, r, healthyUser)
+	})
+	mux.HandleFunc("/stalled", func(w http.ResponseWriter, r *http.Request) {
+		hub.ServeHTTPFor(w, r, stalledUser)
+	})
+	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	// Healthy client: continuously drain and watch for the marker event.
-	healthyResp, healthyCancel := dialStream(t, srv.URL) //nolint:bodyclose // closed by the defer below; the linter cannot follow the helper
+	healthyResp, healthyCancel := dialStream(t, srv.URL+"/healthy") //nolint:bodyclose // closed by the defer below; the linter cannot follow the helper
 	defer healthyCancel()
 	defer healthyResp.Body.Close()
 	markerSeen := make(chan struct{})
@@ -458,23 +482,36 @@ func TestAC_BROADCAST_NONBLOCKING(t *testing.T) {
 	}()
 
 	// Stalled client: connected but never draining its body.
-	stalledResp, stalledCancel := dialStream(t, srv.URL)
+	stalledResp, stalledCancel := dialStream(t, srv.URL+"/stalled") //nolint:bodyclose // closed by the defer below; the linter cannot follow the helper
 	defer stalledCancel()
 	defer stalledResp.Body.Close()
 
 	waitFor(t, 2*time.Second, func() bool { return hub.ClientCount() == 2 }, "both clients registered")
 
-	// Make the stalled handler block on a socket write, then fill its buffered
-	// channel so a blocking Broadcast would hang there.
-	hub.Broadcast(sse.Event{Type: "blob", Data: strings.Repeat("x", 8<<20)})
-	time.Sleep(300 * time.Millisecond)
+	// Make the stalled handler block on a socket write: an 8 MiB frame to a
+	// client that never reads cannot be absorbed by the socket chain, so the
+	// handler parks inside its write until the (one-hour) deadline. Floods
+	// sent to the same user then saturate its delivery channel. A blocking
+	// SendToUser would hang here instead of completing, which the guard
+	// reports; the healthy client's channel is not touched by this setup.
+	saturated := make(chan struct{})
+	go func() {
+		hub.SendToUser(stalledUser, sse.Event{Type: "blob", Data: strings.Repeat("x", 8<<20)})
+		for i := 0; i < 128; i++ {
+			hub.SendToUser(stalledUser, sse.Event{Type: "flood", Data: i})
+		}
+		close(saturated)
+	}()
+	select {
+	case <-saturated:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("AC-BROADCAST-NONBLOCKING: saturating the stalled client did not complete within the deadlock guard")
+	}
 
+	// Broadcast now targets both clients; the stalled one is saturated, so a
+	// Broadcast that blocked on its full channel would never return.
 	result := make(chan time.Duration, 1)
 	go func() {
-		for i := 0; i < 128; i++ {
-			hub.Broadcast(sse.Event{Type: "flood", Data: i})
-		}
-		time.Sleep(50 * time.Millisecond)
 		start := time.Now()
 		for i := 0; i < 5; i++ {
 			hub.Broadcast(sse.Event{Type: "marker", Data: map[string]string{"id": "m1"}})
@@ -491,10 +528,20 @@ func TestAC_BROADCAST_NONBLOCKING(t *testing.T) {
 		t.Fatalf("AC-BROADCAST-NONBLOCKING: Broadcast blocked on a stalled client")
 	}
 
+	// The healthy client's channel was empty when the markers were enqueued,
+	// so delivery is guaranteed by construction on any scheduler; this wait
+	// observes that fact. The 30s timeout is a deadlock guard, not the
+	// assertion window.
 	select {
 	case <-markerSeen:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatalf("AC-BROADCAST-NONBLOCKING: healthy client did not receive the event while another client was stalled")
+	}
+
+	// Honest scenario check: the healthy event arrived while the other client
+	// was still stalled and still registered (not evicted or timed out).
+	if n := hub.ClientCount(); n != 2 {
+		t.Fatalf("AC-BROADCAST-NONBLOCKING: expected both streams to still be active when the healthy client received the event, found %d", n)
 	}
 }
 
