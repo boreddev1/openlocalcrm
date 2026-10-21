@@ -533,7 +533,7 @@ export const ContactsPage: React.FC = () => {
       {/* Create Contact Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full max-h-[calc(100vh-2rem)] overflow-y-auto p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="font-bold text-slate-100 text-lg">Neuen Kontakt anlegen</h3>
               <button
@@ -1068,7 +1068,7 @@ export const ContactsPage: React.FC = () => {
       {/* Gemma 12B AI Research Modal (§5.4) */}
       {researchModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full max-h-[calc(100vh-2rem)] overflow-y-auto p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-purple-400" />
