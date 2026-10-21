@@ -102,6 +102,22 @@ jobs:
       - name: Build Web Production Bundle
         run: cd web && pnpm build
 
+      - name: Freshness Gate — committed web/dist must match a fresh build
+        shell: bash
+        run: |
+          cd web
+          pnpm build > /dev/null
+          cd ..
+          STALE=$(git status --porcelain --untracked-files=all -- web/dist)
+          if [ -n "$STALE" ]; then
+            echo "::error::web/dist in git is STALE: a fresh 'cd web && pnpm build' (pnpm 12.4.1, node 22) produces different output than the committed bundle, so the Go binary would embed an SPA that does not match web/src (violates repo invariant #5). Typical cause: a commit changed web/src, package.json or pnpm-lock.yaml without rebuilding dist."
+            echo "Committed dist vs freshly built dist:"
+            printf '%s\n' "$STALE"
+            echo "Fix: run 'cd web && pnpm install --frozen-lockfile && pnpm build' and commit the resulting web/dist changes."
+            exit 1
+          fi
+          echo "OK: committed web/dist is byte-identical to a fresh production build."
+
       - name: Install Playwright Browsers & OS Dependencies
         run: npx playwright install --with-deps chromium
 
