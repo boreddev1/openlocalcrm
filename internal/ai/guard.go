@@ -1,9 +1,16 @@
 package ai
 
 import (
+	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 )
+
+// ErrPIILeakDetected signals that a model response still contained unredacted PII
+// after generation and must never be surfaced to the caller. It is returned by
+// ValidateOutput as the second, output-side guard on top of input sanitization.
+var ErrPIILeakDetected = errors.New("PII-Leak in der KI-Ausgabe erkannt")
 
 var (
 	// Regex for IBANs (e.g. DE89370400440532013000)
@@ -19,6 +26,11 @@ var (
 	secretKeyRegex = regexp.MustCompile(`(?i)(api[_-]?key|password|secret|token)\s*[:=]\s*['"]?([a-zA-Z0-9_\-\.]{12,})['"]?`)
 	// Regex for script tags / javascript execution injection
 	scriptTagRegex = regexp.MustCompile(`(?i)<script[\s\S]*?>[\s\S]*?<\/script>|<script[\s\S]*?>|javascript:`)
+	// Regex for e-mail addresses (issue #82). Optional mailto: scheme, a tolerant
+	// local part, optional spaces around the @ to catch "meier @ gmbh.de"
+	// obfuscation, and a domain that must end in a dotted TLD. The TLD requirement
+	// is what keeps "user@localhost", "5 @ 3 = 15" and IBANs from matching.
+	mailRegex = regexp.MustCompile(`(?i)(?:mailto:)?[A-Za-z0-9._%+\-]+[ \t]*@[ \t]*[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
 )
 
 type Guard struct{}
@@ -52,6 +64,12 @@ func (g *Guard) SanitizeInputWithCount(text string) (string, int) {
 
 	count += len(secretKeyRegex.FindAllStringIndex(sanitized, -1))
 	sanitized = secretKeyRegex.ReplaceAllString(sanitized, "$1: [REDACTED_SECRET]")
+
+	// Issue #82: redact e-mail addresses. The triage sender is passed as its own
+	// argument, so redacting the mail inside the body costs the model no
+	// information it needs to classify.
+	count += len(mailRegex.FindAllStringIndex(sanitized, -1))
+	sanitized = mailRegex.ReplaceAllString(sanitized, "[REDACTED_EMAIL]")
 
 	return sanitized, count
 }
@@ -87,6 +105,13 @@ func (g *Guard) ValidateOutput(output string) (string, error) {
 		if strings.Contains(clean, sig) {
 			clean = strings.ReplaceAll(clean, sig, "[REDACTED_INTERNAL]")
 		}
+	}
+
+	// Issue #82: reject any mail address that survived to the output. Input
+	// sanitization is the primary redaction; this is the output-side guard that
+	// refuses to release a leak even if a model reconstructs or echoes one.
+	if mailRegex.MatchString(clean) {
+		return "", fmt.Errorf("%w: unredacted e-mail in model output", ErrPIILeakDetected)
 	}
 
 	return clean, nil

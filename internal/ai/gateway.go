@@ -68,8 +68,10 @@ const DefaultOllamaModel = "gemma4:12b"
 type GatewayConfig struct {
 	DefaultProvider Provider
 	OllamaBaseURL   string
-	// AIBaseURL overrides the embeddings base URL for OpenAI-compatible
-	// providers (OpenAI, Mistral, Nebius, ...). Resolved from AI_BASE_URL.
+	// AIBaseURL is the OpenAI-compatible base URL override for providers that speak
+	// the OpenAI wire format (OpenAI, Mistral, Nebius, ...). It is honored for BOTH
+	// chat completions (see chatBaseURL) and embeddings (see embeddingsBaseURL).
+	// Resolved from AI_BASE_URL.
 	AIBaseURL   string
 	OllamaModel string // defaults to DefaultOllamaModel when unset
 	// EmbeddingModel is the embedding model used for semantic search. Resolved
@@ -189,7 +191,7 @@ func (g *Gateway) ServingModel() string {
 		return g.cfg.OllamaModel
 	}
 	switch g.cfg.DefaultProvider {
-	case ProviderOpenAI:
+	case ProviderOpenAI, ProviderMistral, ProviderNebius:
 		return g.openAIModel()
 	default:
 		return g.cfg.OllamaModel
@@ -230,7 +232,10 @@ func (g *Gateway) Generate(ctx context.Context, prompt string, systemInstruction
 	switch g.cfg.DefaultProvider {
 	case ProviderOllama:
 		return g.callOllama(ctx, cleanPrompt, cleanSystem)
-	case ProviderOpenAI:
+	case ProviderOpenAI, ProviderMistral, ProviderNebius:
+		// OpenAI-compatible chat providers. All three reach the model through the
+		// same /chat/completions call path; their endpoints are resolved from the
+		// documented base precedence (see chatBaseURL).
 		return g.callOpenAI(ctx, cleanPrompt, cleanSystem)
 	case ProviderAnthropic:
 		return "", fmt.Errorf("%w: ai provider 'anthropic' ist noch nicht konfiguriert", ErrUpstreamUnavailable)
@@ -241,11 +246,31 @@ func (g *Gateway) Generate(ctx context.Context, prompt string, systemInstruction
 	}
 }
 
-func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstruction string) (string, error) {
-	baseURL := g.cfg.OllamaBaseURL
-	if baseURL == "" || strings.Contains(baseURL, "11434") {
-		baseURL = "https://api.openai.com/v1"
+// chatBaseURL resolves the base URL for OpenAI-compatible chat completions.
+// Precedence (issue #82):
+//  1. AIBaseURL — the documented OpenAI-compatible override (AI_BASE_URL).
+//  2. OllamaBaseURL, but only when it is NOT a local Ollama/11434 endpoint. A
+//     self-hosted OpenAI-compatible gateway wired through the legacy field is
+//     honored; a real Ollama daemon is never sent chat traffic meant for an
+//     OpenAI endpoint.
+//  3. The OpenAI public default.
+//
+// Before this fix the chat path derived its base from OllamaBaseURL alone and
+// fell back to api.openai.com, so a configured OpenAI-compatible endpoint
+// (AIBaseURL) returned HTTP 401 from api.openai.com while the same key/URL
+// worked directly.
+func (g *Gateway) chatBaseURL() string {
+	if g.cfg.AIBaseURL != "" {
+		return strings.TrimRight(g.cfg.AIBaseURL, "/")
 	}
+	if b := g.cfg.OllamaBaseURL; b != "" && !strings.Contains(b, "11434") {
+		return strings.TrimRight(b, "/")
+	}
+	return "https://api.openai.com/v1"
+}
+
+func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstruction string) (string, error) {
+	baseURL := g.chatBaseURL()
 	// Finding #30 & #37: Do not silently overwrite OpenAI model if explicitly configured
 	model := g.openAIModel()
 
@@ -298,7 +323,7 @@ func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstructi
 	if len(res.Choices) > 0 {
 		out, err := g.guard.ValidateOutput(res.Choices[0].Message.Content)
 		if err != nil {
-			return "", fmt.Errorf("%w: openai output validation failed: %v", ErrUpstreamUnavailable, err)
+			return "", fmt.Errorf("%w: openai output validation failed: %w", ErrUpstreamUnavailable, err)
 		}
 		return out, nil
 	}
@@ -342,7 +367,7 @@ func (g *Gateway) callOllama(ctx context.Context, prompt string, systemInstructi
 
 	out, err := g.guard.ValidateOutput(res.Response)
 	if err != nil {
-		return "", fmt.Errorf("%w: ollama output validation failed: %v", ErrUpstreamUnavailable, err)
+		return "", fmt.Errorf("%w: ollama output validation failed: %w", ErrUpstreamUnavailable, err)
 	}
 	return out, nil
 }
