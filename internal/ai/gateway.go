@@ -176,6 +176,41 @@ func (g *Gateway) GetConfig() GatewayConfig {
 	return g.cfg
 }
 
+// ServingModel reports the model name the gateway would actually consult for
+// the next Generate call. It is the truthful label for the UI and the
+// observability stats (issue #72): the demo gateway reports DemoStubMarker
+// (precedent PR #67), the Ollama gateway reports its resolved tag (single
+// source ai.DefaultOllamaModel when unconfigured, precedent PR #64), and the
+// OpenAI path reports the exact model its request would carry.
+func (g *Gateway) ServingModel() string {
+	if g.cfg.DemoMode {
+		// NewGateway forces the marker into OllamaModel for the demo stub, so
+		// every consumer that reads the label from the gateway tells the truth.
+		return g.cfg.OllamaModel
+	}
+	switch g.cfg.DefaultProvider {
+	case ProviderOpenAI:
+		return g.openAIModel()
+	default:
+		return g.cfg.OllamaModel
+	}
+}
+
+// openAIModel resolves the model name an OpenAI request will carry from the
+// same config/env precedence callOpenAI uses, so the reported label never
+// drifts from the request that is actually sent.
+func (g *Gateway) openAIModel() string {
+	model := g.cfg.OllamaModel
+	if aiModel := os.Getenv("AI_MODEL"); aiModel != "" {
+		model = aiModel
+	} else if openAIModel := os.Getenv("OPENAI_MODEL"); openAIModel != "" {
+		model = openAIModel
+	} else if model == "" || model == DefaultOllamaModel {
+		model = "gpt-4o-mini"
+	}
+	return model
+}
+
 // Generate sends a prompt to the configured LLM backend with automatic PII sanitization and prompt guards
 func (g *Gateway) Generate(ctx context.Context, prompt string, systemInstruction string) (string, error) {
 	// 1. Sanitize input prompt and system instructions for PII (Finding #38)
@@ -212,14 +247,7 @@ func (g *Gateway) callOpenAI(ctx context.Context, prompt string, systemInstructi
 		baseURL = "https://api.openai.com/v1"
 	}
 	// Finding #30 & #37: Do not silently overwrite OpenAI model if explicitly configured
-	model := g.cfg.OllamaModel
-	if aiModel := os.Getenv("AI_MODEL"); aiModel != "" {
-		model = aiModel
-	} else if openAIModel := os.Getenv("OPENAI_MODEL"); openAIModel != "" {
-		model = openAIModel
-	} else if model == "" || model == DefaultOllamaModel {
-		model = "gpt-4o-mini"
-	}
+	model := g.openAIModel()
 
 	messages := []map[string]string{}
 	if systemInstruction != "" {

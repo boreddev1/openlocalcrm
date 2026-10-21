@@ -40,6 +40,20 @@ type ObservabilityService struct {
 	mu   sync.RWMutex
 	logs []AIAuditLog
 	dbtx db.DBTX
+	// gateway is the serving gateway whose model name the stats report. Wired
+	// once at startup before any request (issue #72); nil keeps the legacy
+	// environment-based resolution for standalone use and tests.
+	gateway *Gateway
+}
+
+// WithGateway binds the gateway that actually serves inferences, so
+// GetStats reports the model the instance really uses — including the
+// DemoStubMarker in demo mode — instead of re-guessing from the environment.
+func (s *ObservabilityService) WithGateway(g *Gateway) *ObservabilityService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gateway = g
+	return s
 }
 
 func NewObservabilityService(dbtx ...db.DBTX) *ObservabilityService {
@@ -158,6 +172,10 @@ func (s *ObservabilityService) GetStats() ObservabilityStats {
 	defer s.mu.RUnlock()
 
 	total := len(s.logs)
+	var gatewayModel string
+	if s.gateway != nil {
+		gatewayModel = s.gateway.ServingModel()
+	}
 	var totalLatency int
 	var piiCount int
 
@@ -173,7 +191,13 @@ func (s *ObservabilityService) GetStats() ObservabilityStats {
 		avgLatency = float64(totalLatency) / float64(total)
 	}
 
-	activeModel := os.Getenv("OLLAMA_MODEL")
+	// Issue #72: the gateway is the authority on which model is actually
+	// served (demo marker included). Only an unwired service may fall back to
+	// environment guessing.
+	activeModel := gatewayModel
+	if activeModel == "" {
+		activeModel = os.Getenv("OLLAMA_MODEL")
+	}
 	if activeModel == "" {
 		activeModel = os.Getenv("AI_MODEL")
 	}

@@ -173,7 +173,7 @@ export const InboxPage: React.FC = () => {
       }
 
       setFeedbackBanner(
-        'Eingehende E-Mail erfolgreich simuliert, analysiert & per Gemma 12B klassifiziert!',
+        'Eingehende E-Mail erfolgreich simuliert, analysiert & per KI-Triage klassifiziert!',
       );
       setTimeout(() => setFeedbackBanner(null), 4000);
     },
@@ -304,7 +304,7 @@ export const InboxPage: React.FC = () => {
           </h1>
           <p className="text-sm text-slate-400">
             Zentraler Posteingang mit automatischer Frist- & Dringlichkeitserkennung,
-            Prompt-Injection-Schutz und Gemma 12B Triage
+            Prompt-Injection-Schutz und automatisierte KI-Triage
           </p>
         </div>
         {isDemo && (

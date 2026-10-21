@@ -567,3 +567,27 @@ func TestTriageEmailMalformedJSONReturnsUpstreamError(t *testing.T) {
 		t.Fatalf("expected ErrUpstreamUnavailable, got: %v", err)
 	}
 }
+
+func TestObservabilityStatsActiveModelFollowsGateway(t *testing.T) {
+	// Issue #72: the stats the UI reads must name the model the gateway
+	// actually serves — the demo marker included — not an environment guess.
+	demoObs := ai.NewObservabilityService().WithGateway(demoGateway(t))
+	if got := demoObs.GetStats().ActiveModel; got != ai.DemoStubMarker {
+		t.Fatalf("demo stats ActiveModel must be the stub marker, got %q", got)
+	}
+
+	ollamaObs := ai.NewObservabilityService().WithGateway(ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaModel:     "qwen2.5:7b",
+	}))
+	if got := ollamaObs.GetStats().ActiveModel; got != "qwen2.5:7b" {
+		t.Fatalf("stats ActiveModel must be the configured model, got %q", got)
+	}
+
+	// Unwired keeps the legacy environment-based resolution.
+	t.Setenv("OLLAMA_MODEL", "env-model")
+	unwired := ai.NewObservabilityService()
+	if got := unwired.GetStats().ActiveModel; got != "env-model" {
+		t.Fatalf("unwired stats must keep env resolution, got %q", got)
+	}
+}

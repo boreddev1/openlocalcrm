@@ -289,3 +289,60 @@ func TestNewGatewayDisableEnvFallbackForcesDefaultTimeout(t *testing.T) {
 		t.Fatalf("expected timeout error (1s from env) without flag, got: %v", err)
 	}
 }
+
+func TestServingModelReportsConfiguredOllamaModel(t *testing.T) {
+	gw := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOllama,
+		OllamaModel:     "llama3:8b",
+	})
+	if got := gw.ServingModel(); got != "llama3:8b" {
+		t.Fatalf("ServingModel must report the configured tag, got %q", got)
+	}
+}
+
+func TestServingModelDefaultsToSingleSourceOfTruth(t *testing.T) {
+	// Drift guard (issue #72, precedent PR #64): an unconfigured gateway must
+	// report exactly ai.DefaultOllamaModel — never a literal re-invented here.
+	t.Setenv("OLLAMA_MODEL", "")
+	t.Setenv("AI_MODEL", "")
+	t.Setenv("OPENAI_MODEL", "")
+	gw := ai.NewGateway(ai.GatewayConfig{})
+	if got := gw.ServingModel(); got != ai.DefaultOllamaModel {
+		t.Fatalf("unconfigured gateway must report DefaultOllamaModel, got %q", got)
+	}
+}
+
+func TestServingModelDemoReportsMarker(t *testing.T) {
+	// Issue #72, precedent PR #67: the demo gateway must announce the stub,
+	// so no UI label can ever read like real inference.
+	gw := demoGateway(t)
+	if got := gw.ServingModel(); got != ai.DemoStubMarker {
+		t.Fatalf("demo gateway must report DemoStubMarker, got %q", got)
+	}
+}
+
+func TestServingModelOpenAIFollowsRequestPrecedence(t *testing.T) {
+	t.Setenv("OLLAMA_MODEL", "")
+	t.Setenv("AI_MODEL", "")
+	t.Setenv("OPENAI_MODEL", "")
+
+	// Explicitly configured model is kept (Finding #30/#37) ...
+	configured := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.ProviderOpenAI,
+		OllamaModel:     "eu-model",
+	})
+	if got := configured.ServingModel(); got != "eu-model" {
+		t.Fatalf("explicit OpenAI model must survive, got %q", got)
+	}
+
+	// ... an unconfigured one resolves to the same fallback callOpenAI sends.
+	fallback := ai.NewGateway(ai.GatewayConfig{DefaultProvider: ai.ProviderOpenAI})
+	if got := fallback.ServingModel(); got != "gpt-4o-mini" {
+		t.Fatalf("unconfigured OpenAI provider must report gpt-4o-mini, got %q", got)
+	}
+
+	t.Setenv("AI_MODEL", "gpt-4o")
+	if got := fallback.ServingModel(); got != "gpt-4o" {
+		t.Fatalf("AI_MODEL must win over the fallback, got %q", got)
+	}
+}

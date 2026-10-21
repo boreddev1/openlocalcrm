@@ -85,7 +85,7 @@ func newNonJSONAIGateway(t *testing.T) *ai.Gateway {
 
 func setupAIHandlerWithGateway(t *testing.T, gw *ai.Gateway) *handlers.AIHandler {
 	t.Helper()
-	obs := ai.NewObservabilityService()
+	obs := ai.NewObservabilityService().WithGateway(gw)
 	triageSvc := ai.NewTriageService(gw, obs)
 	querier := demo.NewInMemoryQuerier()
 	researchSvc := ai.NewResearchService(gw, obs)
@@ -243,6 +243,31 @@ func TestAIHandler_ObservabilityAndBill(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, res, "stats")
 		require.Contains(t, res, "recent_logs")
+
+		// Issue #72: the active_model the UI reads must be the model the wired
+		// gateway actually serves, not an environment guess.
+		stats, ok := res["stats"].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "test-model", stats["active_model"])
+	})
+
+	t.Run("GetObservability reports the demo marker in demo mode", func(t *testing.T) {
+		gw := ai.NewGateway(ai.GatewayConfig{DemoMode: true})
+		h := setupAIHandlerWithGateway(t, gw)
+		req := httptest.NewRequest(http.MethodGet, "/api/ai/observability", nil)
+		rec := httptest.NewRecorder()
+
+		h.GetObservability(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var res struct {
+			Stats struct {
+				ActiveModel string `json:"active_model"`
+			} `json:"stats"`
+		}
+		err := json.NewDecoder(rec.Body).Decode(&res)
+		require.NoError(t, err)
+		require.Equal(t, ai.DemoStubMarker, res.Stats.ActiveModel)
 	})
 
 	t.Run("ParseBill requires document_text", func(t *testing.T) {

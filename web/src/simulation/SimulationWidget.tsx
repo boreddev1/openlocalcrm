@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../api/client';
+import { useAIModel } from '../hooks/useAIModel';
 
 interface SimulationScenario {
   name: string;
@@ -26,6 +27,10 @@ export const SimulationWidget: React.FC = () => {
   const [speed, setSpeed] = useState<number>(2);
   const [autoNavigate, setAutoNavigate] = useState<boolean>(true);
   const [isExpanded, setIsExpanded] = useState(false);
+  // Issue #72: the ticker names the model the instance actually serves
+  // (observability stats). The pill itself fetches nothing — /api/v1/ai is
+  // rate-limited, so data loads only once the panel is expanded.
+  const aiModel = useAIModel(isExpanded);
   const [tickerLogs, setTickerLogs] = useState<string[]>([
     'Bereit für echte Live-Simulation. Klicken Sie auf Start.',
   ]);
@@ -105,14 +110,14 @@ export const SimulationWidget: React.FC = () => {
       },
     },
 
-    // 2. Echter KI-Aufruf & Gemma 12B Inferenz -> Navigiere zu /agent
+    // 2. Echter KI-Aufruf & Inferenz mit dem ausgelieferten Modell (issue #72)
+    // -> Navigiere zu /agent
     {
-      name: 'Gemma 12B KI-Triage & Modell-Inferenz',
+      name: `${aiModel} KI-Triage & Modell-Inferenz`,
       run: async () => {
         if (autoNavigate) navigate('/agent');
 
         const startTime = Date.now();
-        const aiModelName = 'Gemma 12B (Lokal)';
         let aiSummary = 'PV-Interesse mit Speicherbedarf erkannt, PII maskiert';
 
         // Finding #40: Use backend AI gateway API instead of raw unauthenticated localhost:11434
@@ -138,7 +143,7 @@ export const SimulationWidget: React.FC = () => {
         const latency = Date.now() - startTime;
         setStats((s) => ({ ...s, aiInferences: s.aiInferences + 1 }));
         queryClient.invalidateQueries({ queryKey: ['ai-observability'] });
-        return `🧠 KI-Zentrale (/agent): ${aiModelName} Inferenz (${latency}ms) -> "${aiSummary}".`;
+        return `🧠 KI-Zentrale (/agent): ${aiModel} Inferenz (${latency}ms) -> "${aiSummary}".`;
       },
     },
 

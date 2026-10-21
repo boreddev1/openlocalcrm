@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../api/client';
+import { MODEL_NOT_CONNECTED } from '../hooks/useAIModel';
 import {
   Sparkles,
   ShieldCheck,
@@ -37,23 +38,6 @@ export const AIAssistantPage: React.FC = () => {
   >('copilot');
   const [selectedAuditLog, setSelectedAuditLog] = useState<any>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
-
-  const { data: healthData } = useQuery<any>({
-    queryKey: ['health'],
-    queryFn: () => apiFetch('/api/v1/health'),
-    staleTime: 60000,
-  });
-
-  const formatModelBadge = (m?: string) => {
-    if (!m) return 'Mistral';
-    const lower = m.toLowerCase();
-    if (lower.startsWith('mistral')) return 'Mistral';
-    if (lower.includes('gemma')) return 'Gemma 12B';
-    if (lower.includes('gpt-4')) return 'GPT-4o';
-    if (lower.includes('claude')) return 'Claude';
-    return m.split(':')[0].toUpperCase();
-  };
-  const activeModel = formatModelBadge(healthData?.ai_model);
 
   // --- TAB 1: Chat Copilot State ---
   const [chatInput, setChatInput] = useState('');
@@ -249,10 +233,15 @@ export const AIAssistantPage: React.FC = () => {
     average_latency_ms: 0,
     compliance_standard: 'EU AI Act konform (Art. 50/52 Transparenz & Auditierbarkeit)',
     // No data from the API: show nothing rather than name a model this page
-    // cannot know. /api/v1/ai/observability returns the configured model.
-    active_model: '— (nicht verbunden)',
+    // cannot know. /api/v1/ai/observability returns the model the serving
+    // gateway actually uses (issue #72), demo marker included.
+    active_model: MODEL_NOT_CONNECTED,
     provider: 'Ollama Local / Isolated Single-Tenant',
   };
+
+  // Issue #72: every model label on this page names the actually served
+  // model from the observability stats — never a hardcoded string.
+  const activeModel: string = stats.active_model;
 
   const recentLogs = Array.isArray(observabilityData?.recent_logs)
     ? observabilityData.recent_logs
@@ -265,7 +254,7 @@ export const AIAssistantPage: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-100">KI-Zentrale & Copilot</h1>
           <p className="text-sm text-slate-400">
-            Gemma 12B Assistenz, Evidence-Ledger, Wissensbasis, Web-Recherche und EU AI Act
+            {activeModel} Assistenz, Evidence-Ledger, Wissensbasis, Web-Recherche und EU AI Act
             Observability
           </p>
         </div>
@@ -273,8 +262,12 @@ export const AIAssistantPage: React.FC = () => {
           <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold rounded-full">
             <ShieldCheck className="w-3.5 h-3.5" /> Prompt Guards Aktiv
           </span>
-          <span className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-semibold rounded-full">
-            <Cpu className="w-3.5 h-3.5" /> {activeModel} (Lokal)
+          <span
+            className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-semibold rounded-full max-w-xs"
+            title={activeModel}
+          >
+            <Cpu className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{activeModel}</span>
           </span>
         </div>
       </div>
@@ -654,8 +647,8 @@ export const AIAssistantPage: React.FC = () => {
               <span>Neuen Research-Auftrag starten (§5.4)</span>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Automatisierte Web-Recherche per Gemma 12B & SSRF-geschütztem Web-Crawl. Analysiert
-              Impressum, Gewerbedachflächen, Entscheider und technologische Eignung.
+              Automatisierte Web-Recherche per {activeModel} & SSRF-geschütztem Web-Crawl.
+              Analysiert Impressum, Gewerbedachflächen, Entscheider und technologische Eignung.
             </p>
 
             <form onSubmit={handleStartResearchJob} className="space-y-4">
@@ -782,7 +775,7 @@ export const AIAssistantPage: React.FC = () => {
               </span>
               {selectedResearchJob && (
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
-                  Gemma 12B Analyse abgeschlossen
+                  {activeModel} Analyse abgeschlossen
                 </span>
               )}
             </div>
@@ -1035,7 +1028,7 @@ export const AIAssistantPage: React.FC = () => {
           <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <span className="text-sm font-bold text-slate-200">
-                Strukturierte KI-Ergebnisse (Gemma 12B)
+                Strukturierte KI-Ergebnisse ({activeModel})
               </span>
               {triageResult && (
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
