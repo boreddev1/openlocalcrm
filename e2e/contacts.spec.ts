@@ -28,13 +28,19 @@ test.describe('Contacts Management (§3.1 Full CRUD & AI Research)', () => {
     await expect(page.getByText('Erika Musterfrau')).toBeVisible();
     await expect(page.getByText('Solarweg 42, 60311 Frankfurt')).toBeVisible();
 
-    // 2. Trigger Gemma 12B AI Research on Contact (§5.4)
+    // 2. Trigger AI Research on Contact (§5.4). Issue #72: the modal names the
+    // model the backend actually serves, taken from the same observability
+    // endpoint the UI reads — never a hardcoded model string.
+    const obsRes = await page.request.get('/api/v1/ai/observability');
+    await expect(obsRes.ok()).toBeTruthy();
+    const servedModel: string = (await obsRes.json())?.stats?.active_model;
+    expect(servedModel.length).toBeGreaterThan(0);
     const row = page.getByRole('row', { name: /Erika Musterfrau/i });
     await expect(row).toBeVisible();
 
     const researchBtn = row.getByRole('button', { name: /KI-Recherche/i });
     await researchBtn.click();
-    await expect(page.getByText(/Gemma 12B Recherche/i)).toBeVisible();
+    await expect(page.getByText(`${servedModel} Recherche`)).toBeVisible();
     await expect(page.getByText(/KI-Zusammenfassung/i)).toBeVisible();
 
     // Adopt research as note

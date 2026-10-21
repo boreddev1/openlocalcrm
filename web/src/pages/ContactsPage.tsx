@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, getFieldText } from '../api/client';
+import { useAIModel } from '../hooks/useAIModel';
 import {
   Plus,
   Search,
@@ -41,6 +42,10 @@ export const ContactsPage: React.FC = () => {
 
   // Research State (§5.4)
   const [researchModal, setResearchModal] = useState<any | null>(null);
+  // Issue #72: the research modal names the model that actually answers
+  // (observability stats, fetched only while the modal is open — /api/v1/ai
+  // is rate-limited). The button tooltip makes no model claim.
+  const aiModel = useAIModel(!!researchModal);
   const [isResearching, setIsResearching] = useState(false);
   const [researchResult, setResearchResult] = useState<any | null>(null);
 
@@ -429,7 +434,7 @@ export const ContactsPage: React.FC = () => {
                             })
                           }
                           className="p-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 rounded-lg text-xs transition-colors inline-flex items-center gap-1"
-                          title="Gemma 12B Firmen-Recherche starten (§5.4)"
+                          title="Firmen-Recherche starten (§5.4)"
                           aria-label="KI-Recherche"
                         >
                           <Sparkles className="w-3.5 h-3.5" />
@@ -1065,7 +1070,7 @@ export const ContactsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Gemma 12B AI Research Modal (§5.4) */}
+      {/* AI Research Modal (§5.4) */}
       {researchModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
@@ -1073,7 +1078,7 @@ export const ContactsPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-purple-400" />
                 <h3 className="font-bold text-slate-100 text-base">
-                  Gemma 12B Recherche: {researchModal.first_name} {researchModal.last_name}
+                  {aiModel} Recherche: {researchModal.first_name} {researchModal.last_name}
                 </h3>
               </div>
               <button
@@ -1088,7 +1093,7 @@ export const ContactsPage: React.FC = () => {
               <div className="py-8 text-center space-y-3">
                 <Sparkles className="w-8 h-8 text-purple-400 animate-spin mx-auto" />
                 <p className="text-xs text-slate-300">
-                  Gemma 12B ruft Webseite ab und analysiert Kerngeschäft & Nutzenversprechen...
+                  {aiModel} ruft Webseite ab und analysiert Kerngeschäft & Nutzenversprechen...
                 </p>
               </div>
             ) : researchResult ? (

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../api/client';
+import { useAIModel } from '../../hooks/useAIModel';
 import {
   X,
   MessageSquare,
@@ -32,6 +33,8 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
   entityName,
   onClose,
 }) => {
+  // Issue #72: the synthesis banner names the model the backend actually serves.
+  const aiModel = useAIModel();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<string>('ALL');
@@ -235,7 +238,7 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
         <div className="p-3 bg-purple-500/10 border-b border-purple-500/20 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2 text-xs text-purple-300">
             <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
-            <span>Gemma 12B Notizen-Synthese & Next Best Actions</span>
+            <span>{aiModel} Notizen-Synthese & Next Best Actions</span>
           </div>
           <button
             onClick={handleTriggerSynthesis}

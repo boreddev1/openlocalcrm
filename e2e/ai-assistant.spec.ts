@@ -4,14 +4,24 @@ test.describe('AI Assistant, Copilot, Research & EU Observability', () => {
   test('should display AI Copilot, Evidence-Ledger, KB, Research, Triage, and Observability tabs', async ({ page }) => {
     await page.goto('/agent');
 
-    // Check main heading and badges. "Gemma 12B (Lokal)" is only produced by
-    // web/src/simulation/SimulationWidget.tsx (collapsed to a pill here), never by
-    // /agent: the header badge reads healthData.ai_model, and /api/v1/health does not
-    // expose AI config (F-40, internal/server/router.go:134), so it shows the
-    // 'Mistral' fallback. Assert the page's own descriptive copy instead.
+    // Issue #72: every model label must name the model the backend actually
+    // serves. /api/v1/health stays AI-config-free (F-40); the legitimate
+    // source is the observability surface the page itself queries, so the
+    // expectation reads the same endpoint instead of any constant. The E2E
+    // harness runs DEMO_MODE=true, so the truthful answer is the demo stub
+    // marker (PR #67) — asserting it here proves demo output can never be
+    // mistaken for inference.
+    const obsRes = await page.request.get('/api/v1/ai/observability');
+    await expect(obsRes.ok()).toBeTruthy();
+    const servedModel: string = (await obsRes.json())?.stats?.active_model;
+    expect(typeof servedModel).toBe('string');
+    expect(servedModel.length).toBeGreaterThan(0);
+    expect(servedModel).toContain('DEMO');
+
+    // Check main heading and badges.
     await expect(page.getByRole('heading', { name: /KI-Zentrale & Copilot/i })).toBeVisible();
     await expect(page.getByText('Prompt Guards Aktiv')).toBeVisible();
-    await expect(page.getByText('Gemma 12B Assistenz')).toBeVisible();
+    await expect(page.getByText(`${servedModel} Assistenz`)).toBeVisible();
 
     // 1. Test Copilot Chat Tab
     await expect(page.getByRole('button', { name: /KI-Vertriebs-Copilot/i })).toBeVisible();

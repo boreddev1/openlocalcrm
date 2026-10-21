@@ -56,9 +56,14 @@ func main() {
 	aiGateway := ai.NewGateway(ai.GatewayConfig{
 		DefaultProvider: ai.Provider(aiEnv("AI_PROVIDER", "", "ollama")),
 		OllamaBaseURL:   aiEnv("OLLAMA_BASE_URL", "AI_BASE_URL", "http://localhost:11434"),
-		OllamaModel:     aiEnv("OLLAMA_MODEL", "AI_MODEL", "mistral"),
-		APIKey:          os.Getenv("AI_API_KEY"),
+		// Single source of truth (issue #72, precedent PR #64): the previous
+		// literal "mistral" made the worker triage audit logs name a model the
+		// rest of the system never assumes.
+		OllamaModel: aiEnv("OLLAMA_MODEL", "AI_MODEL", ai.DefaultOllamaModel),
+		APIKey:      os.Getenv("AI_API_KEY"),
 	})
+	// The gateway is the authority on which model the worker actually calls.
+	obsSvc.WithGateway(aiGateway)
 	triageSvc := ai.NewTriageService(aiGateway, obsSvc)
 
 	deps := queue.Deps{

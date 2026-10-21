@@ -234,6 +234,10 @@ func NewRouter(cfg Config) http.Handler {
 			// with zero network access; with demo off nothing changes.
 			DemoMode: cfg.DemoMode,
 		})
+		// Issue #72: the observability stats must name the model this gateway
+		// actually serves — including the demo marker — instead of re-reading
+		// the environment, which disagreed with demo mode and cfg.AIModel.
+		obsSvc.WithGateway(aiGateway)
 		triageSvc := ai.NewTriageService(aiGateway, obsSvc)
 		researchSvc := ai.NewResearchService(aiGateway, obsSvc)
 		chatSvc := ai.NewChatService(aiGateway, obsSvc, researchSvc, cfg.DB)

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../api/client';
+import { useAIModel } from '../../hooks/useAIModel';
 import {
   X,
   Sparkles,
@@ -41,6 +42,8 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
   onClose,
 }) => {
   const queryClient = useQueryClient();
+  // Issue #72: the OCR banner names the model the backend actually serves.
+  const aiModel = useAIModel();
   const [activeTab, setActiveTab] = useState<'consumption' | 'hardware' | 'pricing'>('consumption');
 
   // Extraction & Customer State
@@ -215,7 +218,7 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                 KI-Dokumentenextraktion & Manuell anpassbarer Angebotsrechner (§5.2 / §5.6 / §6.3)
               </h2>
               <p className="text-xs text-slate-400">
-                OCR-Extraktion mit Gemma 12B ➔ Deterministischer Rechner ➔ Volle manuelle
+                OCR-Extraktion mit {aiModel} ➔ Deterministischer Rechner ➔ Volle manuelle
                 Anpassungskontrolle für Vertriebler
               </p>
             </div>

@@ -12,7 +12,8 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { apiFetch } from '../../api/client';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAIModel } from '../../hooks/useAIModel';
 
 interface ActionCard {
   type: string;
@@ -38,22 +39,10 @@ export const AIChatDrawer: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { data: healthData } = useQuery<any>({
-    queryKey: ['health'],
-    queryFn: () => apiFetch('/api/v1/health'),
-    staleTime: 60000,
-  });
-
-  const formatModelBadge = (m?: string) => {
-    if (!m) return 'Mistral';
-    const lower = m.toLowerCase();
-    if (lower.startsWith('mistral')) return 'Mistral';
-    if (lower.includes('gemma')) return 'Gemma 12B';
-    if (lower.includes('gpt-4')) return 'GPT-4o';
-    if (lower.includes('claude')) return 'Claude';
-    return m.split(':')[0].toUpperCase();
-  };
-  const activeModel = formatModelBadge(healthData?.ai_model);
+  // Issue #72: the drawer labels the model the instance actually serves
+  // (observability stats), never a hardcoded name. /api/v1/ai is rate-limited,
+  // so the global drawer shell only fetches once the user opens it.
+  const activeModel = useAIModel(isOpen);
 
   const [messages, setMessages] = useState<Message[]>([
     {
