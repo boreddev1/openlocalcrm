@@ -159,11 +159,13 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
         setRoofOrientation(res.extracted.roof_orientation);
         handleKwpChange(res.extracted.recommended_kwp);
         setStorageKwh(res.extracted.recommended_storage_kwh);
-        if (res.mode === 'demo_template' || res.simulated) {
-          setFeedbackBanner('Mustervorlage (Demo-Daten): Beispieldaten für Stromrechnung geladen.');
-        } else {
-          setFeedbackBanner('Stromrechnung: Verbrauchs- & Zählerdaten erfolgreich extrahiert.');
-        }
+        // There is exactly one success banner. The old 'demo_template' /
+        // 'simulated' branch consumed a response shape that commit 5e9f4fd
+        // ("eliminate simulated responses") deleted from the backend: ParseBill
+        // always answers mode "ai_ocr_extraction", simulated false (or a 400/502
+        // honest failure). A branch that can never fire is debt, not a feature —
+        // see #70.
+        setFeedbackBanner('Stromrechnung: Verbrauchs- & Zählerdaten erfolgreich extrahiert.');
         setTimeout(() => setFeedbackBanner(null), 4000);
       }
     } catch {
