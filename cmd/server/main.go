@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -198,6 +199,14 @@ func main() {
 		log.Fatalf("failed initializing cryptographic keys: %v", err)
 	}
 
+	// The CSRF HMAC key must outlive a restart, otherwise every cookie-bound
+	// mutating request answers 403 until the user logs in again. Install it here
+	// and treat a configured-but-unusable secret as a fatal misconfiguration:
+	// falling back to a random key would look like success and lose the sessions.
+	if csrfErr := installCSRFSecret(privKey); csrfErr != nil {
+		log.Fatalf("failed initializing CSRF secret: %v", csrfErr)
+	}
+
 	// Initialize Storage & SSE Hub
 	localStorage := storage.NewLocalStorage(storagePath)
 	sseHub := sse.NewHub()
@@ -257,4 +266,35 @@ func main() {
 		log.Printf("[SHUTDOWN_WARNING] Error shutting down HTTP server: %v", err)
 	}
 	log.Println("crm-server stopped.")
+}
+
+// installCSRFSecret resolves the CSRF HMAC key for this process.
+//
+// CSRF_SECRET_KEY_PATH (optional) wins when set, mirroring JWT_SECRET_KEY_PATH, so
+// an operator can rotate or pin the secret independently of the signing key. Without
+// it the secret is derived from the signing key, which is already persisted and
+// already rotated by the same file - no second secret to forget about.
+//
+// Every failure is returned, never swallowed: an unreadable file, an empty file and
+// a too-short file are all fatal at the call site. Reading is deliberately not
+// allowed to fall through to derivation, because that would silently invalidate
+// tokens issued under the configured secret after a restart.
+func installCSRFSecret(privKey ed25519.PrivateKey) error {
+	path := os.Getenv("CSRF_SECRET_KEY_PATH")
+	if path == "" {
+		return auth.InstallCSRFSecretFromSigningKey(privKey)
+	}
+
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path comes from operator-controlled configuration, not request input
+	if err != nil {
+		return fmt.Errorf("CSRF_SECRET_KEY_PATH is set but unreadable (%s): %w", path, err)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return fmt.Errorf("CSRF_SECRET_KEY_PATH is set but empty after trimming whitespace (%s)", path)
+	}
+	if err := auth.SetCSRFSecret(data); err != nil {
+		return fmt.Errorf("CSRF_SECRET_KEY_PATH (%s): %w", path, err)
+	}
+	log.Printf("[Crypto] Installed persistent CSRF secret from %s", path) //nolint:gosec // G706: logged value is operator configuration, not attacker-controlled text
+	return nil
 }
