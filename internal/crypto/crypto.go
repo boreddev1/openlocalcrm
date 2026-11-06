@@ -18,20 +18,63 @@ var (
 	keyMu    sync.RWMutex
 )
 
+// defaultKeyFileName is the file name used when the key location is derived
+// from another directory instead of being configured outright.
+const defaultKeyFileName = "secrets.key"
+
 // GetKeyPath returns the resolved file path for the master secret key.
-func GetKeyPath() string {
-	path := os.Getenv("SECRETS_KEY_PATH")
-	if path == "" {
-		path = os.Getenv("SECRET_KEY_PATH")
+//
+// Resolution order - the first entry that yields a value wins:
+//
+//  1. SECRETS_KEY_PATH (canonical)
+//  2. SECRET_KEY_PATH (legacy alias, kept for existing installs)
+//  3. $STORAGE_PATH/keys/secrets.key, or $STORAGE_LOCAL_DIR/... (the same
+//     alias chain cmd/server uses for the storage root). docker-compose.yml,
+//     docker-compose.demo.yml and the launcher template all set STORAGE_PATH
+//     to a directory that is mounted from a persisted volume, so server and
+//     worker read one and the same key with no extra configuration.
+//  4. <user config dir>/openlocalcrm/secrets.key (os.UserConfigDir:
+//     $XDG_CONFIG_HOME, %AppData%, ~/Library/Application Support) - the
+//     locally-run and launcher-installed case where no storage root is set.
+//
+// There is deliberately no working-directory default. The old fallback was
+// "data/secrets.key" relative to the process cwd, so every
+// `go test ./internal/auth/...` generated a fresh 256-bit master key straight
+// into the package directory (issue #122). Only the `*.key` filename rule in
+// .gitignore hid it; any sibling file in that directory stays committable, so
+// a `git add -A` after a test run could ship a real key.
+//
+// An explicitly configured path is honored verbatim - the operator owns it.
+// If nothing can be resolved the error is returned instead of silently
+// picking a location: a wrong or unwritable key path must fail loudly, the
+// same way cmd/server treats an unpersistable JWT signing key.
+func GetKeyPath() (string, error) {
+	if path := firstConfiguredEnv("SECRETS_KEY_PATH", "SECRET_KEY_PATH"); path != "" {
+		return path, nil
 	}
-	if path == "" {
-		path = "data/secrets.key"
+	if storage := firstConfiguredEnv("STORAGE_PATH", "STORAGE_LOCAL_DIR"); storage != "" {
+		return filepath.Join(storage, "keys", defaultKeyFileName), nil
 	}
-	return path
+	if dir, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(dir, "openlocalcrm", defaultKeyFileName), nil
+	}
+	return "", errors.New("cannot resolve a location for the master secret key: " +
+		"set SECRETS_KEY_PATH to an absolute path (e.g. /app/keys/secrets.key), " +
+		"or STORAGE_PATH so it can be derived from the storage directory")
 }
 
-// GetOrCreateMasterKey loads the master 256-bit AES key from SECRETS_KEY_PATH,
-// or generates a new one with 0600 permissions if absent.
+// firstConfiguredEnv returns the first non-empty value among names.
+func firstConfiguredEnv(names ...string) string {
+	for _, name := range names {
+		if v := os.Getenv(name); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// GetOrCreateMasterKey loads the master 256-bit AES key from the path resolved
+// by GetKeyPath, or generates a new one with 0600 permissions if absent.
 func GetOrCreateMasterKey() ([]byte, error) {
 	keyMu.RLock()
 	if len(keyCache) == 32 {
@@ -51,7 +94,11 @@ func GetOrCreateMasterKey() ([]byte, error) {
 		return cp, nil
 	}
 
-	keyPath := GetKeyPath()
+	keyPath, err := GetKeyPath()
+	if err != nil {
+		return nil, err
+	}
+
 	if data, err := os.ReadFile(keyPath); err == nil {
 		if len(data) == 32 {
 			keyCache = make([]byte, 32)

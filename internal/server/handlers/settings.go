@@ -20,12 +20,32 @@ type SettingsHandler struct {
 	audit   *audit.Service
 }
 
+// NewSettingsHandler builds the handler for the deployment's .env file.
+//
+// The directory is taken from the explicit argument (the launcher and the tests
+// pass one), otherwise from $CONFIG_DIR, otherwise the working directory. An
+// import writes a regenerated .env - with a fresh database password, connector
+// token and admin password - so the working-directory fallback must never be
+// relied on: inside a `go test` binary the working directory is the package
+// directory, and that fallback dropped a live production-style configuration
+// file straight into the source tree (issue #122), visible to git only as long
+// as the file is named `.env`.
 func NewSettingsHandler(baseDir ...string) *SettingsHandler {
-	dir := "."
+	dir := defaultConfigDir()
 	if len(baseDir) > 0 && baseDir[0] != "" {
 		dir = baseDir[0]
 	}
 	return &SettingsHandler{baseDir: dir}
+}
+
+// defaultConfigDir is the fallback every settings handler gets when no base
+// directory was passed. Unset $CONFIG_DIR keeps the historic behavior (working
+// directory), which is what the containerised server has always used.
+func defaultConfigDir() string {
+	if dir := os.Getenv("CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	return "."
 }
 
 func (h *SettingsHandler) WithAudit(auditSvc *audit.Service) *SettingsHandler {
