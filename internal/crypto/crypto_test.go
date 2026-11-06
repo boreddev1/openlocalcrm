@@ -2,10 +2,12 @@ package crypto
 
 import (
 	"bytes"
+	"encoding/base64"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -885,5 +887,161 @@ func TestResolveKeyPath_IgnoresNonRegularLegacyEntries(t *testing.T) {
 	}
 	if res.IgnoredLegacyPath != "" {
 		t.Errorf("expected nothing ignored, got %q", res.IgnoredLegacyPath)
+	}
+}
+
+// Legacy rescue when nothing else can be derived at all (no STORAGE_PATH, no
+// usable user config dir): the legacy file is still reused, the warning says
+// there is no replacement location, and the process does not fail.
+func TestResolveKeyPath_LegacyRescueWithoutDerivableLocation(t *testing.T) {
+	clearKeyEnv(t)
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	key := writeKeyFile(t, legacyPathIn(cwd), 57)
+
+	res, err := resolveKeyPath(cwd)
+	if err != nil {
+		t.Fatalf("a readable legacy key must be enough: %v", err)
+	}
+	if res.Source != KeyPathLegacy || res.Path != legacyPathIn(cwd) {
+		t.Fatalf("unexpected resolution %+v", res)
+	}
+	if res.CreatePath != "" {
+		t.Errorf("no location is derivable, CreatePath must stay empty, got %q", res.CreatePath)
+	}
+	notice := res.Notice()
+	if !strings.Contains(notice, "no replacement location could be derived") || !strings.Contains(notice, "SECRETS_KEY_PATH") {
+		t.Errorf("the warning must say that nothing could be derived and name the pin, got %q", notice)
+	}
+
+	got, err := GetOrCreateMasterKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateMasterKey: %v", err)
+	}
+	if !bytes.Equal(got, key) {
+		t.Fatal("expected the legacy key bytes")
+	}
+	entries, err := os.ReadDir(cwd)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("expected only the legacy data/ directory, got %v", entries)
+	}
+}
+
+// Small helpers with security-relevant edge inputs: an empty path is never a
+// key file, and path comparison is cleaning-normalised.
+func TestKeyPathHelpers(t *testing.T) {
+	if regularFileExists("") {
+		t.Error("the empty path must not count as an existing key")
+	}
+	if regularFileExists(t.TempDir()) {
+		t.Error("a directory is not a regular file")
+	}
+	if samePath("", "/a/b") || samePath("/a/b", "") {
+		t.Error("an empty path never equals another")
+	}
+	if !samePath("/a/b", "/a/./b") {
+		t.Error("/a/b and /a/./b are the same location")
+	}
+}
+
+// The base64 key shape is documented and load-bearing: a stored credential
+// encrypted with such a key must keep decrypting after a restart.
+func TestGetOrCreateMasterKey_LoadsBase64EncodedKey(t *testing.T) {
+	clearKeyEnv(t)
+
+	raw := make([]byte, 32)
+	for i := range raw {
+		raw[i] = byte(200 + i)
+	}
+	path := filepath.Join(t.TempDir(), defaultKeyFileName)
+	encoded := base64.StdEncoding.EncodeToString(raw)
+	if err := os.WriteFile(path, []byte(encoded), 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	t.Setenv("SECRETS_KEY_PATH", path)
+
+	got, err := GetOrCreateMasterKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateMasterKey: %v", err)
+	}
+	if !bytes.Equal(got, raw) {
+		t.Fatalf("expected the decoded key %x, got %x", raw, got)
+	}
+	if after := mustRead(t, path); string(after) != encoded {
+		t.Error("a base64 key file was rewritten instead of loaded")
+	}
+}
+
+// SetMasterKeyForTest with a real key is what every other package uses; it must
+// win over the whole resolution chain (no file access, no error even when
+// nothing is configurable).
+func TestSetMasterKeyForTest_ShortCircuitsResolution(t *testing.T) {
+	clearKeyEnv(t)
+
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i * 3)
+	}
+	SetMasterKeyForTest(key)
+
+	got, err := GetOrCreateMasterKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateMasterKey: %v", err)
+	}
+	if !bytes.Equal(got, key) {
+		t.Errorf("expected the injected key, got %x", got)
+	}
+	sealed, err := EncryptSecret("nur-getestet")
+	if err != nil {
+		t.Fatalf("EncryptSecret: %v", err)
+	}
+	opened, err := DecryptSecret(sealed)
+	if err != nil {
+		t.Fatalf("DecryptSecret: %v", err)
+	}
+	if opened != "nur-getestet" {
+		t.Errorf("roundtrip through the injected key failed: %q", opened)
+	}
+}
+
+// Concurrent first use is the real server/worker shape (SSE handlers, jobs).
+// It exercises the double-checked cache path, the legacy notice latch and the
+// new mutex pairing without deadlocking, and every caller must get one key.
+func TestGetOrCreateMasterKey_ConcurrentFirstUse(t *testing.T) {
+	clearKeyEnv(t)
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	legacyKey := writeKeyFile(t, legacyPathIn(cwd), 61)
+	storage := t.TempDir()
+	t.Setenv("STORAGE_PATH", storage)
+
+	var wg sync.WaitGroup
+	results := make([][]byte, 8)
+	errs := make([]error, len(results))
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			key, err := GetOrCreateMasterKey()
+			results[i], errs[i] = key, err
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: %v", i, err)
+		}
+		if !bytes.Equal(results[i], legacyKey) {
+			t.Fatalf("goroutine %d got a different key - secrets would split across two masters", i)
+		}
+	}
+	if regularFileExists(derivedPathIn(storage)) {
+		t.Error("a racing goroutine minted a second key in the storage volume")
 	}
 }
