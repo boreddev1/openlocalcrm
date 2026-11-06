@@ -2,7 +2,10 @@ package crypto
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -361,6 +364,338 @@ func TestGetOrCreateMasterKey_ReportsUnresolvablePath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "SECRETS_KEY_PATH") {
 		t.Errorf("expected the error to name SECRETS_KEY_PATH, got: %v", err)
+	}
+}
+
+// --- fail-closed: a present but unusable key is never replaced (issue #128) --
+
+// listDir names the entries of a directory, for "nothing else was written"
+// assertions: no second key, no temp-file residue.
+func listDir(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir %s: %v", dir, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// (a) No key file yet: the key is minted at the resolved location with 0600
+// and published without leaving temporary files behind.
+func TestGetOrCreateMasterKey_CreatesWhenAbsent(t *testing.T) {
+	clearKeyEnv(t)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, defaultKeyFileName)
+	t.Setenv("SECRETS_KEY_PATH", path)
+
+	key, err := GetOrCreateMasterKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateMasterKey: %v", err)
+	}
+	if len(key) != 32 {
+		t.Fatalf("expected a 32-byte key, got %d bytes", len(key))
+	}
+	if after := mustRead(t, path); !bytes.Equal(after, key) {
+		t.Error("the key on disk is not the key in use")
+	}
+	if fi, err := os.Stat(path); err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	} else if perm := fi.Mode().Perm(); perm != 0600 {
+		t.Errorf("expected 0600 on %s, got %o", path, perm)
+	}
+	if names := listDir(t, dir); len(names) != 1 || names[0] != defaultKeyFileName {
+		t.Errorf("expected only the key file after minting, got %v", names)
+	}
+}
+
+// (b) An existing valid key file is reused exactly: the returned bytes match,
+// the file content (hash) is unchanged, and the directory gains no other
+// entry. Regenerating here would orphan every stored secret - the #128 bug.
+func TestGetOrCreateMasterKey_ReusesExistingValidKey(t *testing.T) {
+	clearKeyEnv(t)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, defaultKeyFileName)
+	want := writeKeyFile(t, path, 7)
+	before := sha256Of(t, mustRead(t, path))
+	t.Setenv("SECRETS_KEY_PATH", path)
+
+	got, err := GetOrCreateMasterKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateMasterKey: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("an existing valid key was replaced instead of reused - stored secrets would be undecryptable")
+	}
+	if after := mustRead(t, path); sha256Of(t, after) != before {
+		t.Error("the key file content changed on a read-only reuse")
+	}
+	if names := listDir(t, dir); len(names) != 1 || names[0] != defaultKeyFileName {
+		t.Errorf("expected the directory to hold only the key file, got %v", names)
+	}
+
+	// And after a restart (cache dropped) the same file is still the key.
+	SetMasterKeyForTest(nil)
+	again, err := GetOrCreateMasterKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateMasterKey after restart: %v", err)
+	}
+	if !bytes.Equal(again, want) {
+		t.Error("the key changed across a simulated restart")
+	}
+	if after := mustRead(t, path); sha256Of(t, after) != before {
+		t.Error("the restart rewrote the key file")
+	}
+}
+
+// sha256Of hashes content so "unchanged" assertions are explicit rather than
+// relying on bytes.Equal alone.
+func sha256Of(t *testing.T, content []byte) string {
+	t.Helper()
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
+}
+
+// (c) The key file exists but is not a usable key - empty, truncated, wrong
+// byte length, garbage, base64 of the wrong length. Every case is a hard
+// error naming the path and the cause, and the file bytes on disk are
+// provably UNCHANGED afterwards: no truncation, no overwrite, no fresh key,
+// no temp residue, and the failure is not cached away - the next call (and
+// Encrypt/Decrypt through it) keeps failing until the operator fixes it.
+func TestGetOrCreateMasterKey_FailClosedOnUnusableFile(t *testing.T) {
+	realKey := make([]byte, 32)
+	for i := range realKey {
+		realKey[i] = byte(i)
+	}
+
+	tests := []struct {
+		name      string
+		content   []byte
+		wantCause string
+	}{
+		{name: "empty file", content: []byte(""), wantCause: "empty file, 0 bytes"},
+		{name: "truncated key", content: realKey[:31], wantCause: "looks truncated"},
+		{name: "short garbage", content: []byte("kurz"), wantCause: "does not contain a usable key"},
+		{name: "long garbage", content: bytes.Repeat([]byte("x"), 50), wantCause: "does not contain a usable key"},
+		{name: "base64 of wrong length", content: []byte(base64.StdEncoding.EncodeToString(realKey[:16])), wantCause: "does not contain a usable key"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clearKeyEnv(t)
+
+			dir := t.TempDir()
+			path := filepath.Join(dir, defaultKeyFileName)
+			if err := os.WriteFile(path, tc.content, 0600); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			t.Setenv("SECRETS_KEY_PATH", path)
+
+			key, err := GetOrCreateMasterKey()
+			if err == nil {
+				t.Fatalf("expected a hard error for an unusable key file, got a key %x", key)
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Errorf("the error must name the path, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantCause) {
+				t.Errorf("the error must name the cause %q, got: %v", tc.wantCause, err)
+			}
+			if !strings.Contains(err.Error(), "Refusing to overwrite") {
+				t.Errorf("the error must say the file will not be touched, got: %v", err)
+			}
+			if !errors.Is(err, ErrKeyUnusable) {
+				t.Errorf("the error must classify as ErrKeyUnusable for callers, got: %v", err)
+			}
+			// Non-vacuous core assertion: the bytes on disk did not move.
+			if after := mustRead(t, path); !bytes.Equal(after, tc.content) {
+				t.Errorf("the invalid key file was rewritten: got %x, want %x", after, tc.content)
+			}
+			if names := listDir(t, dir); len(names) != 1 || names[0] != defaultKeyFileName {
+				t.Errorf("expected only the untouched key file, got %v", names)
+			}
+			// The failure must not be papered over by a cached mint:
+			SetMasterKeyForTest(nil)
+			if _, err2 := GetOrCreateMasterKey(); err2 == nil {
+				t.Error("a second call succeeded - a fresh key replaced the broken one")
+			}
+			// ...and encryption through the same code path refuses too.
+			if _, err := EncryptSecret("vertrieb@openlocalcrm.local"); err == nil {
+				t.Error("EncryptSecret succeeded over a broken master key")
+			} else if !errors.Is(err, ErrKeyUnusable) {
+				t.Errorf("EncryptSecret must propagate ErrKeyUnusable, got: %v", err)
+			}
+		})
+	}
+}
+
+// The fail-closed rule covers every NON-legacy location named in the issue:
+// SECRETS_KEY_PATH, its SECRET_KEY_PATH alias, $STORAGE_PATH/keys/secrets.key
+// and the user-config-dir location.
+func TestGetOrCreateMasterKey_FailClosedAtEveryNonLegacyLocation(t *testing.T) {
+	garbage := bytes.Repeat([]byte("x"), 50)
+
+	cases := []struct {
+		name  string
+		setup func(t *testing.T) (path string, dir string)
+	}{
+		{
+			name: "SECRETS_KEY_PATH",
+			setup: func(t *testing.T) (string, string) {
+				dir := t.TempDir()
+				path := filepath.Join(dir, defaultKeyFileName)
+				t.Setenv("SECRETS_KEY_PATH", path)
+				return path, dir
+			},
+		},
+		{
+			name: "SECRET_KEY_PATH alias",
+			setup: func(t *testing.T) (string, string) {
+				dir := t.TempDir()
+				path := filepath.Join(dir, defaultKeyFileName)
+				t.Setenv("SECRET_KEY_PATH", path)
+				return path, dir
+			},
+		},
+		{
+			name: "STORAGE_PATH derived",
+			setup: func(t *testing.T) (string, string) {
+				storage := t.TempDir()
+				t.Setenv("STORAGE_PATH", storage)
+				path := derivedPathIn(storage)
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				return path, filepath.Dir(path)
+			},
+		},
+		{
+			name: "user config dir",
+			setup: func(t *testing.T) (string, string) {
+				home := t.TempDir()
+				t.Setenv("XDG_CONFIG_HOME", home)
+				t.Setenv("APPDATA", home)
+				t.Setenv("HOME", home)
+				path := filepath.Join(home, "openlocalcrm", defaultKeyFileName)
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				return path, filepath.Dir(path)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearKeyEnv(t)
+			path, dir := tc.setup(t)
+			if err := os.WriteFile(path, garbage, 0600); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+
+			_, err := GetOrCreateMasterKey()
+			if err == nil {
+				t.Fatal("expected a hard error instead of a regenerated key")
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Errorf("the error must name %s, got: %v", path, err)
+			}
+			if !errors.Is(err, ErrKeyUnusable) {
+				t.Errorf("expected ErrKeyUnusable, got: %v", err)
+			}
+			if after := mustRead(t, path); !bytes.Equal(after, garbage) {
+				t.Error("the invalid key file was overwritten")
+			}
+			if names := listDir(t, dir); len(names) != 1 || names[0] != defaultKeyFileName {
+				t.Errorf("expected only the untouched key file in %s, got %v", dir, names)
+			}
+		})
+	}
+}
+
+// (d) A key file that exists but cannot be read (permissions) is "present but
+// unusable", not "absent": hard error, file untouched, nothing generated.
+func TestGetOrCreateMasterKey_FailClosedOnUnreadableFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: file permissions are not enforced")
+	}
+	clearKeyEnv(t)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, defaultKeyFileName)
+	want := writeKeyFile(t, path, 8)
+	if err := os.Chmod(path, 0000); err != nil {
+		t.Fatalf("chmod 000: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0600) })
+	t.Setenv("SECRETS_KEY_PATH", path)
+
+	_, err := GetOrCreateMasterKey()
+	if err == nil {
+		t.Fatal("expected a hard error for an unreadable key file, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot read the master key file") {
+		t.Errorf("the error must say the file cannot be read, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("the error must name the path, got: %v", err)
+	}
+	if !errors.Is(err, ErrKeyUnusable) {
+		t.Errorf("expected ErrKeyUnusable, got: %v", err)
+	}
+	// Give the test itself read access back and prove the file never moved:
+	// a fail-open implementation would have replaced it with a fresh key here.
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatalf("chmod 600: %v", err)
+	}
+	if after := mustRead(t, path); !bytes.Equal(after, want) {
+		t.Error("the unreadable key file was replaced")
+	}
+	if names := listDir(t, dir); len(names) != 1 || names[0] != defaultKeyFileName {
+		t.Errorf("expected only the original key file, got %v", names)
+	}
+}
+
+// The mint path stays atomic under the real server+worker shape: concurrent
+// first use on an EMPTY location must converge on exactly one key - the bytes
+// on disk - with no second file and no temp residue. (With the old
+// check-write-write code both renames could publish different bytes and the
+// two processes would keep encrypting with two different masters.)
+func TestGetOrCreateMasterKey_ConcurrentFirstMintConverges(t *testing.T) {
+	clearKeyEnv(t)
+
+	storage := t.TempDir()
+	t.Setenv("STORAGE_PATH", storage)
+
+	const n = 8
+	keys := make([][]byte, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			keys[i], errs[i] = GetOrCreateMasterKey()
+		}(i)
+	}
+	wg.Wait()
+
+	onDisk := mustRead(t, derivedPathIn(storage))
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d: %v", i, errs[i])
+		}
+		if !bytes.Equal(keys[i], onDisk) {
+			t.Fatalf("goroutine %d holds a key that is not on disk - split-brain masters", i)
+		}
+	}
+	if names := listDir(t, filepath.Dir(derivedPathIn(storage))); len(names) != 1 || names[0] != defaultKeyFileName {
+		t.Errorf("expected exactly one key file, got %v", names)
 	}
 }
 

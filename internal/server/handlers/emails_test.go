@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -242,4 +244,58 @@ func TestEmailHandler_TagMessage(t *testing.T) {
 	var updated db.EmailMessage
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&updated))
 	require.JSONEq(t, `["wichtig","angebot"]`, string(updated.Tags))
+}
+
+// Fail-closed master key errors (issue #128) are operator information: they
+// name the key file path and recovery steps. The API response must stay
+// generic - no filesystem paths in a body a client can read - while the
+// detailed cause is logged for the operator.
+func TestEmailHandler_MasterKeyFailureIsNotLeakedToClients(t *testing.T) {
+	t.Cleanup(func() { crypto.SetMasterKeyForTest(nil) })
+	crypto.SetMasterKeyForTest(nil)
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "secrets.key")
+	if err := os.WriteFile(keyPath, []byte("corrupt master key file"), 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	t.Setenv("SECRETS_KEY_PATH", keyPath)
+
+	q := demo.NewEmptyInMemoryQuerier()
+	svc := email.NewService(q, nil, nil, nil)
+	h := handlers.NewEmailHandler(svc, true)
+	adminClaims := &auth.AccessClaims{UserID: uuid.New(), Role: "ADMIN"}
+	withAuth := func(req *http.Request) *http.Request {
+		return req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, adminClaims))
+	}
+
+	body, _ := json.Marshal(handlers.EmailAccountRequest{
+		Name:         "Kaputtes Postfach",
+		EmailAddress: "kaputt@openlocalcrm.local",
+		Provider:     "IMAP",
+		ImapHost:     "imap.example.com",
+		ImapPort:     993,
+		SmtpHost:     "smtp.example.com",
+		SmtpPort:     587,
+		Username:     "kaputt@openlocalcrm.local",
+		Password:     "s3cret-password",
+	})
+	req := withAuth(httptest.NewRequest(http.MethodPost, "/api/v1/emails/accounts", bytes.NewReader(body)))
+	rec := httptest.NewRecorder()
+
+	h.CreateAccount(rec, req)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+
+	msg := rec.Body.String()
+	require.Contains(t, msg, "master key")
+	require.NotContains(t, msg, keyPath)
+	require.NotContains(t, msg, dir)
+	require.NotContains(t, msg, "does not contain a usable key")
+	require.NotContains(t, msg, "Recovery:")
+	require.NotContains(t, msg, "s3cret-password")
+
+	// And the refusal never touched the corrupt file (fail-closed, #128).
+	raw, err := os.ReadFile(keyPath)
+	require.NoError(t, err)
+	require.Equal(t, "corrupt master key file", string(raw))
 }

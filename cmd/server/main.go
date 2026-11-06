@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/openlocalcrm/openlocalcrm/internal/server"
@@ -205,6 +206,19 @@ func main() {
 	// falling back to a random key would look like success and lose the sessions.
 	if csrfErr := installCSRFSecret(privKey); csrfErr != nil {
 		log.Fatalf("failed initializing CSRF secret: %v", csrfErr)
+	}
+
+	// Master secret key (encrypts stored mail account passwords and TOTP seeds
+	// at rest). Resolve it now and refuse to start when the key file exists but
+	// cannot be used (issue #128): continuing would look like a healthy boot
+	// and only reveal the damage when the first stored secret fails to decrypt.
+	// Getting it wrong is a log.Fatalf with the path, the cause and the
+	// recovery steps. Demo mode keeps everything in memory, encrypts nothing
+	// and must not touch filesystem key locations (issue #122).
+	if !isDemoMode {
+		if _, keyErr := crypto.GetOrCreateMasterKey(); keyErr != nil {
+			log.Fatalf("[FATAL] unusable master secret key: %v", keyErr)
+		}
 	}
 
 	// Initialize Storage & SSE Hub
