@@ -1,4 +1,4 @@
-.PHONY: help build up down restart logs test test-e2e check-licenses run-local clean check-backup-integration
+.PHONY: help build up down restart logs test test-e2e check-licenses run-local clean check-backup-integration check-dist-freshness
 
 help: ## Show help instructions
 	@echo "OpenLocalCRM — Single-Tenant Production & Development Commands:"
@@ -10,6 +10,7 @@ help: ## Show help instructions
 	@echo "  make test            - Run all unit and integration tests"
 	@echo "  make test-e2e        - Run all 20 Playwright E2E UI tests"
 	@echo "  make check-licenses  - Audit 100% Permissive Open Source License Compliance"
+	@echo "  make check-dist-freshness - Rebuild web/ and verify web/dist on disk == git index (incl. gitignored files, #130)"
 	@echo "  make run-local       - Run server locally on :8080"
 
 build-web:
@@ -84,7 +85,7 @@ lint: ## Run go vet, golangci-lint (v2, .golangci.yml), frontend ESLint and Type
 	$(GOLANGCI_LINT) run ./...
 	cd web && pnpm lint && pnpm typecheck
 
-check: setup-hooks fmt lint check-licenses check-backup-integration test ## Run full suite of local quality checks
+check: setup-hooks fmt lint check-licenses check-backup-integration test check-dist-freshness ## Run full suite of local quality checks
 
 setup-hooks: ## Configure and enable enterprise Git pre-commit and pre-push hooks
 	git config core.hooksPath .githooks
@@ -105,3 +106,6 @@ run-local: build-web ## Run Go binary locally
 
 clean: ## Clean build artifacts
 	rm -rf bin/ web/dist/
+
+check-dist-freshness: ## Rebuild web/ and compare web/dist on disk vs git index by hash — catches files .gitignore hides from git status (issue #130)
+	./scripts/check-dist-freshness.sh
