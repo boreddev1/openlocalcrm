@@ -1,0 +1,85 @@
+{
+  "$comment": "Explizite, befristete Lizenzausnahmen für THIRD-PARTY-LICENSES.csv. Dies ist KEINE Ignore-Liste: ./scripts/check-licenses.sh verlangt, dass jede Zeile passt — eine Ausnahme, die nichts mehr trifft (DEAD), deren Prüffrist abgelaufen ist (OVERDUE) oder deren Felder fehlen (BAD ENTRY), lässt den Check scheitern. Hartes Copyleft (GPL/AGPL/LGPL/SSPL/BUSL/Commons-Clause) kann diese Datei nicht erlauben. Siehe docs/COMPLIANCE_AND_LICENSES.md §2.",
+  "dependencies": [
+    {
+      "package": "github.com/riverqueue/river",
+      "license": "MPL-2.0",
+      "decision": "accepted",
+      "reason": "Kernabhängigkeit des Queue-Workers (crm-worker, Postgres-nativ — dieselbe Datenbank wie die Geschäftsdaten, kein zusätzlicher Broker). MPL-2.0 ist Datei-Level-Copyleft: eigenes Go-Code bleibt MIT, nur direkt geänderte River-Dateien müssen unter MPL zurückgegeben werden; vom fertigen Binary verlangt MPL nichts. Ob es eine vollständig permissive, Postgres-native Job-Queue in Go als gleichwertigen Ersatz gibt, wurde hier NICHT ermittelt — weder 'es gibt keine' noch 'es gibt eine' ist entschieden. Re-review, wenn (a) upstream die Lizenz ändert, (b) die Queue-Schicht ausgetauscht werden soll, oder (c) eine permissive Alternative tatsächlich evaluiert wurde.",
+      "issue": "https://github.com/boreddev1/openlocalcrm/issues/126",
+      "acceptedBy": "ewenwitte",
+      "recordedOn": "2026-11-06",
+      "reviewBy": "2027-06-30"
+    },
+    {
+      "package": "github.com/riverqueue/river/riverdriver",
+      "license": "MPL-2.0",
+      "decision": "accepted",
+      "reason": "Untermodul von github.com/riverqueue/river im selben Repository. Upstream führt in diesem Unterordner keine eigene LICENSE-Datei — der bisher verlinkte Pfad war ein toter Link (HTTP 404, bereits in v0.44.1). Die Wurzel-LICENSE des Tags ist MPL-2.0 und erklärt das gesamte Repository als Covered Software. Entscheidung folgt github.com/riverqueue/river (#126).",
+      "issue": "https://github.com/boreddev1/openlocalcrm/issues/126",
+      "acceptedBy": "ewenwitte",
+      "recordedOn": "2026-11-06",
+      "reviewBy": "2027-06-30"
+    },
+    {
+      "package": "github.com/riverqueue/river/riverdriver/riverpgxv5",
+      "license": "MPL-2.0",
+      "decision": "accepted",
+      "reason": "Untermodul von github.com/riverqueue/river im selben Repository; eigene LICENSE-Datei existiert upstream nicht (alter Link war HTTP 404), es gilt die MPL-2.0-Wurzellizenz des Tags. Entscheidung folgt github.com/riverqueue/river (#126).",
+      "issue": "https://github.com/boreddev1/openlocalcrm/issues/126",
+      "acceptedBy": "ewenwitte",
+      "recordedOn": "2026-11-06",
+      "reviewBy": "2027-06-30"
+    },
+    {
+      "package": "github.com/riverqueue/river/rivershared",
+      "license": "MPL-2.0",
+      "decision": "accepted",
+      "reason": "Untermodul von github.com/riverqueue/river im selben Repository; eigene LICENSE-Datei existiert upstream nicht (alter Link war HTTP 404), es gilt die MPL-2.0-Wurzellizenz des Tags. Entscheidung folgt github.com/riverqueue/river (#126).",
+      "issue": "https://github.com/boreddev1/openlocalcrm/issues/126",
+      "acceptedBy": "ewenwitte",
+      "recordedOn": "2026-11-06",
+      "reviewBy": "2027-06-30"
+    },
+    {
+      "package": "github.com/riverqueue/river/rivertype",
+      "license": "MPL-2.0",
+      "decision": "accepted",
+      "reason": "Untermodul von github.com/riverqueue/river im selben Repository; eigene LICENSE-Datei existiert upstream nicht (alter Link war HTTP 404), es gilt die MPL-2.0-Wurzellizenz des Tags. Entscheidung folgt github.com/riverqueue/river (#126).",
+      "issue": "https://github.com/boreddev1/openlocalcrm/issues/126",
+      "acceptedBy": "ewenwitte",
+      "recordedOn": "2026-11-06",
+      "reviewBy": "2027-06-30"
+    },
+    {
+      "package": "lightningcss",
+      "license": "MPL-2.0",
+      "decision": "accepted",
+      "reason": "Build-time-Abhängigkeit von vite 8 (CSS-Transformation/Minifizierung, Rust-Native-Addon, läuft nur im Node-Prozess während `pnpm build`). Es gelangt kein lightningcss-Code in das eingebettete web/dist: das Bundle enthält kein Modul dieses Pakets, im generierten Stylesheet stehen nur die von lightningcss erzeugten CSS-Variablen (--lightningcss-light / --lightningcss-dark) — geprüft am 2026-11-06 gegen web/dist/assets/index-Dcfrlh5U.css. MPL-Pflichten treffen Modifikationen an lightningcss selbst; die gibt es hier nicht. Re-review, wenn vite den CSS-Transformer wechselt, lightningcss-Code in den Auslieferungspfad gelangt oder die Lizenz sich ändert.",
+      "issue": "https://github.com/boreddev1/openlocalcrm/issues/126",
+      "acceptedBy": "ewenwitte",
+      "recordedOn": "2026-11-06",
+      "reviewBy": "2027-11-06"
+    },
+    {
+      "package": "react-leaflet",
+      "license": "Hippocratic-2.1",
+      "decision": "pending",
+      "reason": "Noch NICHT freigegeben — diese Zeile wurde erst durch die Verschärfung des Checks sichtbar, nicht durch eine neue Entscheidung. Hippocratic-2.1 ist keine permissive OSI-Lizenz, sondern MIT plus Nutzungsbeschränkung; die 100%-permissive-Prosa in AGENTS.md deckt sie nicht, und die alte Fassung des Checks hat sie kommentarlos durchgelassen. In Nutzung: web/src/pages/MapViewPage.tsx (Kartenansicht). Ein Ersatz ist machbar: leaflet (BSD-2-Clause) ist bereits im Projekt, react-leaflet ist nur eine dünne Wrapper-Schicht darüber. Zu entscheiden bis reviewBy: ersetzen oder bewusst als befristete Ausnahme tragen.",
+      "issue": "https://github.com/boreddev1/openlocalcrm/issues/126",
+      "decidedBy": "ewenwitte (Product Owner) gemeinsam mit Rechtlichem — Entscheidung steht noch aus",
+      "recordedOn": "2026-11-06",
+      "reviewBy": "2026-12-04"
+    },
+    {
+      "package": "@react-leaflet/core",
+      "license": "Hippocratic-2.1",
+      "decision": "pending",
+      "reason": "Transitive Laufzeitabhängigkeit von react-leaflet (dasselbe Repository, dieselbe Lizenz, eigene LICENSE.md in packages/core). Dieselbe offene Entscheidung wie für react-leaflet: Hippocratic-2.1 ist nicht permissiv, der alte Check hat sie durchgelassen, die Verschärfung macht sie sichtbar. Wird die Entscheidung 'ersetzen' lauten, fällt diese Zeile mit.",
+      "issue": "https://github.com/boreddev1/openlocalcrm/issues/126",
+      "decidedBy": "ewenwitte (Product Owner) gemeinsam mit Rechtlichem — Entscheidung steht noch aus",
+      "recordedOn": "2026-11-06",
+      "reviewBy": "2026-12-04"
+    }
+  ]
+}
