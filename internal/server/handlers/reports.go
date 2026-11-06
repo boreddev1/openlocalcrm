@@ -18,7 +18,7 @@ func NewReportsHandler(svc *reports.Service) *ReportsHandler {
 func (h *ReportsHandler) GetSalesReport(w http.ResponseWriter, r *http.Request) {
 	rep, err := h.svc.GetSalesReport(r.Context())
 	if err != nil {
-		http.Error(w, `{"error":"failed to generate sales report: `+err.Error()+`"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "report_failed", "Vertriebsbericht konnte nicht generiert werden")
 		return
 	}
 

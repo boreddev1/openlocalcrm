@@ -49,6 +49,7 @@ WHERE id = $1 LIMIT 1;
 UPDATE workflow_runs
 SET status = $2,
     current_step = $3,
-    completed_at = $4
+    completed_at = $4,
+    snapshot_json = $5
 WHERE id = $1
 RETURNING *;

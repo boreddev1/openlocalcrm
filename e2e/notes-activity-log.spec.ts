@@ -22,7 +22,8 @@ test.describe('Customer Notes, Activity Log & AI Synthesis (§3.4 & §5.5)', () 
     // Verify newly created note appears in timeline
     await expect(drawer.getByText('Telefonat mit Kunden: Zählerstand 42.150 kWh notiert. Vor-Ort Begehung gewünscht.')).toBeVisible();
 
-    // 3. Trigger Gemma 12B AI Synthesis & Next Best Actions (§5.5)
+    // 3. Trigger AI Synthesis & Next Best Actions (§5.5, served model named by
+    // the observability-backed banner — issue #72)
     const synthBtn = drawer.getByRole('button', { name: /KI-Synthese starten/i });
     await synthBtn.click();
 

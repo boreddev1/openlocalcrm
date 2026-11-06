@@ -31,6 +31,13 @@ func (m *mockContactDB) CreateContact(ctx context.Context, arg db.CreateContactP
 	}, nil
 }
 
+func (m *mockContactDB) SetContactOwner(ctx context.Context, arg db.SetContactOwnerParams) (db.Contact, error) {
+	return db.Contact{
+		ID:          arg.ID,
+		OwnerUserID: arg.OwnerUserID,
+	}, nil
+}
+
 func TestConnectorHandler_LeadIntake(t *testing.T) {
 	contactSvc := contact.NewService(&mockContactDB{}, nil)
 	engine := connectors.NewEngine(contactSvc, nil, "valid-token")
@@ -45,8 +52,7 @@ func TestConnectorHandler_LeadIntake(t *testing.T) {
 	})
 
 	t.Run("invalid token", func(t *testing.T) {
-		payload := connectors.LeadIntakePayload{LastName: "Schmidt"}
-		body, _ := json.Marshal(payload)
+		body, _ := json.Marshal(map[string]any{"last_name": "Schmidt"})
 		req := httptest.NewRequest(http.MethodPost, "/api/connectors/lead-intake", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer wrong-token")
 		rec := httptest.NewRecorder()
@@ -65,13 +71,12 @@ func TestConnectorHandler_LeadIntake(t *testing.T) {
 	})
 
 	t.Run("valid token and payload", func(t *testing.T) {
-		payload := connectors.LeadIntakePayload{
-			FirstName: "Klaus",
-			LastName:  "Schmidt",
-			Email:     "klaus@schmidt.de",
-			City:      "Berlin",
-		}
-		body, _ := json.Marshal(payload)
+		body, _ := json.Marshal(map[string]any{
+			"first_name": "Klaus",
+			"last_name":  "Schmidt",
+			"email":      "klaus@schmidt.de",
+			"city":       "Berlin",
+		})
 		req := httptest.NewRequest(http.MethodPost, "/api/connectors/lead-intake", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer valid-token")
 		rec := httptest.NewRecorder()

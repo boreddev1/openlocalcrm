@@ -27,7 +27,7 @@ Dieses Handbuch beschreibt alle Konfigurationsparameter, Umgebungsvariablen (`.e
 | `CONNECTOR_API_TOKEN` | — | Ja (Prod) | Geheimer API-Schlüssel für Lead-Intake Webhooks (Bearer Auth) |
 | `AI_PROVIDER` | `ollama` | Nein | KI-Inferenz-Provider (`ollama`, `openai`, `gemini`) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Nein | URL der lokalen Ollama-Instanz |
-| `OLLAMA_MODEL` | `gemma4:12b` | Nein | Verwendetes Sprachmodell (z. B. `gemma4:12b`, `qwen3:8b`) |
+| `OLLAMA_MODEL` | `gemma2:12b` | Nein | Verwendetes Sprachmodell (z. B. `gemma2:12b`, `qwen3:8b`) |
 | `AI_API_KEY` | — | Nein | API-Key bei Nutzung externer Provider (OpenAI, Gemini) |
 | `AI_BASE_URL` | — | Nein | Optionale Custom-Base-URL für OpenAI-kompatible Proxies |
 | `LOG_LEVEL` | `info` | Nein | Log-Level (`debug`, `info`, `warn`, `error`) |
@@ -68,7 +68,7 @@ shared_preload_libraries = 'vector'
    ```
 2. **Gemma 12B Modell laden:**
    ```bash
-   ollama pull gemma4:12b
+   ollama pull gemma2:12b
    ```
 3. **Starten:**
    ```bash

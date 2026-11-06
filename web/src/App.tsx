@@ -14,6 +14,7 @@ import { AIAssistantPage } from './pages/AIAssistantPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { LoginPage } from './pages/LoginPage';
+import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { useAuth } from './context/AuthContext';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -36,6 +37,9 @@ export const App: React.FC = () => {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* Public: an invitee has no session yet, so this route must not sit
+          behind ProtectedRoute. Accepting an invite does not log anyone in. */}
+      <Route path="/accept-invite" element={<AcceptInvitePage />} />
       <Route
         path="/"
         element={

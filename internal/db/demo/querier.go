@@ -2,21 +2,25 @@ package demo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
 	"math/big"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
 var (
-	ErrNotFound = errors.New("record not found")
+	ErrNotFound = pgx.ErrNoRows
 )
 
 type InMemoryQuerier struct {
@@ -39,6 +43,8 @@ type InMemoryQuerier struct {
 	aiResearchJobs map[string]db.AiResearchJob
 	workflows      map[string]db.Workflow
 	workflowRuns   map[string]db.WorkflowRun
+	userInvites    map[string]db.UserInvite
+	emailTemplates map[string]db.EmailTemplate
 }
 
 func parseUUID(s string) pgtype.UUID {
@@ -88,6 +94,8 @@ func NewEmptyInMemoryQuerier() *InMemoryQuerier {
 		aiResearchJobs: make(map[string]db.AiResearchJob),
 		workflows:      make(map[string]db.Workflow),
 		workflowRuns:   make(map[string]db.WorkflowRun),
+		userInvites:    make(map[string]db.UserInvite),
+		emailTemplates: make(map[string]db.EmailTemplate),
 	}
 }
 
@@ -290,41 +298,41 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 	nowTime := time.Now().UTC()
 	q.appointments[uuidToStr(app1ID)] = db.Appointment{
 		ID:         app1ID,
-		Title:      "Internes Vertriebs-Meeting (M365)",
+		Title:      "Internes Vertriebs-Meeting",
 		ContactID:  pgtype.UUID{Valid: false},
 		CompanyID:  pgtype.UUID{Valid: false},
 		DealID:     pgtype.UUID{Valid: false},
 		StartTime:  pgtype.Timestamptz{Time: nowTime.Add(1 * time.Hour), Valid: true},
 		EndTime:    pgtype.Timestamptz{Time: nowTime.Add(2 * time.Hour), Valid: true},
-		Location:   "Microsoft Teams",
+		Location:   "",
 		Notes:      "Wöchentliches Pipeline-Update Vertrieb",
-		IcsUid:     "m365-ext-1",
+		IcsUid:     "crm-int-1",
 		AssignedTo: "Max Vertriebsleiter",
 		Type:       "MEETING",
-		IsExternal: true,
-		Provider:   "microsoft",
+		IsExternal: false,
+		Provider:   "",
 		IsPrivate:  false,
-		IsPushed:   true,
+		IsPushed:   false,
 		CreatedAt:  nowTimestamptz(),
 		UpdatedAt:  nowTimestamptz(),
 	}
 	q.appointments[uuidToStr(app2ID)] = db.Appointment{
 		ID:         app2ID,
-		Title:      "Privater Termin / Facharzt (Google)",
+		Title:      "Privater Termin / Facharzt",
 		ContactID:  pgtype.UUID{Valid: false},
 		CompanyID:  pgtype.UUID{Valid: false},
 		DealID:     pgtype.UUID{Valid: false},
 		StartTime:  pgtype.Timestamptz{Time: nowTime.Add(5 * time.Hour), Valid: true},
 		EndTime:    pgtype.Timestamptz{Time: nowTime.Add(6 * time.Hour), Valid: true},
-		Location:   "Frankfurt",
+		Location:   "",
 		Notes:      "Privatblocker",
-		IcsUid:     "google-ext-2",
+		IcsUid:     "crm-int-2",
 		AssignedTo: "Max Vertriebsleiter",
 		Type:       "MEETING",
-		IsExternal: true,
-		Provider:   "google",
+		IsExternal: false,
+		Provider:   "",
 		IsPrivate:  true,
-		IsPushed:   true,
+		IsPushed:   false,
 		CreatedAt:  nowTimestamptz(),
 		UpdatedAt:  nowTimestamptz(),
 	}
@@ -404,7 +412,7 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 		TriggerType: "NEW_LEAD",
 		TargetType:  "CONTACT",
 		IsActive:    true,
-		StepsJson:   []byte(`[{"title":"Tag 'PV-Interessent' zuweisen","action_type":"SET_TAG"},{"title":"Erstkontakt E-Mail-Entwurf vorbereiten (Gemma 12B)","action_type":"DRAFT_EMAIL"},{"title":"Follow-Up Telefontermin anlegen","action_type":"CREATE_TASK"}]`),
+		StepsJson:   []byte(`[{"step_number":1,"title":"Tag 'PV-Interessent' zuweisen","action_type":"SET_TAG","payload":{"tag":"PV-Interessent"}},{"step_number":2,"title":"Erstkontakt E-Mail-Entwurf vorbereiten (Gemma 12B)","action_type":"DRAFT_EMAIL","payload":{"template":"onboarding_intro"}},{"step_number":3,"title":"Follow-Up Telefontermin anlegen","action_type":"CREATE_TASK","payload":{"due_days":2,"priority":"HIGH"}}]`),
 		CreatedAt:   nowTimestamptz(),
 		UpdatedAt:   nowTimestamptz(),
 	}
@@ -415,7 +423,7 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 		TriggerType: "DEAL_WON",
 		TargetType:  "DEAL",
 		IsActive:    true,
-		StepsJson:   []byte(`[{"title":"Auftragsbestätigung & Widerrufsbelehrung § 355 BGB senden","action_type":"DRAFT_EMAIL"},{"title":"Übergabe-Task an Technik/Montage erstellen","action_type":"CREATE_TASK"}]`),
+		StepsJson:   []byte(`[{"step_number":1,"title":"Auftragsbestätigung & Widerrufsbelehrung § 355 BGB senden","action_type":"DRAFT_EMAIL","payload":{"template":"order_confirmation"}},{"step_number":2,"title":"Übergabe-Task an Technik/Montage erstellen","action_type":"CREATE_TASK","payload":{"title":"Zählerkasten-Planung & Materialbestellung","priority":"URGENT"}}]`),
 		CreatedAt:   nowTimestamptz(),
 		UpdatedAt:   nowTimestamptz(),
 	}
@@ -425,8 +433,8 @@ func NewInMemoryQuerier() *InMemoryQuerier {
 		Description: "Erinnert Vertriebler an Leads ohne Interaktion seit 30 Tagen.",
 		TriggerType: "INACTIVITY_TIMEOUT",
 		TargetType:  "CONTACT",
-		IsActive:    false,
-		StepsJson:   []byte(`[{"title":"Reaktivierungs-Todo für Account Manager erstellen","action_type":"CREATE_TASK"}]`),
+		IsActive:    true,
+		StepsJson:   []byte(`[{"step_number":1,"title":"Reaktivierungs-Todo für Account Manager erstellen","action_type":"CREATE_TASK","payload":{"title":"Lead-Nachfassen telefonisch","priority":"MEDIUM"}}]`),
 		CreatedAt:   nowTimestamptz(),
 		UpdatedAt:   nowTimestamptz(),
 	}
@@ -473,6 +481,11 @@ func (q *InMemoryQuerier) CreateUser(ctx context.Context, arg db.CreateUserParam
 		}
 	}
 
+	status := arg.Status
+	if status == "" {
+		status = "ACTIVE"
+	}
+
 	u := db.User{
 		ID:           newUUID(),
 		Email:        arg.Email,
@@ -480,7 +493,7 @@ func (q *InMemoryQuerier) CreateUser(ctx context.Context, arg db.CreateUserParam
 		FirstName:    arg.FirstName,
 		LastName:     arg.LastName,
 		Role:         arg.Role,
-		Status:       arg.Status,
+		Status:       status,
 		CreatedAt:    nowTimestamptz(),
 		UpdatedAt:    nowTimestamptz(),
 	}
@@ -613,6 +626,80 @@ func (q *InMemoryQuerier) UpdateUserTOTP(ctx context.Context, arg db.UpdateUserT
 	}
 	u.TotpSecretEncrypted = arg.TotpSecretEncrypted
 	u.TotpEnabled = arg.TotpEnabled
+	u.TotpLastUsedStep = arg.TotpLastUsedStep
+	u.UpdatedAt = nowTimestamptz()
+	q.users[idStr] = u
+	return nil
+}
+
+func (q *InMemoryQuerier) UpdateUserTOTPLastUsedStep(ctx context.Context, arg db.UpdateUserTOTPLastUsedStepParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	u, ok := q.users[idStr]
+	if !ok {
+		return ErrNotFound
+	}
+	u.TotpLastUsedStep = arg.TotpLastUsedStep
+	u.UpdatedAt = nowTimestamptz()
+	q.users[idStr] = u
+	return nil
+}
+
+func (q *InMemoryQuerier) EnableTOTPWithSecret(ctx context.Context, arg db.EnableTOTPWithSecretParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	u, ok := q.users[idStr]
+	if !ok {
+		return ErrNotFound
+	}
+	u.TotpSecretEncrypted = arg.TotpSecretEncrypted
+	u.TotpEnabled = true
+	u.TotpLastUsedStep = 0
+	u.UpdatedAt = nowTimestamptz()
+	q.users[idStr] = u
+	return nil
+}
+
+func (q *InMemoryQuerier) CurrentTokenVersion(ctx context.Context, id pgtype.UUID) (int32, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	u, ok := q.users[uuidToStr(id)]
+	if !ok {
+		return 0, ErrNotFound
+	}
+	return u.TokenVersion, nil
+}
+
+func (q *InMemoryQuerier) IncrementUserTokenVersion(ctx context.Context, id pgtype.UUID) (int32, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(id)
+	u, ok := q.users[idStr]
+	if !ok {
+		return 0, ErrNotFound
+	}
+	u.TokenVersion++
+	u.UpdatedAt = nowTimestamptz()
+	q.users[idStr] = u
+	return u.TokenVersion, nil
+}
+
+func (q *InMemoryQuerier) SetUserMustChangePassword(ctx context.Context, arg db.SetUserMustChangePasswordParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	u, ok := q.users[idStr]
+	if !ok {
+		return ErrNotFound
+	}
+	u.MustChangePassword = arg.MustChangePassword
 	u.UpdatedAt = nowTimestamptz()
 	q.users[idStr] = u
 	return nil
@@ -664,6 +751,9 @@ func (q *InMemoryQuerier) ListCompanies(ctx context.Context, arg db.ListCompanie
 
 	var list []db.Company
 	for _, c := range q.companies {
+		if arg.OwnerUserID.Valid && (!c.OwnerUserID.Valid || c.OwnerUserID.Bytes != arg.OwnerUserID.Bytes) {
+			continue
+		}
 		list = append(list, c)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -688,6 +778,9 @@ func (q *InMemoryQuerier) SearchCompanies(ctx context.Context, arg db.SearchComp
 	query := strings.ToLower(arg.Column1.String)
 	var list []db.Company
 	for _, c := range q.companies {
+		if arg.OwnerUserID.Valid && (!c.OwnerUserID.Valid || c.OwnerUserID.Bytes != arg.OwnerUserID.Bytes) {
+			continue
+		}
 		if strings.Contains(strings.ToLower(c.Name), query) ||
 			strings.Contains(strings.ToLower(c.Domain.String), query) ||
 			strings.Contains(strings.ToLower(c.AddressCity.String), query) {
@@ -723,29 +816,72 @@ func (q *InMemoryQuerier) UpdateCompany(ctx context.Context, arg db.UpdateCompan
 	return c, nil
 }
 
+func (q *InMemoryQuerier) ListUnownedCompanies(ctx context.Context) ([]db.Company, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.Company
+	for _, c := range q.companies {
+		if !c.OwnerUserID.Valid {
+			list = append(list, c)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		ti := list[i].CreatedAt.Time
+		tj := list[j].CreatedAt.Time
+		if ti.Equal(tj) {
+			return uuidToStr(list[i].ID) < uuidToStr(list[j].ID)
+		}
+		return ti.Before(tj)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) SetCompanyOwner(ctx context.Context, arg db.SetCompanyOwnerParams) (db.Company, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	c, ok := q.companies[idStr]
+	if !ok {
+		return db.Company{}, ErrNotFound
+	}
+	c.OwnerUserID = arg.OwnerUserID
+	c.UpdatedAt = nowTimestamptz()
+	q.companies[idStr] = c
+	return c, nil
+}
+
 // Contact methods
 func (q *InMemoryQuerier) CreateContact(ctx context.Context, arg db.CreateContactParams) (db.Contact, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	c := db.Contact{
-		ID:            newUUID(),
-		CompanyID:     arg.CompanyID,
-		FirstName:     arg.FirstName,
-		LastName:      arg.LastName,
-		Email:         arg.Email,
-		Phone:         arg.Phone,
-		Mobile:        arg.Mobile,
-		Position:      arg.Position,
-		LeadSource:    arg.LeadSource,
-		AddressStreet: arg.AddressStreet,
-		AddressZip:    arg.AddressZip,
-		AddressCity:   arg.AddressCity,
-		Latitude:      arg.Latitude,
-		Longitude:     arg.Longitude,
-		CustomFields:  arg.CustomFields,
-		CreatedAt:     nowTimestamptz(),
-		UpdatedAt:     nowTimestamptz(),
+		ID:                newUUID(),
+		CompanyID:         arg.CompanyID,
+		FirstName:         arg.FirstName,
+		LastName:          arg.LastName,
+		Email:             arg.Email,
+		Phone:             arg.Phone,
+		Mobile:            arg.Mobile,
+		Position:          arg.Position,
+		LeadSource:        arg.LeadSource,
+		AddressStreet:     arg.AddressStreet,
+		AddressZip:        arg.AddressZip,
+		AddressCity:       arg.AddressCity,
+		Latitude:          arg.Latitude,
+		Longitude:         arg.Longitude,
+		ConsentPhone:      arg.ConsentPhone,
+		ConsentEmail:      arg.ConsentEmail,
+		ConsentUpdatedAt:  arg.ConsentUpdatedAt,
+		StromverbrauchKwh: arg.StromverbrauchKwh,
+		GasverbrauchKwh:   arg.GasverbrauchKwh,
+		Zaehlernummer:     arg.Zaehlernummer,
+		EigentuemerStatus: arg.EigentuemerStatus,
+		CustomFields:      arg.CustomFields,
+		CreatedAt:         nowTimestamptz(),
+		UpdatedAt:         nowTimestamptz(),
 	}
 	q.contacts[uuidToStr(c.ID)] = c
 	return c, nil
@@ -774,6 +910,9 @@ func (q *InMemoryQuerier) ListContacts(ctx context.Context, arg db.ListContactsP
 
 	var list []db.Contact
 	for _, c := range q.contacts {
+		if arg.OwnerUserID.Valid && (!c.OwnerUserID.Valid || c.OwnerUserID.Bytes != arg.OwnerUserID.Bytes) {
+			continue
+		}
 		list = append(list, c)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -814,6 +953,9 @@ func (q *InMemoryQuerier) SearchContacts(ctx context.Context, arg db.SearchConta
 	query := strings.ToLower(arg.Column1.String)
 	var list []db.Contact
 	for _, c := range q.contacts {
+		if arg.OwnerUserID.Valid && (!c.OwnerUserID.Valid || c.OwnerUserID.Bytes != arg.OwnerUserID.Bytes) {
+			continue
+		}
 		if strings.Contains(strings.ToLower(c.FirstName), query) ||
 			strings.Contains(strings.ToLower(c.LastName), query) ||
 			strings.Contains(strings.ToLower(c.Email.String), query) ||
@@ -849,7 +991,114 @@ func (q *InMemoryQuerier) UpdateContact(ctx context.Context, arg db.UpdateContac
 	c.AddressCity = arg.AddressCity
 	c.Latitude = arg.Latitude
 	c.Longitude = arg.Longitude
+	c.ConsentPhone = arg.ConsentPhone
+	c.ConsentEmail = arg.ConsentEmail
+	c.ConsentUpdatedAt = arg.ConsentUpdatedAt
+	c.StromverbrauchKwh = arg.StromverbrauchKwh
+	c.GasverbrauchKwh = arg.GasverbrauchKwh
+	c.Zaehlernummer = arg.Zaehlernummer
+	c.EigentuemerStatus = arg.EigentuemerStatus
 	c.CustomFields = arg.CustomFields
+	c.UpdatedAt = nowTimestamptz()
+	q.contacts[idStr] = c
+	return c, nil
+}
+
+func appendJSONTagsDedup(existingJSON []byte, incomingJSON []byte) []byte {
+	var tags []string
+	if len(existingJSON) > 0 {
+		_ = json.Unmarshal(existingJSON, &tags)
+	}
+	exists := make(map[string]bool, len(tags))
+	for _, t := range tags {
+		exists[t] = true
+	}
+
+	var incoming []string
+	if err := json.Unmarshal(incomingJSON, &incoming); err == nil {
+		for _, t := range incoming {
+			if !exists[t] {
+				tags = append(tags, t)
+				exists[t] = true
+			}
+		}
+	} else {
+		var single string
+		if err := json.Unmarshal(incomingJSON, &single); err == nil && single != "" {
+			if !exists[single] {
+				tags = append(tags, single)
+			}
+		}
+	}
+	b, _ := json.Marshal(tags)
+	return b
+}
+
+func (q *InMemoryQuerier) UpdateContactTags(ctx context.Context, arg db.UpdateContactTagsParams) (db.Contact, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	c, ok := q.contacts[idStr]
+	if !ok {
+		return db.Contact{}, ErrNotFound
+	}
+	c.Tags = appendJSONTagsDedup(c.Tags, arg.Tags)
+	c.UpdatedAt = nowTimestamptz()
+	q.contacts[idStr] = c
+	return c, nil
+}
+
+func (q *InMemoryQuerier) ListInactiveContacts(ctx context.Context, arg db.ListInactiveContactsParams) ([]db.Contact, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.Contact
+	for _, c := range q.contacts {
+		if c.UpdatedAt.Valid && c.UpdatedAt.Time.Before(arg.UpdatedAt.Time) {
+			list = append(list, c)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].UpdatedAt.Time.Before(list[j].UpdatedAt.Time)
+	})
+	if int(arg.Limit) > 0 && len(list) > int(arg.Limit) {
+		list = list[:arg.Limit]
+	}
+	return list, nil
+}
+
+func (q *InMemoryQuerier) ListUnownedContacts(ctx context.Context) ([]db.Contact, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	var list []db.Contact
+	for _, c := range q.contacts {
+		if !c.OwnerUserID.Valid {
+			list = append(list, c)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		ti := list[i].CreatedAt.Time
+		tj := list[j].CreatedAt.Time
+		if ti.Equal(tj) {
+			return uuidToStr(list[i].ID) < uuidToStr(list[j].ID)
+		}
+		return ti.Before(tj)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) SetContactOwner(ctx context.Context, arg db.SetContactOwnerParams) (db.Contact, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	c, ok := q.contacts[idStr]
+	if !ok {
+		return db.Contact{}, ErrNotFound
+	}
+	c.OwnerUserID = arg.OwnerUserID
 	c.UpdatedAt = nowTimestamptz()
 	q.contacts[idStr] = c
 	return c, nil
@@ -879,11 +1128,16 @@ func (q *InMemoryQuerier) CreateDeal(ctx context.Context, arg db.CreateDealParam
 	return d, nil
 }
 
-func (q *InMemoryQuerier) DeleteDeal(ctx context.Context, id pgtype.UUID) error {
+func (q *InMemoryQuerier) DeleteDeal(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	delete(q.deals, uuidToStr(id))
-	return nil
+	idString := uuidToStr(id)
+	dealItem, ok := q.deals[idString]
+	if !ok || dealItem.Stage == "WIDERRUFEN" {
+		return pgtype.UUID{}, ErrNotFound
+	}
+	delete(q.deals, idString)
+	return id, nil
 }
 
 func (q *InMemoryQuerier) GetDealByID(ctx context.Context, id pgtype.UUID) (db.Deal, error) {
@@ -902,6 +1156,9 @@ func (q *InMemoryQuerier) ListDeals(ctx context.Context, arg db.ListDealsParams)
 
 	var list []db.Deal
 	for _, d := range q.deals {
+		if arg.AssignedTo.Valid && (!d.AssignedTo.Valid || d.AssignedTo.Bytes != arg.AssignedTo.Bytes) {
+			continue
+		}
 		list = append(list, d)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -919,13 +1176,16 @@ func (q *InMemoryQuerier) ListDeals(ctx context.Context, arg db.ListDealsParams)
 	return list, nil
 }
 
-func (q *InMemoryQuerier) ListDealsByStage(ctx context.Context, stage string) ([]db.Deal, error) {
+func (q *InMemoryQuerier) ListDealsByStage(ctx context.Context, arg db.ListDealsByStageParams) ([]db.Deal, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	var list []db.Deal
 	for _, d := range q.deals {
-		if d.Stage == stage {
+		if d.Stage == arg.Stage {
+			if arg.AssignedTo.Valid && (!d.AssignedTo.Valid || d.AssignedTo.Bytes != arg.AssignedTo.Bytes) {
+				continue
+			}
 			list = append(list, d)
 		}
 	}
@@ -938,7 +1198,7 @@ func (q *InMemoryQuerier) UpdateDeal(ctx context.Context, arg db.UpdateDealParam
 
 	idStr := uuidToStr(arg.ID)
 	d, ok := q.deals[idStr]
-	if !ok {
+	if !ok || d.Stage == "WIDERRUFEN" {
 		return db.Deal{}, ErrNotFound
 	}
 	d.Title = arg.Title
@@ -962,12 +1222,47 @@ func (q *InMemoryQuerier) UpdateDealStage(ctx context.Context, arg db.UpdateDeal
 
 	idStr := uuidToStr(arg.ID)
 	d, ok := q.deals[idStr]
-	if !ok {
+	if !ok || d.Stage == "WIDERRUFEN" {
 		return db.Deal{}, ErrNotFound
 	}
 	d.Stage = arg.Stage
 	d.Probability = arg.Probability
 	d.ClosedAt = arg.ClosedAt
+	d.UpdatedAt = nowTimestamptz()
+	q.deals[idStr] = d
+	return d, nil
+}
+
+func (q *InMemoryQuerier) RevokeDeal(ctx context.Context, arg db.RevokeDealParams) (db.Deal, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	d, ok := q.deals[idStr]
+	if !ok {
+		return db.Deal{}, ErrNotFound
+	}
+	if d.Stage != "WIDERRUFEN" {
+		d.Stage = "WIDERRUFEN"
+		d.Probability = 0
+		d.WiderrufenAt = arg.WiderrufenAt
+		d.WiderrufGrund = arg.WiderrufGrund
+		d.UpdatedAt = nowTimestamptz()
+	}
+	q.deals[idStr] = d
+	return d, nil
+}
+
+func (q *InMemoryQuerier) UpdateDealTags(ctx context.Context, arg db.UpdateDealTagsParams) (db.Deal, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	d, ok := q.deals[idStr]
+	if !ok || d.Stage == "WIDERRUFEN" {
+		return db.Deal{}, ErrNotFound
+	}
+	d.Tags = appendJSONTagsDedup(d.Tags, arg.Tags)
 	d.UpdatedAt = nowTimestamptz()
 	q.deals[idStr] = d
 	return d, nil
@@ -1018,6 +1313,9 @@ func (q *InMemoryQuerier) ListTodos(ctx context.Context, arg db.ListTodosParams)
 
 	var list []db.Todo
 	for _, t := range q.todos {
+		if arg.AssignedTo.Valid && (!t.AssignedTo.Valid || t.AssignedTo.Bytes != arg.AssignedTo.Bytes) {
+			continue
+		}
 		list = append(list, t)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -1182,12 +1480,40 @@ func (q *InMemoryQuerier) CreateAuditLog(ctx context.Context, arg db.CreateAudit
 		EntityID:   arg.EntityID,
 		Action:     arg.Action,
 		Changes:    arg.Changes,
+		OldValues:  arg.OldValues,
+		NewValues:  arg.NewValues,
 		IpAddress:  arg.IpAddress,
 		UserAgent:  arg.UserAgent,
+		PrevHash:   arg.PrevHash,
+		Hash:       arg.Hash,
 		CreatedAt:  nowTimestamptz(),
 	}
 	q.auditLogs = append([]db.AuditLog{log}, q.auditLogs...)
 	return log, nil
+}
+
+func (q *InMemoryQuerier) GetLatestAuditLogHash(ctx context.Context) (pgtype.Text, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	for _, l := range q.auditLogs {
+		if l.Hash.Valid && l.Hash.String != "" {
+			return l.Hash, nil
+		}
+	}
+	return pgtype.Text{Valid: false}, nil
+}
+
+func (q *InMemoryQuerier) ListAuditLogsAsc(ctx context.Context) ([]db.AuditLog, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	n := len(q.auditLogs)
+	list := make([]db.AuditLog, n)
+	for i, l := range q.auditLogs {
+		list[n-1-i] = l
+	}
+	return list, nil
 }
 
 func (q *InMemoryQuerier) ListAuditLogsByEntity(ctx context.Context, arg db.ListAuditLogsByEntityParams) ([]db.AuditLog, error) {
@@ -1218,6 +1544,29 @@ func (q *InMemoryQuerier) ListRecentAuditLogs(ctx context.Context, arg db.ListRe
 	return list, nil
 }
 
+func (q *InMemoryQuerier) SeedUserForTest(id uuid.UUID, email, passwordHash, status, role string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	pgID := pgtype.UUID{Bytes: id, Valid: true}
+	q.users[uuidToStr(pgID)] = db.User{
+		ID:           pgID,
+		Email:        email,
+		PasswordHash: passwordHash,
+		FirstName:    "Test",
+		LastName:     "User",
+		Role:         role,
+		Status:       status,
+		CreatedAt:    nowTimestamptz(),
+		UpdatedAt:    nowTimestamptz(),
+	}
+}
+
+func (q *InMemoryQuerier) RefreshTokensCountForTest() int {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	return len(q.refreshTokens)
+}
+
 // Refresh token methods
 func (q *InMemoryQuerier) CreateRefreshToken(ctx context.Context, arg db.CreateRefreshTokenParams) (db.RefreshToken, error) {
 	q.mu.Lock()
@@ -1230,10 +1579,80 @@ func (q *InMemoryQuerier) CreateRefreshToken(ctx context.Context, arg db.CreateR
 		UserAgent: arg.UserAgent,
 		IpAddress: arg.IpAddress,
 		ExpiresAt: arg.ExpiresAt,
+		FamilyID:  arg.FamilyID,
 		CreatedAt: nowTimestamptz(),
 	}
 	q.refreshTokens[arg.TokenHash] = t
 	return t, nil
+}
+
+func (q *InMemoryQuerier) ConsumeRefreshToken(ctx context.Context, tokenHash string) (db.ConsumeRefreshTokenRow, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	t, ok := q.refreshTokens[tokenHash]
+	if !ok {
+		return db.ConsumeRefreshTokenRow{}, ErrNotFound
+	}
+	if t.UsedAt.Valid {
+		return db.ConsumeRefreshTokenRow{}, ErrNotFound
+	}
+	if t.ExpiresAt.Valid && t.ExpiresAt.Time.Before(time.Now()) {
+		return db.ConsumeRefreshTokenRow{}, ErrNotFound
+	}
+
+	t.UsedAt = nowTimestamptz()
+	q.refreshTokens[tokenHash] = t
+
+	return db.ConsumeRefreshTokenRow{
+		ID:        t.ID,
+		UserID:    t.UserID,
+		FamilyID:  t.FamilyID,
+		UserAgent: t.UserAgent,
+		IpAddress: t.IpAddress,
+		ExpiresAt: t.ExpiresAt,
+	}, nil
+}
+
+func (q *InMemoryQuerier) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (db.RefreshToken, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	t, ok := q.refreshTokens[tokenHash]
+	if !ok {
+		return db.RefreshToken{}, ErrNotFound
+	}
+	return t, nil
+}
+
+func (q *InMemoryQuerier) DeleteRefreshTokenFamily(ctx context.Context, familyID pgtype.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	for hash, t := range q.refreshTokens {
+		if t.FamilyID.Valid && familyID.Valid && t.FamilyID.Bytes == familyID.Bytes {
+			delete(q.refreshTokens, hash)
+		}
+	}
+	return nil
+}
+
+func (q *InMemoryQuerier) DeleteExpiredAndSpentRefreshTokens(ctx context.Context) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	cutoff := time.Now().Add(-30 * 24 * time.Hour)
+	now := time.Now()
+	for hash, t := range q.refreshTokens {
+		if t.ExpiresAt.Valid && t.ExpiresAt.Time.Before(now) {
+			delete(q.refreshTokens, hash)
+			continue
+		}
+		if t.UsedAt.Valid && t.UsedAt.Time.Before(cutoff) {
+			delete(q.refreshTokens, hash)
+		}
+	}
+	return nil
 }
 
 func (q *InMemoryQuerier) DeleteRefreshToken(ctx context.Context, tokenHash string) error {
@@ -1286,11 +1705,72 @@ func (q *InMemoryQuerier) CreateEmailAccount(ctx context.Context, arg db.CreateE
 		Username:          arg.Username,
 		PasswordEncrypted: arg.PasswordEncrypted,
 		IsActive:          arg.IsActive,
+		AccountType:       arg.AccountType,
+		OwnerUserID:       arg.OwnerUserID,
 		CreatedAt:         nowTimestamptz(),
 		UpdatedAt:         nowTimestamptz(),
 	}
 	q.emailAccounts[uuidToStr(acc.ID)] = acc
 	return acc, nil
+}
+
+func (q *InMemoryQuerier) UpdateEmailAccount(ctx context.Context, arg db.UpdateEmailAccountParams) (db.EmailAccount, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	acc, ok := q.emailAccounts[idStr]
+	if !ok {
+		return db.EmailAccount{}, ErrNotFound
+	}
+	acc.Name = arg.Name
+	acc.ImapHost = arg.ImapHost
+	acc.ImapPort = arg.ImapPort
+	acc.SmtpHost = arg.SmtpHost
+	acc.SmtpPort = arg.SmtpPort
+	acc.Username = arg.Username
+	acc.PasswordEncrypted = arg.PasswordEncrypted
+	acc.IsActive = arg.IsActive
+	acc.UpdatedAt = nowTimestamptz()
+	q.emailAccounts[idStr] = acc
+	return acc, nil
+}
+
+func (q *InMemoryQuerier) DeleteEmailAccount(ctx context.Context, id pgtype.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	delete(q.emailAccounts, uuidToStr(id))
+	return nil
+}
+
+func (q *InMemoryQuerier) UpdateEmailAccountSyncState(ctx context.Context, arg db.UpdateEmailAccountSyncStateParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	if acc, ok := q.emailAccounts[idStr]; ok {
+		acc.LastSyncAt = arg.LastSyncAt
+		acc.LastUid = arg.LastUid
+		acc.LastSyncedAt = arg.LastSyncAt
+		acc.UpdatedAt = nowTimestamptz()
+		q.emailAccounts[idStr] = acc
+	}
+	return nil
+}
+
+func (q *InMemoryQuerier) UpdateEmailMessageTags(ctx context.Context, arg db.UpdateEmailMessageTagsParams) (db.EmailMessage, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	msg, ok := q.emailMessages[idStr]
+	if !ok {
+		return db.EmailMessage{}, ErrNotFound
+	}
+	msg.Tags = arg.Tags
+	q.emailMessages[idStr] = msg
+	return msg, nil
 }
 
 func (q *InMemoryQuerier) CreateEmailAttachment(ctx context.Context, arg db.CreateEmailAttachmentParams) (db.EmailAttachment, error) {
@@ -1331,6 +1811,35 @@ func (q *InMemoryQuerier) CreateEmailMessage(ctx context.Context, arg db.CreateE
 		IsRead:          arg.IsRead,
 		ContactID:       arg.ContactID,
 		DealID:          arg.DealID,
+		Tags:            []byte("[]"),
+		CreatedAt:       nowTimestamptz(),
+	}
+	q.emailMessages[uuidToStr(msg.ID)] = msg
+	return msg, nil
+}
+
+func (q *InMemoryQuerier) CreateDraftEmailMessage(ctx context.Context, arg db.CreateDraftEmailMessageParams) (db.EmailMessage, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	msg := db.EmailMessage{
+		ID:              newUUID(),
+		AccountID:       arg.AccountID,
+		ThreadID:        arg.ThreadID,
+		MessageID:       arg.MessageID,
+		Direction:       "OUTBOUND",
+		SenderEmail:     arg.SenderEmail,
+		SenderName:      arg.SenderName,
+		RecipientEmails: arg.RecipientEmails,
+		Subject:         arg.Subject,
+		BodyText:        arg.BodyText,
+		BodyHtml:        arg.BodyHtml,
+		ReceivedAt:      nowTimestamptz(),
+		IsRead:          false,
+		IsDraft:         true,
+		ContactID:       arg.ContactID,
+		DealID:          arg.DealID,
+		Tags:            []byte("[]"),
 		CreatedAt:       nowTimestamptz(),
 	}
 	q.emailMessages[uuidToStr(msg.ID)] = msg
@@ -1359,12 +1868,15 @@ func (q *InMemoryQuerier) GetEmailMessageByID(ctx context.Context, id pgtype.UUI
 	return msg, nil
 }
 
-func (q *InMemoryQuerier) ListEmailAccounts(ctx context.Context) ([]db.EmailAccount, error) {
+func (q *InMemoryQuerier) ListEmailAccounts(ctx context.Context, ownerUserID pgtype.UUID) ([]db.EmailAccount, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	var list []db.EmailAccount
 	for _, acc := range q.emailAccounts {
+		if ownerUserID.Valid && (!acc.OwnerUserID.Valid || acc.OwnerUserID.Bytes != ownerUserID.Bytes) {
+			continue
+		}
 		list = append(list, acc)
 	}
 	return list, nil
@@ -1470,6 +1982,7 @@ func (q *InMemoryQuerier) CreateAppointment(ctx context.Context, arg db.CreateAp
 		Provider:   arg.Provider,
 		IsPrivate:  arg.IsPrivate,
 		IsPushed:   arg.IsPushed,
+		UserID:     arg.UserID,
 		CreatedAt:  nowTimestamptz(),
 		UpdatedAt:  nowTimestamptz(),
 	}
@@ -1488,12 +2001,15 @@ func (q *InMemoryQuerier) GetAppointmentByID(ctx context.Context, id pgtype.UUID
 	return app, nil
 }
 
-func (q *InMemoryQuerier) ListAppointments(ctx context.Context) ([]db.Appointment, error) {
+func (q *InMemoryQuerier) ListAppointments(ctx context.Context, userID pgtype.UUID) ([]db.Appointment, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	var list []db.Appointment
 	for _, app := range q.appointments {
+		if userID.Valid && (!app.UserID.Valid || app.UserID.Bytes != userID.Bytes) {
+			continue
+		}
 		list = append(list, app)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -1563,6 +2079,7 @@ func (q *InMemoryQuerier) CreateNote(ctx context.Context, arg db.CreateNoteParam
 		Type:       arg.Type,
 		Author:     arg.Author,
 		Content:    arg.Content,
+		UserID:     arg.UserID,
 		CreatedAt:  nowTimestamptz(),
 		UpdatedAt:  nowTimestamptz(),
 	}
@@ -1581,12 +2098,15 @@ func (q *InMemoryQuerier) GetNoteByID(ctx context.Context, id pgtype.UUID) (db.N
 	return n, nil
 }
 
-func (q *InMemoryQuerier) ListNotes(ctx context.Context) ([]db.Note, error) {
+func (q *InMemoryQuerier) ListNotes(ctx context.Context, userID pgtype.UUID) ([]db.Note, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	var list []db.Note
 	for _, n := range q.notes {
+		if userID.Valid && (!n.UserID.Valid || n.UserID.Bytes != userID.Bytes) {
+			continue
+		}
 		list = append(list, n)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -1603,6 +2123,9 @@ func (q *InMemoryQuerier) ListNotesByEntity(ctx context.Context, arg db.ListNote
 	entityIDStr := uuidToStr(arg.EntityID)
 	for _, n := range q.notes {
 		if strings.EqualFold(n.EntityType, arg.EntityType) && uuidToStr(n.EntityID) == entityIDStr {
+			if arg.UserID.Valid && (!n.UserID.Valid || n.UserID.Bytes != arg.UserID.Bytes) {
+				continue
+			}
 			list = append(list, n)
 		}
 	}
@@ -1682,55 +2205,176 @@ func (q *InMemoryQuerier) ListRecentCallActivities(ctx context.Context, limit in
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
 	})
-	if int32(len(list)) > limit {
+	if len(list) > int(limit) {
 		list = list[:limit]
 	}
 	return list, nil
 }
 
 // --- Knowledge Base ---
-func (q *InMemoryQuerier) CreateKBArticle(ctx context.Context, arg db.CreateKBArticleParams) (db.KnowledgeBaseArticle, error) {
+
+func kbRowFromArticle(a db.KnowledgeBaseArticle) db.ListKBArticlesRow {
+	return db.ListKBArticlesRow{
+		ID:             a.ID,
+		Title:          a.Title,
+		Category:       a.Category,
+		Content:        a.Content,
+		Tags:           a.Tags,
+		Author:         a.Author,
+		EmbeddingModel: a.EmbeddingModel,
+		Indexed:        strings.TrimSpace(a.Embedding) != "",
+		CreatedAt:      a.CreatedAt,
+		UpdatedAt:      a.UpdatedAt,
+	}
+}
+
+func parseVectorLiteral(s string) ([]float64, error) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "[")
+	s = strings.TrimSuffix(s, "]")
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(s, ",")
+	vec := make([]float64, len(parts))
+	for i, p := range parts {
+		v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
+		if err != nil {
+			return nil, err
+		}
+		vec[i] = v
+	}
+	return vec, nil
+}
+
+func cosineDistance(a, b []float64) float64 {
+	if len(a) == 0 || len(a) != len(b) {
+		return 1
+	}
+	var dot, normA, normB float64
+	for i := range a {
+		dot += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	if normA == 0 || normB == 0 {
+		return 1
+	}
+	return 1 - dot/(math.Sqrt(normA)*math.Sqrt(normB))
+}
+
+func (q *InMemoryQuerier) CreateKBArticle(ctx context.Context, arg db.CreateKBArticleParams) (db.CreateKBArticleRow, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	id := newUUID()
 	article := db.KnowledgeBaseArticle{
-		ID:        id,
-		Title:     arg.Title,
-		Category:  arg.Category,
-		Content:   arg.Content,
-		Tags:      arg.Tags,
-		Author:    arg.Author,
-		CreatedAt: nowTimestamptz(),
-		UpdatedAt: nowTimestamptz(),
+		ID:             id,
+		Title:          arg.Title,
+		Category:       arg.Category,
+		Content:        arg.Content,
+		Tags:           arg.Tags,
+		Author:         arg.Author,
+		Embedding:      arg.Embedding,
+		EmbeddingModel: arg.EmbeddingModel,
+		CreatedAt:      nowTimestamptz(),
+		UpdatedAt:      nowTimestamptz(),
 	}
 	q.kbArticles[uuidToStr(id)] = article
-	return article, nil
+	return db.CreateKBArticleRow(kbRowFromArticle(article)), nil
 }
 
-func (q *InMemoryQuerier) GetKBArticleByID(ctx context.Context, id pgtype.UUID) (db.KnowledgeBaseArticle, error) {
+func (q *InMemoryQuerier) GetKBArticleByID(ctx context.Context, id pgtype.UUID) (db.GetKBArticleByIDRow, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	a, ok := q.kbArticles[uuidToStr(id)]
 	if !ok {
-		return db.KnowledgeBaseArticle{}, ErrNotFound
+		return db.GetKBArticleByIDRow{}, ErrNotFound
 	}
-	return a, nil
+	return db.GetKBArticleByIDRow(kbRowFromArticle(a)), nil
 }
 
-func (q *InMemoryQuerier) ListKBArticles(ctx context.Context) ([]db.KnowledgeBaseArticle, error) {
+func (q *InMemoryQuerier) ListKBArticles(ctx context.Context) ([]db.ListKBArticlesRow, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
-	var list []db.KnowledgeBaseArticle
+	list := make([]db.ListKBArticlesRow, 0, len(q.kbArticles))
 	for _, a := range q.kbArticles {
-		list = append(list, a)
+		list = append(list, kbRowFromArticle(a))
 	}
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
 	})
 	return list, nil
+}
+
+func (q *InMemoryQuerier) UpdateKBArticleEmbedding(ctx context.Context, arg db.UpdateKBArticleEmbeddingParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(arg.ID)
+	article, ok := q.kbArticles[idStr]
+	if !ok {
+		return ErrNotFound
+	}
+	article.Embedding = arg.Embedding
+	article.EmbeddingModel = arg.EmbeddingModel
+	article.UpdatedAt = nowTimestamptz()
+	q.kbArticles[idStr] = article
+	return nil
+}
+
+func (q *InMemoryQuerier) SearchKBArticlesByEmbedding(ctx context.Context, arg db.SearchKBArticlesByEmbeddingParams) ([]db.SearchKBArticlesByEmbeddingRow, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	queryVec, err := parseVectorLiteral(arg.Embedding)
+	if err != nil {
+		return nil, err
+	}
+
+	type scored struct {
+		article  db.KnowledgeBaseArticle
+		distance float64
+	}
+	matches := make([]scored, 0, len(q.kbArticles))
+	for _, a := range q.kbArticles {
+		if strings.TrimSpace(a.Embedding) == "" {
+			continue
+		}
+		vec, err := parseVectorLiteral(a.Embedding)
+		if err != nil {
+			continue
+		}
+		matches = append(matches, scored{article: a, distance: cosineDistance(queryVec, vec)})
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].distance < matches[j].distance
+	})
+
+	limit := int(arg.LimitCount)
+	if limit <= 0 || limit > len(matches) {
+		limit = len(matches)
+	}
+	rows := make([]db.SearchKBArticlesByEmbeddingRow, 0, limit)
+	for _, m := range matches[:limit] {
+		base := kbRowFromArticle(m.article)
+		rows = append(rows, db.SearchKBArticlesByEmbeddingRow{
+			ID:             base.ID,
+			Title:          base.Title,
+			Category:       base.Category,
+			Content:        base.Content,
+			Tags:           base.Tags,
+			Author:         base.Author,
+			EmbeddingModel: base.EmbeddingModel,
+			Indexed:        base.Indexed,
+			CreatedAt:      base.CreatedAt,
+			UpdatedAt:      base.UpdatedAt,
+			Distance:       m.distance,
+		})
+	}
+	return rows, nil
 }
 
 func (q *InMemoryQuerier) DeleteKBArticle(ctx context.Context, id pgtype.UUID) error {
@@ -1909,8 +2553,345 @@ func (q *InMemoryQuerier) UpdateWorkflowRunStatus(ctx context.Context, arg db.Up
 	run.Status = arg.Status
 	run.CurrentStep = arg.CurrentStep
 	run.CompletedAt = arg.CompletedAt
+	if len(arg.SnapshotJson) > 0 {
+		run.SnapshotJson = arg.SnapshotJson
+	}
 	q.workflowRuns[arg.ID] = run
 	return run, nil
+}
+
+// --- User Invites ---
+// CreateInvitedUserWithInvite mirrors the single SQL statement: under one write
+// lock it enforces users.email UNIQUE, creates the INVITED user and stores the
+// invite. A duplicate on either constraint aborts before anything is written,
+// so a half-created account can never exist.
+func (q *InMemoryQuerier) CreateInvitedUserWithInvite(ctx context.Context, arg db.CreateInvitedUserWithInviteParams) (db.UserInvite, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	for _, u := range q.users {
+		if strings.EqualFold(u.Email, arg.Email) {
+			return db.UserInvite{}, errors.New("user with this email already exists")
+		}
+	}
+	for _, invite := range q.userInvites {
+		if invite.TokenHash == arg.TokenHash {
+			return db.UserInvite{}, errors.New("user invite with this token hash already exists")
+		}
+	}
+
+	user := db.User{
+		ID:           newUUID(),
+		Email:        arg.Email,
+		PasswordHash: arg.PasswordHash,
+		FirstName:    arg.FirstName,
+		LastName:     arg.LastName,
+		Role:         arg.Role,
+		Status:       "INVITED",
+		CreatedAt:    nowTimestamptz(),
+		UpdatedAt:    nowTimestamptz(),
+	}
+	q.users[uuidToStr(user.ID)] = user
+
+	id := newUUID()
+	invite := db.UserInvite{
+		ID:        id,
+		UserID:    user.ID,
+		TokenHash: arg.TokenHash,
+		CreatedBy: arg.CreatedBy,
+		ExpiresAt: arg.ExpiresAt,
+		CreatedAt: nowTimestamptz(),
+	}
+	q.userInvites[uuidToStr(id)] = invite
+	return invite, nil
+}
+
+// AcceptUserInvite mirrors the single SQL statement: it looks the invite up by
+// hash, applies the same active predicates the locked CTE uses, then consumes
+// the invite and activates the user under one write lock. A consumed, revoked,
+// expired or unknown token matches nothing and returns ErrNotFound, which is
+// what pgx reports for the statement's zero-row result.
+func (q *InMemoryQuerier) AcceptUserInvite(ctx context.Context, arg db.AcceptUserInviteParams) (db.User, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	now := time.Now().UTC()
+	var locked db.UserInvite
+	found := false
+	for _, invite := range q.userInvites {
+		if invite.TokenHash != arg.TokenHash {
+			continue
+		}
+		if invite.ConsumedAt.Valid || invite.RevokedAt.Valid {
+			continue
+		}
+		if !invite.ExpiresAt.Valid || !invite.ExpiresAt.Time.After(now) {
+			continue
+		}
+		locked = invite
+		found = true
+		break
+	}
+	if !found {
+		return db.User{}, ErrNotFound
+	}
+
+	// The SQL consumes exactly the row the locked CTE selected (WHERE i.id =
+	// l.id). Consuming "an invite of this user" instead would, in map order,
+	// burn an unrelated invite and leave the presented token usable.
+	consumed := locked
+	consumed.ConsumedAt = pgtype.Timestamptz{Time: now, Valid: true}
+	q.userInvites[uuidToStr(locked.ID)] = consumed
+
+	userID := uuidToStr(locked.UserID)
+	user, ok := q.users[userID]
+	if !ok {
+		return db.User{}, ErrNotFound
+	}
+	user.PasswordHash = arg.PasswordHash
+	user.Status = "ACTIVE"
+	user.UpdatedAt = pgtype.Timestamptz{Time: now, Valid: true}
+	q.users[userID] = user
+	return user, nil
+}
+
+func (q *InMemoryQuerier) CreateUserInvite(ctx context.Context, arg db.CreateUserInviteParams) (db.UserInvite, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	for _, invite := range q.userInvites {
+		if invite.TokenHash == arg.TokenHash {
+			return db.UserInvite{}, errors.New("user invite with this token hash already exists")
+		}
+	}
+
+	id := newUUID()
+	invite := db.UserInvite{
+		ID:        id,
+		UserID:    arg.UserID,
+		TokenHash: arg.TokenHash,
+		CreatedBy: arg.CreatedBy,
+		ExpiresAt: arg.ExpiresAt,
+		CreatedAt: nowTimestamptz(),
+	}
+	q.userInvites[uuidToStr(id)] = invite
+	return invite, nil
+}
+
+func (q *InMemoryQuerier) GetUserInviteByTokenHash(ctx context.Context, tokenHash string) (db.UserInvite, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	for _, invite := range q.userInvites {
+		if invite.TokenHash == tokenHash {
+			return invite, nil
+		}
+	}
+	return db.UserInvite{}, ErrNotFound
+}
+
+func (q *InMemoryQuerier) RevokeUserInvite(ctx context.Context, id pgtype.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idStr := uuidToStr(id)
+	invite, ok := q.userInvites[idStr]
+	if !ok {
+		return nil
+	}
+	// Consumed invites are immutable: the SQL predicate is WHERE id = $1 AND consumed_at IS NULL.
+	if invite.ConsumedAt.Valid {
+		return nil
+	}
+	invite.RevokedAt = nowTimestamptz()
+	q.userInvites[idStr] = invite
+	return nil
+}
+
+func (q *InMemoryQuerier) ListUserInvites(ctx context.Context) ([]db.UserInvite, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	list := make([]db.UserInvite, 0, len(q.userInvites))
+	for _, invite := range q.userInvites {
+		list = append(list, invite)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.Time.After(list[j].CreatedAt.Time)
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) ExportUserInvitesRows(ctx context.Context) ([][]byte, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	type keyedRow struct {
+		key string
+		row []byte
+	}
+	keyed := make([]keyedRow, 0, len(q.userInvites))
+	for id, invite := range q.userInvites {
+		row, err := json.Marshal(invite)
+		if err != nil {
+			return nil, err
+		}
+		keyed = append(keyed, keyedRow{key: id, row: row})
+	}
+	sort.Slice(keyed, func(i, j int) bool {
+		return keyed[i].key < keyed[j].key
+	})
+
+	rows := make([][]byte, 0, len(keyed))
+	for _, k := range keyed {
+		rows = append(rows, k.row)
+	}
+	return rows, nil
+}
+
+func (q *InMemoryQuerier) UpsertUserInvitesRow(ctx context.Context, row []byte) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	var invite db.UserInvite
+	if err := json.Unmarshal(row, &invite); err != nil {
+		return err
+	}
+	if !invite.ID.Valid {
+		return errors.New("user_invites row is missing an id")
+	}
+	idStr := uuidToStr(invite.ID)
+	// ON CONFLICT (id) DO UPDATE leaves created_at untouched.
+	if existing, ok := q.userInvites[idStr]; ok {
+		invite.CreatedAt = existing.CreatedAt
+	}
+	q.userInvites[idStr] = invite
+	return nil
+}
+
+// --- Email Templates ---
+func (q *InMemoryQuerier) CreateEmailTemplate(ctx context.Context, arg db.CreateEmailTemplateParams) (db.EmailTemplate, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if _, exists := q.emailTemplates[arg.Key]; exists {
+		return db.EmailTemplate{}, errors.New("email template key already exists: " + arg.Key)
+	}
+
+	id := newUUID()
+	tpl := db.EmailTemplate{
+		ID:        id,
+		Key:       arg.Key,
+		Name:      arg.Name,
+		Subject:   arg.Subject,
+		Body:      arg.Body,
+		Category:  arg.Category,
+		Locale:    arg.Locale,
+		CreatedAt: nowTimestamptz(),
+		UpdatedAt: nowTimestamptz(),
+	}
+	q.emailTemplates[arg.Key] = tpl
+	return tpl, nil
+}
+
+func (q *InMemoryQuerier) GetEmailTemplateByKey(ctx context.Context, key string) (db.EmailTemplate, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	tpl, ok := q.emailTemplates[key]
+	if !ok {
+		return db.EmailTemplate{}, ErrNotFound
+	}
+	return tpl, nil
+}
+
+func (q *InMemoryQuerier) ListEmailTemplates(ctx context.Context) ([]db.EmailTemplate, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	list := make([]db.EmailTemplate, 0, len(q.emailTemplates))
+	for _, tpl := range q.emailTemplates {
+		list = append(list, tpl)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Category != list[j].Category {
+			return list[i].Category < list[j].Category
+		}
+		return list[i].Key < list[j].Key
+	})
+	return list, nil
+}
+
+func (q *InMemoryQuerier) UpdateEmailTemplate(ctx context.Context, arg db.UpdateEmailTemplateParams) (db.EmailTemplate, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	tpl, ok := q.emailTemplates[arg.Key]
+	if !ok {
+		return db.EmailTemplate{}, ErrNotFound
+	}
+	tpl.Name = arg.Name
+	tpl.Subject = arg.Subject
+	tpl.Body = arg.Body
+	tpl.Category = arg.Category
+	tpl.Locale = arg.Locale
+	tpl.UpdatedAt = nowTimestamptz()
+	q.emailTemplates[arg.Key] = tpl
+	return tpl, nil
+}
+
+func (q *InMemoryQuerier) DeleteEmailTemplate(ctx context.Context, key string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	delete(q.emailTemplates, key)
+	return nil
+}
+
+func (q *InMemoryQuerier) ExportEmailTemplatesRows(ctx context.Context) ([][]byte, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	type keyedRow struct {
+		key string
+		row []byte
+	}
+	keyed := make([]keyedRow, 0, len(q.emailTemplates))
+	for _, tpl := range q.emailTemplates {
+		row, err := json.Marshal(tpl)
+		if err != nil {
+			return nil, err
+		}
+		keyed = append(keyed, keyedRow{key: uuidToStr(tpl.ID), row: row})
+	}
+	sort.Slice(keyed, func(i, j int) bool {
+		return keyed[i].key < keyed[j].key
+	})
+
+	rows := make([][]byte, 0, len(keyed))
+	for _, k := range keyed {
+		rows = append(rows, k.row)
+	}
+	return rows, nil
+}
+
+func (q *InMemoryQuerier) UpsertEmailTemplatesRow(ctx context.Context, row []byte) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	var tpl db.EmailTemplate
+	if err := json.Unmarshal(row, &tpl); err != nil {
+		return err
+	}
+	if !tpl.ID.Valid {
+		return errors.New("email_templates row is missing an id")
+	}
+	// ON CONFLICT (key) DO UPDATE keeps the stored id and refreshes the content.
+	if existing, ok := q.emailTemplates[tpl.Key]; ok {
+		tpl.ID = existing.ID
+	}
+	q.emailTemplates[tpl.Key] = tpl
+	return nil
 }
 
 // Compile-time check that InMemoryQuerier implements db.Querier

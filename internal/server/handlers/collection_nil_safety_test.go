@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/appointment"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
@@ -21,7 +23,8 @@ import (
 )
 
 func TestCollectionEndpoints_EmptyArraySerialization(t *testing.T) {
-	ctx := context.Background()
+	claims := &auth.AccessClaims{UserID: uuid.New(), Role: "ADMIN"}
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, claims)
 
 	t.Run("Deals List and ListByStage empty array serialization", func(t *testing.T) {
 		querier := demo.NewEmptyInMemoryQuerier()

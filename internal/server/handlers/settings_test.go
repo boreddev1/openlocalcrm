@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
+	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/openlocalcrm/openlocalcrm/internal/launcher"
 	"github.com/openlocalcrm/openlocalcrm/internal/server/handlers"
 	"github.com/stretchr/testify/require"
@@ -22,7 +24,7 @@ func TestSettingsHandler_ExportImport(t *testing.T) {
 	envContent := `PORT=8080
 INITIAL_ADMIN_EMAIL=admin@system.de
 AI_PROVIDER=ollama
-OLLAMA_MODEL=gemma4:12b
+OLLAMA_MODEL=gemma2:12b
 `
 	_ = os.WriteFile(filepath.Join(tmp, ".env"), []byte(envContent), 0600)
 
@@ -56,7 +58,7 @@ OLLAMA_MODEL=gemma4:12b
 		err := json.NewDecoder(rec.Body).Decode(&exported)
 		require.NoError(t, err)
 		require.Equal(t, "ollama", exported.AI.Provider)
-		require.Equal(t, "gemma4:12b", exported.AI.Model)
+		require.Equal(t, "gemma2:12b", exported.AI.Model)
 		require.Equal(t, "admin@system.de", exported.Admin.Email)
 		require.Equal(t, 8080, exported.System.Port)
 	})
@@ -111,7 +113,7 @@ OLLAMA_MODEL=gemma4:12b
 			AI: launcher.AISettings{
 				Provider: "ollama",
 				BaseURL:  "http://host.docker.internal:11434",
-				Model:    "gemma4:12b",
+				Model:    "gemma2:12b",
 			},
 			Admin: launcher.AdminSettings{
 				Email: "multipart-admin@solar.de",
@@ -138,4 +140,190 @@ OLLAMA_MODEL=gemma4:12b
 		data, _ := os.ReadFile(filepath.Join(tmp, ".env"))
 		require.Contains(t, string(data), "INITIAL_ADMIN_EMAIL=multipart-admin@solar.de")
 	})
+
+	t.Run("ExportSettings never outputs plaintext secrets (F-31)", func(t *testing.T) {
+		secEnv := `PORT=8080
+INITIAL_ADMIN_EMAIL=admin@system.de
+INITIAL_ADMIN_PASSWORD=SuperSecretAdminPassword123!
+AI_API_KEY=sk-proj-ultra-secret-key-456
+CONNECTOR_API_TOKEN=super-secret-connector-token-789
+`
+		_ = os.WriteFile(filepath.Join(tmp, ".env"), []byte(secEnv), 0600)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/settings/export", nil).WithContext(adminCtx)
+		rec := httptest.NewRecorder()
+
+		h.ExportSettings(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		rawBody := rec.Body.String()
+		require.NotContains(t, rawBody, "SuperSecretAdminPassword123!")
+		require.NotContains(t, rawBody, "sk-proj-ultra-secret-key-456")
+		require.NotContains(t, rawBody, "super-secret-connector-token-789")
+
+		var exported launcher.ExportedSettings
+		err := json.Unmarshal([]byte(rawBody), &exported)
+		require.NoError(t, err)
+		require.Empty(t, exported.Admin.Password)
+		require.True(t, exported.Admin.HasPassword)
+		require.Empty(t, exported.AI.APIKey)
+		require.True(t, exported.AI.HasAPIKey)
+		require.Empty(t, exported.System.ConnectorAPIToken)
+		require.True(t, exported.System.HasConnectorAPIToken)
+	})
+
+	t.Run("ImportSettings rejects newlines to prevent .env injection (F-33)", func(t *testing.T) {
+		injectedSettings := launcher.ExportedSettings{
+			Admin: launcher.AdminSettings{
+				Email: "admin@system.de\nINJECTED_VAR=malicious_payload",
+			},
+		}
+		body, _ := json.Marshal(injectedSettings)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/import", bytes.NewReader(body)).WithContext(adminCtx)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		h.ImportSettings(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		require.Contains(t, rec.Body.String(), "invalid control characters")
+	})
+
+	t.Run("ImportSettings does not echo secrets in response (F-32)", func(t *testing.T) {
+		settingsWithSecrets := launcher.ExportedSettings{
+			Admin: launcher.AdminSettings{
+				Email:    "new@system.de",
+				Password: "NewPlaintextPassword999!",
+			},
+			AI: launcher.AISettings{
+				APIKey: "sk-another-secret-key-111",
+			},
+			System: launcher.SystemSettings{
+				ConnectorAPIToken: "conn-secret-token-222",
+			},
+		}
+		body, _ := json.Marshal(settingsWithSecrets)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/import", bytes.NewReader(body)).WithContext(adminCtx)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		h.ImportSettings(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		rawBody := rec.Body.String()
+		require.NotContains(t, rawBody, "NewPlaintextPassword999!")
+		require.NotContains(t, rawBody, "sk-another-secret-key-111")
+		require.NotContains(t, rawBody, "conn-secret-token-222")
+	})
+
+	t.Run("Export and Import audit logging", func(t *testing.T) {
+		memQ := demo.NewInMemoryQuerier()
+		auditSvc := audit.NewService(memQ)
+		hWithAudit := handlers.NewSettingsHandler(tmp).WithAudit(auditSvc)
+
+		// 1. Export
+		reqExport := httptest.NewRequest(http.MethodGet, "/api/v1/settings/export", nil).WithContext(adminCtx)
+		recExport := httptest.NewRecorder()
+		hWithAudit.ExportSettings(recExport, reqExport)
+		require.Equal(t, http.StatusOK, recExport.Code)
+
+		// 2. Import
+		validSettings := launcher.ExportedSettings{
+			Admin: launcher.AdminSettings{Email: "admin@system.de"},
+		}
+		body, _ := json.Marshal(validSettings)
+		reqImport := httptest.NewRequest(http.MethodPost, "/api/v1/settings/import", bytes.NewReader(body)).WithContext(adminCtx)
+		reqImport.Header.Set("Content-Type", "application/json")
+		recImport := httptest.NewRecorder()
+		hWithAudit.ImportSettings(recImport, reqImport)
+		require.Equal(t, http.StatusOK, recImport.Code)
+
+		// 3. Verify audit logs
+		logs, err := memQ.ListAuditLogsAsc(context.Background())
+		require.NoError(t, err)
+		var hasExport, hasImport bool
+		for _, l := range logs {
+			if l.Action == "SETTINGS_EXPORTED" {
+				hasExport = true
+			}
+			if l.Action == "SETTINGS_IMPORTED" {
+				hasImport = true
+			}
+		}
+		require.True(t, hasExport, "expected SETTINGS_EXPORTED audit log")
+		require.True(t, hasImport, "expected SETTINGS_IMPORTED audit log")
+
+		// 4. Verify chain integrity
+		valid, count, err := auditSvc.VerifyAuditChain(context.Background())
+		require.NoError(t, err)
+		require.True(t, valid)
+		require.Equal(t, 2, count)
+	})
+}
+
+// Issue #122: the settings handler used to fall back to the process working
+// directory, which inside `go test` is the package directory. An import then
+// wrote a regenerated .env — fresh DB password, connector token, admin
+// password — straight into the source tree. The directory must come from
+// $CONFIG_DIR (or an explicit argument), and nothing may land in the tree.
+func TestSettingsHandler_BaseDirFromConfigDir(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("CONFIG_DIR", configDir)
+
+	adminCtx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		Email: "admin@system.de",
+		Role:  "ADMIN",
+	})
+
+	// No explicit baseDir: the handler has to pick up CONFIG_DIR.
+	h := handlers.NewSettingsHandler()
+
+	body, _ := json.Marshal(launcher.ExportedSettings{
+		Admin:  launcher.AdminSettings{Email: "configdir-admin@solar.de"},
+		System: launcher.SystemSettings{Port: 7777},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/import", bytes.NewReader(body)).WithContext(adminCtx)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.ImportSettings(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	written, err := os.ReadFile(filepath.Join(configDir, ".env"))
+	require.NoError(t, err, "expected the import to write $CONFIG_DIR/.env")
+	require.Contains(t, string(written), "INITIAL_ADMIN_EMAIL=configdir-admin@solar.de")
+	require.Contains(t, string(written), "PORT=7777")
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	_, statErr := os.Stat(filepath.Join(cwd, ".env"))
+	require.Truef(t, os.IsNotExist(statErr),
+		"import wrote .env into the package directory %s (issue #122)", cwd)
+}
+
+// An explicit base directory still beats $CONFIG_DIR, which is how the launcher
+// and every existing call site keep working.
+func TestSettingsHandler_ExplicitBaseDirBeatsConfigDir(t *testing.T) {
+	configDir := t.TempDir()
+	explicitDir := t.TempDir()
+	t.Setenv("CONFIG_DIR", configDir)
+
+	adminCtx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		Email: "admin@system.de",
+		Role:  "ADMIN",
+	})
+
+	body, _ := json.Marshal(launcher.ExportedSettings{
+		Admin: launcher.AdminSettings{Email: "explicit@solar.de"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/import", bytes.NewReader(body)).WithContext(adminCtx)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handlers.NewSettingsHandler(explicitDir).ImportSettings(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	_, err := os.Stat(filepath.Join(explicitDir, ".env"))
+	require.NoError(t, err, "explicit baseDir must win")
+	_, err = os.Stat(filepath.Join(configDir, ".env"))
+	require.True(t, os.IsNotExist(err), "CONFIG_DIR must not be written when a baseDir is passed")
 }

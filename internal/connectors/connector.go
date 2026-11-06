@@ -8,7 +8,9 @@ import (
 	"log"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/contact"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/deal"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
@@ -19,32 +21,47 @@ var (
 	ErrUnauthorizedConnector = errors.New("unauthorized connector token")
 )
 
+type EventTrigger interface {
+	TriggerEvent(ctx context.Context, triggerType, targetID, targetType, targetName string) ([]automation.WorkflowRun, error)
+}
+
+func uuidStr(id pgtype.UUID) string {
+	return uuid.UUID(id.Bytes).String()
+}
+
 type LeadIntakePayload struct {
-	FirstName   string `json:"first_name"`
-	LastName    string `json:"last_name"`
-	Email       string `json:"email"`
-	Phone       string `json:"phone"`
-	Street      string `json:"street"`
-	City        string `json:"city"`
-	Zip         string `json:"zip"`
-	DealTitle   string `json:"deal_title"`
-	DealValue   string `json:"deal_value"`
-	Source      string `json:"source"`
-	SetterNotes string `json:"setter_notes"`
+	FirstName    string               `json:"first_name"`
+	LastName     string               `json:"last_name"`
+	Email        string               `json:"email"`
+	Phone        string               `json:"phone"`
+	Street       string               `json:"street"`
+	City         string               `json:"city"`
+	Zip          string               `json:"zip"`
+	DealTitle    string               `json:"deal_title"`
+	DealValue    string               `json:"deal_value"`
+	Source       string               `json:"source"`
+	SetterNotes  string               `json:"setter_notes"`
+	ConsentPhone contact.OptionalBool `json:"consent_phone"`
+	ConsentEmail contact.OptionalBool `json:"consent_email"`
 }
 
 type Engine struct {
 	contactSvc *contact.Service
 	dealSvc    *deal.Service
 	apiToken   string
+	trigger    EventTrigger
 }
 
-func NewEngine(contactSvc *contact.Service, dealSvc *deal.Service, apiToken string) *Engine {
-	return &Engine{
+func NewEngine(contactSvc *contact.Service, dealSvc *deal.Service, apiToken string, trigger ...EventTrigger) *Engine {
+	e := &Engine{
 		contactSvc: contactSvc,
 		dealSvc:    dealSvc,
 		apiToken:   apiToken,
 	}
+	if len(trigger) > 0 {
+		e.trigger = trigger[0]
+	}
+	return e
 }
 
 func (e *Engine) IngestLead(ctx context.Context, token string, payload LeadIntakePayload) (db.Contact, error) {
@@ -68,9 +85,18 @@ func (e *Engine) IngestLead(ctx context.Context, token string, payload LeadIntak
 		AddressStreet: payload.Street,
 		AddressCity:   payload.City,
 		AddressZip:    payload.Zip,
+		ConsentPhone:  payload.ConsentPhone,
+		ConsentEmail:  payload.ConsentEmail,
 	})
 	if err != nil {
 		return db.Contact{}, err
+	}
+
+	fullName := strings.TrimSpace(payload.FirstName + " " + payload.LastName)
+	if e.trigger != nil {
+		if _, trigErr := e.trigger.TriggerEvent(ctx, "NEW_LEAD", uuidStr(c.ID), "CONTACT", fullName); trigErr != nil {
+			log.Printf("[connector_warning] automation trigger NEW_LEAD failed for contact %s: %v", uuidStr(c.ID), trigErr)
+		}
 	}
 
 	// 2. If Deal Title is provided, create associated Deal

@@ -59,6 +59,7 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || healthRes.StatusCode != http.StatusOK {
 		t.Fatalf("health check failed: %v, status: %d", err, healthRes.StatusCode)
 	}
+	defer healthRes.Body.Close()
 	var health map[string]any
 	_ = json.NewDecoder(healthRes.Body).Decode(&health)
 	if health["demo_mode"] != false {
@@ -74,11 +75,17 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || loginRes.StatusCode != http.StatusOK {
 		t.Fatalf("login failed: %v, status: %d", err, loginRes.StatusCode)
 	}
-	var loginData struct {
-		Token string `json:"token"`
+	defer loginRes.Body.Close()
+	var token string
+	for _, c := range loginRes.Cookies() {
+		if c.Name == "access_token" {
+			token = c.Value
+			break
+		}
 	}
-	_ = json.NewDecoder(loginRes.Body).Decode(&loginData)
-	token := loginData.Token
+	if token == "" {
+		t.Fatalf("missing access_token cookie from login")
+	}
 
 	reqWithAuth := func(method, path string) *http.Request {
 		req, _ := http.NewRequest(method, ts.URL+path, nil)
@@ -91,6 +98,7 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("get contacts failed: %v, status: %d", err, res.StatusCode)
 	}
+	defer res.Body.Close()
 	var contacts []any
 	_ = json.NewDecoder(res.Body).Decode(&contacts)
 	if len(contacts) != 0 {
@@ -102,6 +110,7 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("get deals failed: %v, status: %d", err, res.StatusCode)
 	}
+	defer res.Body.Close()
 	var deals []any
 	_ = json.NewDecoder(res.Body).Decode(&deals)
 	if len(deals) != 0 {
@@ -113,6 +122,7 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("get companies failed: %v, status: %d", err, res.StatusCode)
 	}
+	defer res.Body.Close()
 	var companies []any
 	_ = json.NewDecoder(res.Body).Decode(&companies)
 	if len(companies) != 0 {
@@ -124,6 +134,7 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("get todos failed: %v, status: %d", err, res.StatusCode)
 	}
+	defer res.Body.Close()
 	var todos []any
 	_ = json.NewDecoder(res.Body).Decode(&todos)
 	if len(todos) != 0 {
@@ -135,6 +146,7 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("get notes failed: %v, status: %d", err, res.StatusCode)
 	}
+	defer res.Body.Close()
 	var notes []any
 	_ = json.NewDecoder(res.Body).Decode(&notes)
 	if len(notes) != 0 {
@@ -146,6 +158,7 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("get appointments failed: %v, status: %d", err, res.StatusCode)
 	}
+	defer res.Body.Close()
 	var appointments []any
 	_ = json.NewDecoder(res.Body).Decode(&appointments)
 	if len(appointments) != 0 {
@@ -157,6 +170,7 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("get sales reports failed: %v, status: %d", err, res.StatusCode)
 	}
+	defer res.Body.Close()
 	var report struct {
 		Forecast        []any `json:"forecast"`
 		ConversionStats struct {
@@ -182,6 +196,7 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("get kb articles failed: %v, status: %d", err, res.StatusCode)
 	}
+	defer res.Body.Close()
 	var kbArticles []any
 	_ = json.NewDecoder(res.Body).Decode(&kbArticles)
 	if len(kbArticles) != 0 {
@@ -193,6 +208,7 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("get research jobs failed: %v, status: %d", err, res.StatusCode)
 	}
+	defer res.Body.Close()
 	var researchJobs []any
 	_ = json.NewDecoder(res.Body).Decode(&researchJobs)
 	if len(researchJobs) != 0 {
@@ -204,24 +220,33 @@ func TestProductionMode_NoFakeData(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("get automation runs failed: %v, status: %d", err, res.StatusCode)
 	}
+	defer res.Body.Close()
 	var runs []any
 	_ = json.NewDecoder(res.Body).Decode(&runs)
 	if len(runs) != 0 {
 		t.Fatalf("expected 0 automation runs in clean production, got %d", len(runs))
 	}
 
-	// 13. Backup Drill: confirms 0 companies, 0 contacts, 0 deals
+	// 13. Backup drill: this test runs the production wiring against an
+	// in-memory querier, which has no PostgreSQL pool and therefore cannot
+	// perform a real scratch-schema round trip. The honest answer is 501, not a
+	// reassuring count-based "passed". The real drill is covered against a live
+	// pgvector database by scripts/test-backup-integration.sh.
 	res, err = client.Do(reqWithAuth(http.MethodPost, "/api/v1/backup/drill"))
-	if err != nil || res.StatusCode != http.StatusOK {
-		t.Fatalf("backup drill failed: %v, status: %d", err, res.StatusCode)
+	if err != nil {
+		t.Fatalf("backup drill request failed: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected 501 without a PostgreSQL pool, got %d", res.StatusCode)
 	}
 	var drill struct {
-		CompanyCount int `json:"company_count"`
-		ContactCount int `json:"contact_count"`
-		DealCount    int `json:"deal_count"`
+		Error   string `json:"error"`
+		Passed  bool   `json:"passed"`
+		Message string `json:"message"`
 	}
 	_ = json.NewDecoder(res.Body).Decode(&drill)
-	if drill.CompanyCount != 0 || drill.ContactCount != 0 || drill.DealCount != 0 {
-		t.Fatalf("expected 0 counts in backup drill, got %+v", drill)
+	if drill.Error != "backup_unavailable" || drill.Passed {
+		t.Fatalf("unexpected drill response: %+v", drill)
 	}
 }

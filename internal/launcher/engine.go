@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -68,11 +69,12 @@ func ExtractEnvFromInspect(items []DockerInspectItem) map[string]string {
 				parts := strings.SplitN(line, "=", 2)
 				if len(parts) == 2 {
 					k, v := parts[0], parts[1]
-					if k == "POSTGRES_PASSWORD" {
+					switch k {
+					case "POSTGRES_PASSWORD":
 						env["DB_PASSWORD"] = v
-					} else if k == "POSTGRES_USER" {
+					case "POSTGRES_USER":
 						env["DB_USER"] = v
-					} else if k == "POSTGRES_DB" {
+					case "POSTGRES_DB":
 						env["DB_NAME"] = v
 					}
 				}
@@ -102,6 +104,10 @@ func ExtractEnvFromInspect(items []DockerInspectItem) map[string]string {
 						env["AI_API_KEY"] = v
 					case "AI_BASE_URL":
 						env["AI_BASE_URL"] = v
+					case "AI_EMBEDDING_MODEL":
+						env["AI_EMBEDDING_MODEL"] = v
+					case "OLLAMA_EMBEDDING_MODEL":
+						env["OLLAMA_EMBEDDING_MODEL"] = v
 					case "DEMO_MODE":
 						env["DEMO_MODE"] = v
 					}
@@ -175,10 +181,29 @@ func ParseContainersJSON(data []byte) ([]ContainerInfo, error) {
 
 type Engine struct {
 	BaseDir string
+
+	// execFn is the per-engine test seam for creating OS commands. NewEngine
+	// wires it to the platform execCommand function (engine_other.go /
+	// engine_windows.go), which is what production runs. Tests replace it with
+	// a recording stub so destructive flows like ResetAll assert on the docker
+	// argv they issue instead of force-killing the developer's real containers
+	// and volumes. It is package-private on purpose: there is no supported way
+	// to run the shipped launcher with a different command factory.
+	execFn func(ctx context.Context, name string, arg ...string) *exec.Cmd
 }
 
 func NewEngine(baseDir string) *Engine {
-	return &Engine{BaseDir: baseDir}
+	return &Engine{BaseDir: baseDir, execFn: execCommand}
+}
+
+// command creates every command the engine executes, routing through the
+// per-engine seam when one is installed. It falls back to the platform default
+// so a bare &Engine{} literal behaves exactly like NewEngine's.
+func (e *Engine) command(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	if e.execFn != nil {
+		return e.execFn(ctx, name, arg...)
+	}
+	return execCommand(ctx, name, arg...)
 }
 
 func (e *Engine) getDBUserAndName() (string, string) {
@@ -208,7 +233,7 @@ func (e *Engine) getDBUserAndName() (string, string) {
 }
 
 func (e *Engine) Up(ctx context.Context, logChan chan<- string) error {
-	cmd := execCommand(ctx, "docker", "compose", "up", "-d", "--remove-orphans")
+	cmd := e.command(ctx, "docker", "compose", "up", "-d", "--remove-orphans")
 	cmd.Dir = e.BaseDir
 
 	stdout, err := cmd.StdoutPipe()
@@ -233,19 +258,19 @@ func (e *Engine) Up(ctx context.Context, logChan chan<- string) error {
 }
 
 func (e *Engine) Stop(ctx context.Context) error {
-	cmd := execCommand(ctx, "docker", "compose", "stop")
+	cmd := e.command(ctx, "docker", "compose", "stop")
 	cmd.Dir = e.BaseDir
 	return cmd.Run()
 }
 
 func (e *Engine) Restart(ctx context.Context) error {
-	cmd := execCommand(ctx, "docker", "compose", "restart")
+	cmd := e.command(ctx, "docker", "compose", "restart")
 	cmd.Dir = e.BaseDir
 	return cmd.Run()
 }
 
 func (e *Engine) Down(ctx context.Context) error {
-	cmd := execCommand(ctx, "docker", "compose", "down")
+	cmd := e.command(ctx, "docker", "compose", "down")
 	cmd.Dir = e.BaseDir
 	return cmd.Run()
 }
@@ -261,7 +286,7 @@ func (e *Engine) ResetAll(ctx context.Context, logChan chan<- string) error {
 	if logChan != nil {
 		logChan <- "[Reset] Stoppe und entferne Docker-Container & Volumes (docker compose down -v)..."
 	}
-	downCmd := execCommand(ctx, "docker", "compose", "down", "-v", "--remove-orphans")
+	downCmd := e.command(ctx, "docker", "compose", "down", "-v", "--remove-orphans")
 	downCmd.Dir = e.BaseDir
 	if out, err := downCmd.CombinedOutput(); err != nil {
 		if logChan != nil {
@@ -281,17 +306,17 @@ func (e *Engine) ResetAll(ctx context.Context, logChan chan<- string) error {
 		"mavalio-db-1", "mavalio-server-1", "mavalio-caddy-1", "mavalio-worker-1",
 	}
 	for _, name := range lingeringContainers {
-		rmCmd := execCommand(ctx, "docker", "rm", "-f", name)
+		rmCmd := e.command(ctx, "docker", "rm", "-f", name)
 		_ = rmCmd.Run()
 	}
 	// Dynamic container cleanup for any remaining matches
-	if psOut, psErr := execCommand(ctx, "docker", "ps", "-a", "--format", "{{.Names}}").Output(); psErr == nil {
+	if psOut, psErr := e.command(ctx, "docker", "ps", "-a", "--format", "{{.Names}}").Output(); psErr == nil {
 		for _, line := range strings.Split(string(psOut), "\n") {
 			name := strings.TrimSpace(line)
 			cleanName := strings.TrimPrefix(name, "/")
 			lower := strings.ToLower(cleanName)
 			if lower != "" && (strings.Contains(lower, "crm") || strings.Contains(lower, "openlocalcrm") || strings.Contains(lower, "mavalio")) {
-				_ = execCommand(ctx, "docker", "rm", "-f", cleanName).Run()
+				_ = e.command(ctx, "docker", "rm", "-f", cleanName).Run()
 			}
 		}
 	}
@@ -308,16 +333,16 @@ func (e *Engine) ResetAll(ctx context.Context, logChan chan<- string) error {
 		"openlocalcrm_crm_caddy_config", "crm_caddy_config", "mavalio_crm_caddy_config",
 	}
 	for _, vol := range lingeringVolumes {
-		volCmd := execCommand(ctx, "docker", "volume", "rm", "-f", vol)
+		volCmd := e.command(ctx, "docker", "volume", "rm", "-f", vol)
 		_ = volCmd.Run()
 	}
 	// Dynamic volume cleanup for any remaining matches
-	if volOut, volErr := execCommand(ctx, "docker", "volume", "ls", "--format", "{{.Name}}").Output(); volErr == nil {
+	if volOut, volErr := e.command(ctx, "docker", "volume", "ls", "--format", "{{.Name}}").Output(); volErr == nil {
 		for _, line := range strings.Split(string(volOut), "\n") {
 			vol := strings.TrimSpace(line)
 			lower := strings.ToLower(vol)
 			if lower != "" && (strings.Contains(lower, "crm") || strings.Contains(lower, "openlocalcrm") || strings.Contains(lower, "mavalio")) {
-				_ = execCommand(ctx, "docker", "volume", "rm", "-f", vol).Run()
+				_ = e.command(ctx, "docker", "volume", "rm", "-f", vol).Run()
 			}
 		}
 	}
@@ -341,7 +366,7 @@ func (e *Engine) ResetAll(ctx context.Context, logChan chan<- string) error {
 func (e *Engine) RecoverEnvFromDocker(ctx context.Context) (map[string]string, error) {
 	candidates := []string{"crm-db", "crm-server", "crm-proxy", "crm-worker", "openlocalcrm-db-1", "openlocalcrm-server-1", "openlocalcrm-caddy-1"}
 
-	psCmd := execCommand(ctx, "docker", "ps", "-a", "--format", "{{.Names}}")
+	psCmd := e.command(ctx, "docker", "ps", "-a", "--format", "{{.Names}}")
 	if psOut, err := psCmd.Output(); err == nil {
 		lines := strings.Split(string(psOut), "\n")
 		for _, line := range lines {
@@ -361,7 +386,7 @@ func (e *Engine) RecoverEnvFromDocker(ctx context.Context) (map[string]string, e
 		}
 		seen[name] = true
 
-		inspectCmd := execCommand(ctx, "docker", "inspect", name)
+		inspectCmd := e.command(ctx, "docker", "inspect", name)
 		if out, err := inspectCmd.Output(); err == nil {
 			if items, pErr := ParseDockerInspectJSON(out); pErr == nil && len(items) > 0 {
 				allItems = append(allItems, items...)
@@ -381,7 +406,7 @@ func (e *Engine) RecoverEnvFromDocker(ctx context.Context) (map[string]string, e
 }
 
 func (e *Engine) GetContainers(ctx context.Context) ([]ContainerInfo, error) {
-	cmd := execCommand(ctx, "docker", "compose", "ps", "--format", "json")
+	cmd := e.command(ctx, "docker", "compose", "ps", "--format", "json")
 	cmd.Dir = e.BaseDir
 
 	out, err := cmd.Output()
@@ -392,7 +417,7 @@ func (e *Engine) GetContainers(ctx context.Context) ([]ContainerInfo, error) {
 	}
 
 	// Direct query against Docker daemon via docker ps -a (works across different project/folder names)
-	psCmd := execCommand(ctx, "docker", "ps", "-a", "--format", "{{json .}}")
+	psCmd := e.command(ctx, "docker", "ps", "-a", "--format", "{{json .}}")
 	if psOut, psErr := psCmd.Output(); psErr == nil && len(psOut) > 0 {
 		var list []ContainerInfo
 		lines := strings.Split(string(psOut), "\n")
@@ -406,7 +431,7 @@ func (e *Engine) GetContainers(ctx context.Context) ([]ContainerInfo, error) {
 				State  string `json:"State"`
 				Status string `json:"Status"`
 			}
-			if err := json.Unmarshal([]byte(line), &item); err == nil {
+			if jsonErr := json.Unmarshal([]byte(line), &item); jsonErr == nil {
 				cleanName := strings.TrimPrefix(item.Names, "/")
 				if strings.Contains(cleanName, "crm") || strings.Contains(cleanName, "openlocalcrm") || strings.Contains(cleanName, "mavalio") {
 					service := cleanName
@@ -439,7 +464,7 @@ func (e *Engine) GetContainers(ctx context.Context) ([]ContainerInfo, error) {
 	candidateNames := []string{"crm-proxy", "crm-server", "crm-worker", "crm-db"}
 	var inspectItems []DockerInspectItem
 	for _, name := range candidateNames {
-		inspectCmd := execCommand(ctx, "docker", "inspect", name)
+		inspectCmd := e.command(ctx, "docker", "inspect", name)
 		if inspectOut, inspectErr := inspectCmd.Output(); inspectErr == nil {
 			if items, pErr := ParseDockerInspectJSON(inspectOut); pErr == nil && len(items) > 0 {
 				inspectItems = append(inspectItems, items...)
@@ -458,7 +483,7 @@ func (e *Engine) GetContainers(ctx context.Context) ([]ContainerInfo, error) {
 
 func GetPersistentBackupDir() string {
 	if custom := os.Getenv("OPENLOCALCRM_BACKUP_DIR"); custom != "" {
-		_ = os.MkdirAll(custom, 0755)
+		_ = os.MkdirAll(custom, 0755) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 		return custom
 	}
 	var dir string
@@ -476,7 +501,7 @@ func GetPersistentBackupDir() string {
 			dir = filepath.Join(os.TempDir(), "openlocalcrm-backups")
 		}
 	}
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0755) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 	return dir
 }
 
@@ -548,7 +573,7 @@ func (e *Engine) CreateBackup(ctx context.Context) (string, error) {
 	_, _ = file.WriteString(header)
 
 	user, dbName := e.getDBUserAndName()
-	cmd := execCommand(ctx, "docker", "compose", "exec", "-T", "db", "pg_dump", "-U", user, "--clean", "--if-exists", dbName)
+	cmd := e.command(ctx, "docker", "compose", "exec", "-T", "db", "pg_dump", "-U", user, "--clean", "--if-exists", dbName)
 	cmd.Dir = e.BaseDir
 	cmd.Stdout = file
 
@@ -561,7 +586,7 @@ func (e *Engine) CreateBackup(ctx context.Context) (string, error) {
 	persistentDir := GetPersistentBackupDir()
 	persistentPath := filepath.Join(persistentDir, filename)
 	if data, readErr := os.ReadFile(outPath); readErr == nil {
-		_ = os.WriteFile(persistentPath, data, 0644)
+		_ = os.WriteFile(persistentPath, data, 0600) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 	}
 
 	return filename, nil
@@ -576,7 +601,7 @@ func (e *Engine) ListBackups() ([]BackupInfo, error) {
 	if runtime.GOOS == "windows" {
 		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
 			legacyDir := filepath.Join(localAppData, "mavalio", "backups")
-			if _, err := os.Stat(legacyDir); err == nil {
+			if _, err := os.Stat(legacyDir); err == nil { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 				persistentDirs = append(persistentDirs, legacyDir)
 			}
 		}
@@ -593,9 +618,9 @@ func (e *Engine) ListBackups() ([]BackupInfo, error) {
 			for _, entry := range pEntries {
 				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
 					target := filepath.Join(backupDir, entry.Name())
-					if _, err := os.Stat(target); os.IsNotExist(err) {
-						if data, err := os.ReadFile(filepath.Join(pDir, entry.Name())); err == nil {
-							_ = os.WriteFile(target, data, 0644)
+					if _, err := os.Stat(target); os.IsNotExist(err) { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
+						if data, err := os.ReadFile(filepath.Join(pDir, entry.Name())); err == nil { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
+							_ = os.WriteFile(target, data, 0600) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 						}
 					}
 				}
@@ -640,12 +665,12 @@ func (e *Engine) RestoreBackup(ctx context.Context, filename string, logChan cha
 		persistentPath := filepath.Join(GetPersistentBackupDir(), cleanName)
 		if data, err := os.ReadFile(persistentPath); err == nil {
 			_ = os.MkdirAll(filepath.Join(e.BaseDir, "backups"), 0755)
-			_ = os.WriteFile(backupPath, data, 0644)
+			_ = os.WriteFile(backupPath, data, 0600) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 		} else if runtime.GOOS == "windows" {
 			if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-				if legacyData, lErr := os.ReadFile(filepath.Join(localAppData, "mavalio", "backups", cleanName)); lErr == nil {
+				if legacyData, lErr := os.ReadFile(filepath.Join(localAppData, "mavalio", "backups", cleanName)); lErr == nil { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 					_ = os.MkdirAll(filepath.Join(e.BaseDir, "backups"), 0755)
-					_ = os.WriteFile(backupPath, legacyData, 0644)
+					_ = os.WriteFile(backupPath, legacyData, 0600) //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 				}
 			}
 		}
@@ -670,7 +695,7 @@ func (e *Engine) RestoreBackup(ctx context.Context, filename string, logChan cha
 	if logChan != nil {
 		logChan <- "[RESTORE] Schritt 1/5: Erstelle automatischen Sicherheits-Snapshot der aktuellen Datenbank..."
 	}
-	if snap, err := e.CreateBackup(ctx); err == nil && logChan != nil {
+	if snap, snapErr := e.CreateBackup(ctx); snapErr == nil && logChan != nil {
 		logChan <- fmt.Sprintf("[RESTORE] Sicherheits-Snapshot gesichert als: %s", snap)
 	}
 
@@ -678,7 +703,7 @@ func (e *Engine) RestoreBackup(ctx context.Context, filename string, logChan cha
 	if logChan != nil {
 		logChan <- "[RESTORE] Schritt 2/5: Halte Server- und Worker-Container temporär an..."
 	}
-	stopCmd := execCommand(ctx, "docker", "compose", "stop", "server", "worker")
+	stopCmd := e.command(ctx, "docker", "compose", "stop", "server", "worker")
 	stopCmd.Dir = e.BaseDir
 	_ = stopCmd.Run()
 
@@ -689,7 +714,7 @@ func (e *Engine) RestoreBackup(ctx context.Context, filename string, logChan cha
 		logChan <- "[RESTORE] Schritt 3/5: Bereinige Datenbank-Schema für sauberen DDL-Import..."
 	}
 	cleanSQL := fmt.Sprintf("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO %s; GRANT ALL ON SCHEMA public TO public; CREATE EXTENSION IF NOT EXISTS vector;", user)
-	cleanCmd := execCommand(ctx, "docker", "compose", "exec", "-T", "db", "psql", "-U", user, "-d", dbName, "-c", cleanSQL)
+	cleanCmd := e.command(ctx, "docker", "compose", "exec", "-T", "db", "psql", "-U", user, "-d", dbName, "-c", cleanSQL)
 	cleanCmd.Dir = e.BaseDir
 	if cleanErr := cleanCmd.Run(); cleanErr != nil && logChan != nil {
 		logChan <- fmt.Sprintf("[WARNUNG] Schema-Bereinigung meldete: %v (fahre mit Import fort)", cleanErr)
@@ -700,7 +725,7 @@ func (e *Engine) RestoreBackup(ctx context.Context, filename string, logChan cha
 		logChan <- fmt.Sprintf("[RESTORE] Schritt 4/5: Spiele SQL-Dump '%s' in PostgreSQL ein...", cleanName)
 	}
 
-	cmd := execCommand(ctx, "docker", "compose", "exec", "-T", "db", "psql", "-U", user, "-d", dbName)
+	cmd := e.command(ctx, "docker", "compose", "exec", "-T", "db", "psql", "-U", user, "-d", dbName)
 	cmd.Dir = e.BaseDir
 	cmd.Stdin = file
 
@@ -730,7 +755,7 @@ func (e *Engine) RestoreBackup(ctx context.Context, filename string, logChan cha
 	if logChan != nil {
 		logChan <- "[RESTORE] Schritt 5/5: Starte Server & Worker neu — automatische Schema-Migrationen werden ausgeführt..."
 	}
-	startCmd := execCommand(ctx, "docker", "compose", "up", "-d", "server", "worker")
+	startCmd := e.command(ctx, "docker", "compose", "up", "-d", "server", "worker")
 	startCmd.Dir = e.BaseDir
 	_ = startCmd.Run()
 
@@ -759,7 +784,7 @@ func (e *Engine) Update(ctx context.Context, logChan chan<- string) error {
 		logChan <- "[UPDATE] Step 2/2: Running docker compose up -d --build --remove-orphans..."
 	}
 
-	cmd := execCommand(ctx, "docker", "compose", "up", "-d", "--build", "--remove-orphans")
+	cmd := e.command(ctx, "docker", "compose", "up", "-d", "--build", "--remove-orphans")
 	cmd.Dir = e.BaseDir
 
 	stdout, err := cmd.StdoutPipe()
@@ -797,7 +822,7 @@ func (e *Engine) ResetAdminPassword(ctx context.Context, email, newPassword stri
 		return fmt.Errorf("E-Mail-Adresse darf nicht leer sein")
 	}
 	if len(newPassword) < 6 {
-		return fmt.Errorf("Passwort muss mindestens 6 Zeichen lang sein")
+		return fmt.Errorf("Passwort muss mindestens 6 Zeichen lang sein") //nolint:staticcheck // user-facing German message; capitalized noun is correct
 	}
 
 	hash, err := auth.HashPassword(newPassword)
@@ -808,15 +833,15 @@ func (e *Engine) ResetAdminPassword(ctx context.Context, email, newPassword stri
 	user, dbName := e.getDBUserAndName()
 
 	// 1. Ensure db container is running
-	startCmd := execCommand(ctx, "docker", "compose", "up", "-d", "db")
+	startCmd := e.command(ctx, "docker", "compose", "up", "-d", "db")
 	startCmd.Dir = e.BaseDir
 	_ = startCmd.Run()
 
 	// Wait up to 5 seconds for database readiness
 	for i := 0; i < 10; i++ {
-		checkCmd := execCommand(ctx, "docker", "compose", "exec", "-T", "db", "pg_isready", "-U", user, "-d", dbName)
+		checkCmd := e.command(ctx, "docker", "compose", "exec", "-T", "db", "pg_isready", "-U", user, "-d", dbName)
 		checkCmd.Dir = e.BaseDir
-		if err := checkCmd.Run(); err == nil {
+		if runErr := checkCmd.Run(); runErr == nil {
 			break
 		}
 		select {
@@ -855,7 +880,7 @@ BEGIN
 END $$;
 `, escapedHash, escapedEmail, escapedEmail, escapedHash, escapedEmail)
 
-	cmd := execCommand(ctx, "docker", "compose", "exec", "-T", "db", "psql", "-U", user, "-d", dbName)
+	cmd := e.command(ctx, "docker", "compose", "exec", "-T", "db", "psql", "-U", user, "-d", dbName)
 	cmd.Dir = e.BaseDir
 	cmd.Stdin = strings.NewReader(sql)
 	out, err := cmd.CombinedOutput()

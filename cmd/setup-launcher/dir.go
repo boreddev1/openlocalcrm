@@ -47,10 +47,10 @@ func ResolveProjectBaseDir(customDir string) string {
 			}
 			for _, c := range candidates {
 				if c != "" {
-					if _, err := os.Stat(filepath.Join(c, "docker-compose.yml")); err == nil {
+					if _, err := os.Stat(filepath.Join(c, "docker-compose.yml")); err == nil { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 						return c
 					}
-					if _, err := os.Stat(filepath.Join(c, ".env")); err == nil {
+					if _, err := os.Stat(filepath.Join(c, ".env")); err == nil { //nolint:gosec // G703: path comes from operator-controlled configuration or fixed launcher locations, not request input
 						return c
 					}
 				}

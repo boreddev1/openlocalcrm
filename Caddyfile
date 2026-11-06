@@ -26,18 +26,27 @@
 
     # API routes
     handle /api/* {
-        reverse_proxy server:8080
+        reverse_proxy server:8080 {
+            header_up -True-Client-IP
+            header_up -X-Real-IP
+        }
     }
 
     # SSE streaming route with immediate flush
     handle /events/* {
         reverse_proxy server:8080 {
             flush_interval -1
+            header_up -True-Client-IP
+            header_up -X-Real-IP
         }
     }
 
     # Static assets and SPA fallback
     handle {
-        reverse_proxy server:8080
+        reverse_proxy server:8080 {
+            header_up -True-Client-IP
+            header_up -X-Real-IP
+        }
     }
 }
+

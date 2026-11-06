@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { X, Upload, Check, FileSpreadsheet } from 'lucide-react';
+import { X, Upload, Check, FileSpreadsheet, AlertCircle } from 'lucide-react';
+import { apiFetch } from '../../api/client';
 
 interface CSVImportModalProps {
   onClose: () => void;
@@ -8,9 +9,11 @@ interface CSVImportModalProps {
 
 export const CSVImportModal: React.FC<CSVImportModalProps> = ({ onClose, onImportComplete }) => {
   const [csvContent, setCsvContent] = useState<string>('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [previewRows, setPreviewRows] = useState<any[]>([]);
   const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const defaultSampleCSV = `Vorname,Nachname,Email,Telefon,Zaehlernummer,Jahresverbrauch_kWh,Strasse,PLZ,Ort
@@ -21,7 +24,9 @@ Thomas,Becker,becker@bau-solar.de,+49 69 55443322,1EMH0033445566,12000,Mainzer L
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setSelectedFile(file);
       setFileName(file.name);
+      setErrorMessage(null);
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target?.result as string;
@@ -33,8 +38,10 @@ Thomas,Becker,becker@bau-solar.de,+49 69 55443322,1EMH0033445566,12000,Mainzer L
   };
 
   const handleUseSample = () => {
+    setSelectedFile(null);
     setFileName('beispiel_kunden_leads.csv');
     setCsvContent(defaultSampleCSV);
+    setErrorMessage(null);
     parseCSVPreview(defaultSampleCSV);
   };
 
@@ -53,18 +60,34 @@ Thomas,Becker,becker@bau-solar.de,+49 69 55443322,1EMH0033445566,12000,Mainzer L
     setPreviewRows(rows);
   };
 
-  const handleExecuteImport = () => {
+  const handleExecuteImport = async () => {
     setIsProcessing(true);
-    setTimeout(() => {
-      setIsProcessing(false);
+    setErrorMessage(null);
+    try {
+      const blob = selectedFile || new Blob([csvContent], { type: 'text/csv' });
+      const formData = new FormData();
+      formData.append('file', blob, fileName || 'import.csv');
+
+      const res = await apiFetch<{ status: string; imported_count: number }>(
+        '/api/v1/import/contacts',
+        {
+          method: 'POST',
+          body: formData,
+        },
+      );
+
       setImportStatus(
-        '✅ Import erfolgreich: 3 Kontakte importiert, 1 Bestandsdatensatz dedupliziert & aktualisiert (§6.2).',
+        `✅ Import erfolgreich: ${res.imported_count} Kontakt(e) erfolgreich in Datenbank importiert.`,
       );
       setTimeout(() => {
         onImportComplete();
         onClose();
-      }, 1800);
-    }, 1200);
+      }, 1500);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Fehler beim CSV-Import');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -81,6 +104,13 @@ Thomas,Becker,becker@bau-solar.de,+49 69 55443322,1EMH0033445566,12000,Mainzer L
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {errorMessage && (
+          <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-400" />
+            {errorMessage}
+          </div>
+        )}
 
         {importStatus ? (
           <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300 flex items-center gap-2">

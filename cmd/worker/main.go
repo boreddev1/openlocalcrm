@@ -10,19 +10,46 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/openlocalcrm/openlocalcrm/internal/ai"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/email"
+	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/queue"
 	"github.com/riverqueue/river"
 )
 
+func aiEnv(key, fallbackKey, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	if fallbackKey != "" {
+		if v := os.Getenv(fallbackKey); v != "" {
+			return v
+		}
+	}
+	return def
+}
+
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://crm_user:crm_pass@localhost:5432/crm_db?sslmode=disable"
+		dbURL = "postgres://crm_user:crm_pass@localhost:5432/crm_db?sslmode=disable" //nolint:gosec // G101: false positive: local-development default URL / context key name, not a real credential
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// Same fail-closed rule as the server (issue #128): background jobs decrypt
+	// stored mail account passwords with this master key, so a key file that
+	// exists but cannot be read or parsed must stop the worker at boot with a
+	// clear FATAL instead of letting every email job fail later on. On a fresh
+	// install this is also where the shared key (STORAGE_PATH volume) is minted
+	// atomically, together with the server, without split-brain keys.
+	if _, keyErr := crypto.GetOrCreateMasterKey(); keyErr != nil {
+		log.Fatalf("[FATAL] unusable master secret key: %v", keyErr)
+	}
 
 	log.Println("Connecting openlocalcrm crm-worker to PostgreSQL...")
 	dbPool, err := db.ConnectWithRetry(ctx, dbURL, 15, 1*time.Second)
@@ -30,6 +57,32 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer dbPool.Close()
+
+	queries := db.New(dbPool)
+	auditSvc := audit.NewService(queries)
+	automationSvc := automation.NewService(queries)
+	emailSvc := email.NewService(queries, auditSvc, nil, nil, automationSvc)
+
+	obsSvc := ai.NewObservabilityService(dbPool)
+	aiGateway := ai.NewGateway(ai.GatewayConfig{
+		DefaultProvider: ai.Provider(aiEnv("AI_PROVIDER", "", "ollama")),
+		OllamaBaseURL:   aiEnv("OLLAMA_BASE_URL", "AI_BASE_URL", "http://localhost:11434"),
+		// Single source of truth (issue #72, precedent PR #64): the previous
+		// literal "mistral" made the worker triage audit logs name a model the
+		// rest of the system never assumes.
+		OllamaModel: aiEnv("OLLAMA_MODEL", "AI_MODEL", ai.DefaultOllamaModel),
+		APIKey:      os.Getenv("AI_API_KEY"),
+	})
+	// The gateway is the authority on which model the worker actually calls.
+	obsSvc.WithGateway(aiGateway)
+	triageSvc := ai.NewTriageService(aiGateway, obsSvc)
+
+	deps := queue.Deps{
+		Queries:       queries,
+		EmailSvc:      emailSvc,
+		Triager:       triageSvc,
+		AutomationSvc: automationSvc,
+	}
 
 	var client *river.Client[pgx.Tx]
 	for attempt := 1; attempt <= 10; attempt++ {
@@ -39,7 +92,7 @@ func main() {
 		default:
 		}
 
-		client, err = queue.NewClient(ctx, dbPool)
+		client, err = queue.NewClient(ctx, dbPool, deps)
 		if err == nil {
 			break
 		}

@@ -22,12 +22,14 @@ WHERE id = $1 LIMIT 1;
 
 -- name: ListDeals :many
 SELECT * FROM deals
+WHERE (sqlc.narg('assigned_to')::uuid IS NULL OR assigned_to = sqlc.narg('assigned_to')::uuid)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 
 -- name: ListDealsByStage :many
 SELECT * FROM deals
 WHERE stage = $1
+  AND (sqlc.narg('assigned_to')::uuid IS NULL OR assigned_to = sqlc.narg('assigned_to')::uuid)
 ORDER BY created_at DESC;
 
 -- name: UpdateDealStage :one
@@ -37,6 +39,7 @@ SET stage = $2,
     closed_at = $4,
     updated_at = NOW()
 WHERE id = $1
+  AND stage <> 'WIDERRUFEN'
 RETURNING *;
 
 -- name: UpdateDeal :one
@@ -53,8 +56,30 @@ SET title = $2,
     custom_fields = $11,
     updated_at = NOW()
 WHERE id = $1
+  AND stage <> 'WIDERRUFEN'
 RETURNING *;
 
--- name: DeleteDeal :exec
+-- name: DeleteDeal :one
 DELETE FROM deals
-WHERE id = $1;
+WHERE id = $1
+  AND stage <> 'WIDERRUFEN'
+RETURNING id;
+
+-- name: UpdateDealTags :one
+UPDATE deals
+SET tags = CASE WHEN tags @> sqlc.arg(tags)::jsonb THEN tags ELSE tags || sqlc.arg(tags)::jsonb END,
+    updated_at = NOW()
+WHERE id = sqlc.arg(id)
+  AND stage <> 'WIDERRUFEN'
+RETURNING *;
+
+-- name: RevokeDeal :one
+UPDATE deals
+SET stage = 'WIDERRUFEN',
+    probability = 0,
+    widerrufen_at = CASE WHEN stage = 'WIDERRUFEN' THEN widerrufen_at ELSE $2 END,
+    widerruf_grund = CASE WHEN stage = 'WIDERRUFEN' THEN widerruf_grund ELSE $3 END,
+    updated_at = CASE WHEN stage = 'WIDERRUFEN' THEN updated_at ELSE NOW() END
+WHERE id = $1
+RETURNING *;
+

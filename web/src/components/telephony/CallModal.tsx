@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Phone, PhoneOff, Clock, CheckCircle2, X, Sparkles } from 'lucide-react';
+import { Phone, PhoneOff, Clock, CheckCircle2, X, Sparkles, AlertCircle } from 'lucide-react';
 import { apiFetch } from '../../api/client';
 
 interface CallModalProps {
@@ -21,6 +21,7 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
   );
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let interval: any = null;
@@ -41,6 +42,7 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
+    setError(null);
     try {
       await apiFetch('/api/v1/telephony/calls', {
         method: 'POST',
@@ -53,8 +55,8 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
       });
       onCallLogged();
       onClose();
-    } catch {
-      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Fehler beim Speichern des Anrufprotokolls');
     } finally {
       setIsSaving(false);
     }
@@ -82,10 +84,10 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
                   Anruf bei {contact.first_name} {contact.last_name}
                 </h3>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
-                  Click-to-Call Telefonie (§7.1a)
+                  Anruf-Protokoll
                 </span>
               </div>
-              <div className="text-xs text-slate-400 font-mono">
+              <div className="text-xs text-slate-400 font-mono mt-0.5">
                 {contact.phone || 'Keine Nummer'}
               </div>
             </div>
@@ -95,8 +97,15 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
           </button>
         </div>
 
-        {/* Timer Bar */}
-        <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800">
+        {error && (
+          <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* Call & Timer Bar */}
+        <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800 flex-wrap gap-3">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-emerald-400" />
             <span className="text-xs text-slate-400">Gesprächsdauer:</span>
@@ -105,18 +114,30 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
             </span>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setIsActive(!isActive)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
-              isActive
-                ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20'
-                : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20'
-            }`}
-          >
-            {isActive ? <PhoneOff className="w-3.5 h-3.5" /> : <Phone className="w-3.5 h-3.5" />}
-            {isActive ? 'Auflegen' : 'Fortsetzen'}
-          </button>
+          <div className="flex items-center gap-2">
+            {contact.phone && contact.phone.trim() !== '' && (
+              <a
+                href={`tel:${contact.phone.trim()}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+              >
+                <Phone className="w-3.5 h-3.5" />
+                Nummer wählen
+              </a>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsActive(!isActive)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                isActive
+                  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20'
+                  : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20'
+              }`}
+            >
+              {isActive ? <PhoneOff className="w-3.5 h-3.5" /> : <Phone className="w-3.5 h-3.5" />}
+              {isActive ? 'Timer stoppen' : 'Timer fortsetzen'}
+            </button>
+          </div>
         </div>
 
         {/* Form */}
@@ -172,7 +193,7 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
                   type="button"
                   key={idx}
                   onClick={() => setNotes((prev) => (prev ? `${prev}, ${chip}` : chip))}
-                  className="px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-[11px] text-slate-400 border border-slate-800 transition-colors"
+                  className="px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-[11px] text-slate-400 border border-slate-800 transition-colors cursor-pointer"
                 >
                   + {chip}
                 </button>
@@ -184,14 +205,14 @@ export const CallModal: React.FC<CallModalProps> = ({ contact, onClose, onCallLo
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors"
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors cursor-pointer"
             >
               Abbrechen
             </button>
             <button
               type="submit"
               disabled={isSaving}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-lg text-xs transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-lg text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4" />
               {isSaving ? 'Speichert...' : 'Anruf protokollieren'}

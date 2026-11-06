@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, getFieldText } from '../api/client';
+import { useAIModel } from '../hooks/useAIModel';
 import {
   Plus,
   Globe,
@@ -21,8 +22,11 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { ActivityLogDrawer } from '../components/notes/ActivityLogDrawer';
+import { useAuth } from '../context/AuthContext';
+import { OwnerSelect, canModifyRecord, canReassignRecord } from '../components/common/OwnerSelect';
 
 export const CompaniesPage: React.FC = () => {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -33,6 +37,10 @@ export const CompaniesPage: React.FC = () => {
   const [deletingCompany, setDeletingCompany] = useState<any | null>(null);
   const [activeNotesCompany, setActiveNotesCompany] = useState<any | null>(null);
   const [researchModal, setResearchModal] = useState<any | null>(null);
+  // Issue #72: the research modal names the model that actually answers
+  // (observability stats, fetched only while the modal is open — /api/v1/ai
+  // is rate-limited). The button tooltip makes no model claim.
+  const aiModel = useAIModel(!!researchModal);
   const [isResearching, setIsResearching] = useState(false);
   const [researchResult, setResearchResult] = useState<any | null>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
@@ -108,7 +116,11 @@ export const CompaniesPage: React.FC = () => {
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingCompany) return;
-    updateMutation.mutate(editingCompany);
+    const payload: any = { ...editingCompany };
+    if (!canReassignRecord(user, editingCompany.owner_user_id)) {
+      delete payload.owner_user_id;
+    }
+    updateMutation.mutate(payload);
   };
 
   const handleTriggerResearch = async (comp: any) => {
@@ -313,7 +325,7 @@ export const CompaniesPage: React.FC = () => {
                       type="button"
                       onClick={() => handleTriggerResearch({ ...comp, name, domain, email })}
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 text-xs font-semibold rounded-lg transition-colors"
-                      title="Gemma 12B Firmen-Recherche starten (§5.4)"
+                      title="Firmen-Recherche starten (§5.4)"
                       aria-label="KI-Recherche"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
@@ -323,7 +335,9 @@ export const CompaniesPage: React.FC = () => {
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() =>
+                      disabled={!canModifyRecord(user, comp.owner_user_id)}
+                      onClick={() => {
+                        if (!canModifyRecord(user, comp.owner_user_id)) return;
                         setEditingCompany({
                           ...comp,
                           name,
@@ -334,19 +348,39 @@ export const CompaniesPage: React.FC = () => {
                           address_zip: zip,
                           address_city: city,
                           lifecycle_status: status,
-                        })
+                        });
+                      }}
+                      className={`p-1.5 rounded-lg text-xs transition-colors ${
+                        canModifyRecord(user, comp.owner_user_id)
+                          ? 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                          : 'bg-slate-800/40 text-slate-600 cursor-not-allowed opacity-50'
+                      }`}
+                      title={
+                        canModifyRecord(user, comp.owner_user_id)
+                          ? 'Firma bearbeiten'
+                          : 'Keine Berechtigung: Nur der Eigentümer oder Administrator kann diese Firma bearbeiten'
                       }
-                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-colors"
-                      title="Firma bearbeiten"
                       aria-label="Bearbeiten"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
                     </button>
                     <button
                       type="button"
-                      onClick={() => setDeletingCompany({ ...comp, name })}
-                      className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg text-xs transition-colors"
-                      title="Firma löschen"
+                      disabled={!canModifyRecord(user, comp.owner_user_id)}
+                      onClick={() => {
+                        if (!canModifyRecord(user, comp.owner_user_id)) return;
+                        setDeletingCompany({ ...comp, name });
+                      }}
+                      className={`p-1.5 rounded-lg text-xs transition-colors ${
+                        canModifyRecord(user, comp.owner_user_id)
+                          ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20'
+                          : 'bg-slate-800/40 text-slate-600 border border-slate-800/20 cursor-not-allowed opacity-50'
+                      }`}
+                      title={
+                        canModifyRecord(user, comp.owner_user_id)
+                          ? 'Firma löschen'
+                          : 'Keine Berechtigung: Nur der Eigentümer oder Administrator kann diese Firma löschen'
+                      }
                       aria-label="Löschen"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -674,6 +708,15 @@ export const CompaniesPage: React.FC = () => {
                 </div>
               </div>
 
+              <div className="pt-2">
+                <OwnerSelect
+                  value={editingCompany.owner_user_id}
+                  onChange={(ownerId) =>
+                    setEditingCompany({ ...editingCompany, owner_user_id: ownerId || null })
+                  }
+                />
+              </div>
+
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
                 <button
                   type="button"
@@ -727,7 +770,7 @@ export const CompaniesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Gemma 12B AI Research Modal (§5.4) */}
+      {/* AI Research Modal (§5.4) */}
       {researchModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
@@ -735,7 +778,7 @@ export const CompaniesPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-purple-400" />
                 <h3 className="font-bold text-slate-100 text-base">
-                  Gemma 12B Recherche: {researchModal.name}
+                  {aiModel} Recherche: {researchModal.name}
                 </h3>
               </div>
               <button
@@ -750,7 +793,7 @@ export const CompaniesPage: React.FC = () => {
               <div className="py-8 text-center space-y-3">
                 <Sparkles className="w-8 h-8 text-purple-400 animate-spin mx-auto" />
                 <p className="text-xs text-slate-300">
-                  Gemma 12B durchsucht Website, extrahiert Nutzenversprechen & Branchen-Tags...
+                  {aiModel} durchsucht Website, extrahiert Nutzenversprechen & Branchen-Tags...
                 </p>
               </div>
             ) : researchResult ? (

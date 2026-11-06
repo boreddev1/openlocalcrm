@@ -30,7 +30,7 @@ fi
 # ------------------------------------------------------------------------------
 # 1. Security & Secret Leak Prevention
 # ------------------------------------------------------------------------------
-echo -n "  [1/6] Prüfe auf Sicherheitsleaks & vertrauliche Daten... "
+echo -n "  [1/7] Prüfe auf Sicherheitsleaks & vertrauliche Daten... "
 
 # 1a. Prohibited filenames (allow only .env.example)
 FORBIDDEN_FILES=$(echo "$STAGED_FILES" | grep -E '^(\.env(\.[^e].*|\.[a-z0-9]+)?|\.env\.local|\.env\.production|.*\.key|.*\.pem|.*\.pfx|.*\.crt|.*\.p12|.*\.dump|backups/.*\.sql|data/storage/.*\.key)$' | grep -v '\.env\.example' || true)
@@ -60,7 +60,7 @@ echo -e "${GREEN}OK${NC}"
 # ------------------------------------------------------------------------------
 # 2. Database Migration & SQLC Synchronisation Integrity
 # ------------------------------------------------------------------------------
-echo -n "  [2/6] Prüfe Datenbank-Migrationen & SQLC-Konsistenz... "
+echo -n "  [2/7] Prüfe Datenbank-Migrationen & SQLC-Konsistenz... "
 
 # Verify migrations sync between migrations/ and internal/db/migrations/
 MIG_ROOT=$(ls migrations/*.sql 2>/dev/null | xargs -n 1 basename | sort || true)
@@ -92,7 +92,7 @@ echo -e "${GREEN}OK${NC}"
 STAGED_GO_FILES=$(echo "$STAGED_FILES" | grep -E '\.go$' || true)
 
 if [ -n "$STAGED_GO_FILES" ]; then
-    echo -n "  [3/6] Prüfe Go Code-Formatierung (gofmt)... "
+    echo -n "  [3/7] Prüfe Go Code-Formatierung (gofmt)... "
     if ! command -v gofmt >/dev/null 2>&1; then
         echo -e "${YELLOW}WARNUNG (gofmt nicht im PATH)${NC}"
     else
@@ -107,7 +107,7 @@ if [ -n "$STAGED_GO_FILES" ]; then
         echo -e "${GREEN}OK${NC}"
     fi
 
-    echo -n "  [4/6] Führe statische Go-Analyse aus (go vet)... "
+    echo -n "  [4/7] Führe statische Go-Analyse aus (go vet)... "
     if ! command -v go >/dev/null 2>&1; then
         echo -e "${YELLOW}WARNUNG (go nicht im PATH)${NC}"
     else
@@ -119,8 +119,8 @@ if [ -n "$STAGED_GO_FILES" ]; then
         echo -e "${GREEN}OK${NC}"
     fi
 else
-    echo "  [3/6] Keine Go-Dateien geändert — überspringe gofmt."
-    echo "  [4/6] Keine Go-Dateien geändert — überspringe go vet."
+    echo "  [3/7] Keine Go-Dateien geändert — überspringe gofmt."
+    echo "  [4/7] Keine Go-Dateien geändert — überspringe go vet."
 fi
 
 # ------------------------------------------------------------------------------
@@ -129,7 +129,7 @@ fi
 STAGED_WEB_FILES=$(echo "$STAGED_FILES" | grep -E '^web/' || true)
 
 if [ -n "$STAGED_WEB_FILES" ]; then
-    echo -n "  [5/6] Prüfe Web Frontend (TypeScript Typecheck & ESLint)... "
+    echo -n "  [5/7] Prüfe Web Frontend (TypeScript Typecheck & ESLint)... "
     if ! command -v pnpm >/dev/null 2>&1; then
         echo -e "${YELLOW}WARNUNG (pnpm nicht im PATH)${NC}"
     else
@@ -151,16 +151,54 @@ if [ -n "$STAGED_WEB_FILES" ]; then
         echo -e "${GREEN}OK${NC}"
     fi
 else
-    echo "  [5/6] Keine Frontend-Dateien geändert — überspringe Typecheck & Lint."
+    echo "  [5/7] Keine Frontend-Dateien geändert — überspringe Typecheck & Lint."
 fi
 
 # ------------------------------------------------------------------------------
-# 5. Open-Source License Audit
+# 5. Web dist Freshness (Invariant #5: committed web/dist == fresh build of web/src)
+# Only pays the ~2-3 s vite build when staged files can change the bundle.
+# ------------------------------------------------------------------------------
+STAGED_WEB_INPUTS=$(echo "$STAGED_FILES" | grep -E '^web/(src/|index\.html|vite\.config\.ts|tsconfig[^/]*\.json|tailwind\.config\.|postcss\.config\.|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)' || true)
+
+if [ -n "$STAGED_WEB_INPUTS" ]; then
+    echo -n "  [6/7] Prüfe web/dist-Freshness (frischer Build vs. gestagter dist)..."
+    if ! command -v pnpm >/dev/null 2>&1; then
+        echo -e "${YELLOW}WARNUNG (pnpm nicht im PATH)${NC}"
+    else
+        TMP_DIST=$(mktemp -d)
+        trap 'rm -rf "$TMP_DIST"' EXIT
+        if ! (cd web && pnpm exec vite build --outDir "$TMP_DIST/dist" --emptyOutDir > /dev/null 2>&1); then
+            echo -e "${RED}FEHLER${NC}"
+            echo -e "${RED}❌ 'vite build' fehlgeschlagen — web/dist-Freshheit nicht prüfbar!${NC}"
+            echo -e "${YELLOW}Tipp: 'cd web && pnpm install --frozen-lockfile && pnpm build' ausführen, um Fehler zu sehen.${NC}"
+            exit 1
+        fi
+        mkdir -p "$TMP_DIST/staged"
+        git ls-files --cached -- web/dist | git checkout-index --stdin --prefix="$TMP_DIST/staged/" 2>/dev/null || true
+        DIST_DIFF=$(diff -rq "$TMP_DIST/dist" "$TMP_DIST/staged/web/dist" 2>&1 || true)
+        rm -rf "$TMP_DIST"
+        if [ -n "$DIST_DIFF" ]; then
+            echo -e "${RED}FEHLER${NC}"
+            echo -e "${RED}❌ web/dist ist veraltet: ein frischer Build erzeugt anderen Output als der gestagte web/dist (Invariant #5).${NC}"
+            echo -e "${RED}Ursache: Gestagte Web-Build-Inputs ohne passenden dist-Rebuild:${NC}"
+            echo "$STAGED_WEB_INPUTS" | head -10 | while read -r f; do echo -e "   ${RED}• $f${NC}"; done
+            echo "$DIST_DIFF" | head -15 | sed 's/^/   /'
+            echo -e "${YELLOW}Tipp: 'cd web && pnpm build' ausführen und das Ergebnis staggen: git add -A web/dist${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}OK${NC}"
+    fi
+else
+    echo "  [6/7] Keine Web-Build-Inputs geändert — überspringe dist-Freshness-Check."
+fi
+
+# ------------------------------------------------------------------------------
+# 6. Open-Source License Audit
 # ------------------------------------------------------------------------------
 STAGED_MOD_FILES=$(echo "$STAGED_FILES" | grep -E '^(go\.mod|go\.sum)$' || true)
 
 if [ -n "$STAGED_MOD_FILES" ]; then
-    echo -n "  [6/6] Neue Go-Dependencies erkannt: Prüfe Lizenz-Compliance... "
+    echo -n "  [7/7] Neue Go-Dependencies erkannt: Prüfe Lizenz-Compliance... "
     if [ -f "./scripts/check-licenses.sh" ]; then
         if ! ./scripts/check-licenses.sh > /dev/null 2>&1; then
             echo -e "${RED}FEHLER${NC}"
@@ -170,7 +208,7 @@ if [ -n "$STAGED_MOD_FILES" ]; then
     fi
     echo -e "${GREEN}OK${NC}"
 else
-    echo "  [6/6] Keine neuen Go-Dependencies gestagt — überspringe Lizenz-Scan."
+    echo "  [7/7] Keine neuen Go-Dependencies gestagt — überspringe Lizenz-Scan."
 fi
 
 echo -e "${GREEN}${BOLD}✅ Alle Pre-Commit-Prüfungen erfolgreich bestanden!${NC}"

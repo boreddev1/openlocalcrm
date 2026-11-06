@@ -70,6 +70,17 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateC
 		return db.Company{}, err
 	}
 
+	if actorID.Valid {
+		if updated, err := s.queries.SetCompanyOwner(ctx, db.SetCompanyOwnerParams{
+			ID:          comp.ID,
+			OwnerUserID: actorID,
+		}); err != nil {
+			log.Printf("[company] failed to set initial owner: %v", err)
+		} else {
+			comp = updated
+		}
+	}
+
 	if s.audit != nil {
 		if auditErr := s.audit.Log(ctx, actorID, "COMPANY", comp.ID, "CREATE", comp, "", ""); auditErr != nil {
 			log.Printf("[AUDIT_ERROR] Failed logging company creation: %v", auditErr)
@@ -79,17 +90,30 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateC
 	return comp, nil
 }
 
+func (s *Service) SetOwner(ctx context.Context, id pgtype.UUID, ownerID pgtype.UUID) error {
+	_, err := s.queries.SetCompanyOwner(ctx, db.SetCompanyOwnerParams{
+		ID:          id,
+		OwnerUserID: ownerID,
+	})
+	return err
+}
+
 func (s *Service) GetByID(ctx context.Context, id pgtype.UUID) (db.Company, error) {
 	return s.queries.GetCompanyByID(ctx, id)
 }
 
-func (s *Service) List(ctx context.Context, limit, offset int32) ([]db.Company, error) {
+func (s *Service) List(ctx context.Context, limit, offset int32, ownerID ...pgtype.UUID) ([]db.Company, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
+	var owner pgtype.UUID
+	if len(ownerID) > 0 {
+		owner = ownerID[0]
+	}
 	return s.queries.ListCompanies(ctx, db.ListCompaniesParams{
-		Limit:  limit,
-		Offset: offset,
+		Limit:       limit,
+		Offset:      offset,
+		OwnerUserID: owner,
 	})
 }
 

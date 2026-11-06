@@ -1,0 +1,4 @@
+{
+  "$comment": "Bekannte npm-Advisories, die bewusst und befristet hingenommen werden. Dies ist KEINE Ignore-Liste: jede Ausnahme muss passen, sonst scheitert der Check. Siehe docs/WEB_AUDIT_POLICY.md.",
+  "advisories": []
+}

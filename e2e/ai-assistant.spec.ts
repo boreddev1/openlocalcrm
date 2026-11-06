@@ -4,10 +4,24 @@ test.describe('AI Assistant, Copilot, Research & EU Observability', () => {
   test('should display AI Copilot, Evidence-Ledger, KB, Research, Triage, and Observability tabs', async ({ page }) => {
     await page.goto('/agent');
 
-    // Check main heading and badges
+    // Issue #72: every model label must name the model the backend actually
+    // serves. /api/v1/health stays AI-config-free (F-40); the legitimate
+    // source is the observability surface the page itself queries, so the
+    // expectation reads the same endpoint instead of any constant. The E2E
+    // harness runs DEMO_MODE=true, so the truthful answer is the demo stub
+    // marker (PR #67) — asserting it here proves demo output can never be
+    // mistaken for inference.
+    const obsRes = await page.request.get('/api/v1/ai/observability');
+    await expect(obsRes.ok()).toBeTruthy();
+    const servedModel: string = (await obsRes.json())?.stats?.active_model;
+    expect(typeof servedModel).toBe('string');
+    expect(servedModel.length).toBeGreaterThan(0);
+    expect(servedModel).toContain('DEMO');
+
+    // Check main heading and badges.
     await expect(page.getByRole('heading', { name: /KI-Zentrale & Copilot/i })).toBeVisible();
     await expect(page.getByText('Prompt Guards Aktiv')).toBeVisible();
-    await expect(page.getByText('Gemma 12B (Lokal)')).toBeVisible();
+    await expect(page.getByText(`${servedModel} Assistenz`)).toBeVisible();
 
     // 1. Test Copilot Chat Tab
     await expect(page.getByRole('button', { name: /KI-Vertriebs-Copilot/i })).toBeVisible();
@@ -16,11 +30,18 @@ test.describe('AI Assistant, Copilot, Research & EU Observability', () => {
     await chatInput.fill('Wie ist der aktuelle Pipeline-Status?');
     await page.getByRole('button', { name: /Senden/i }).click();
 
-    // 2. Test Evidence-Ledger Tab (§5.2)
+    // 2. Test Evidence-Ledger Tab (§5.2). The previous expectations
+    // ('Dachfläche', '350 m² Südausrichtung') are SimulationWidget scenario text
+    // (web/src/simulation/SimulationWidget.tsx), not /agent content — the widget is
+    // collapsed to a pill during E2E and the ledger holds no seeded facts, so the
+    // tab's real, meaningful content is its section heading and its empty state.
     const factsTabBtn = page.getByRole('button', { name: /Evidence-Ledger/i });
     await factsTabBtn.click();
-    await expect(page.getByText('Dachfläche')).toBeVisible();
-    await expect(page.getByText('350 m² Südausrichtung')).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: /Evidence-Ledger & Gewichtete Fakten/i }),
+    ).toBeVisible();
+    await expect(page.getByText('0 Fakten erfasst')).toBeVisible();
+    await expect(page.getByText('Noch keine extrahierten Fakten im Ledger vorhanden.')).toBeVisible();
 
     // 3. Test Knowledge Base Tab (§5.5)
     const kbTabBtn = page.getByRole('button', { name: /Wissensbasis/i });
@@ -42,25 +63,18 @@ test.describe('AI Assistant, Copilot, Research & EU Observability', () => {
     await expect(analyzeBtn).toBeVisible();
     await analyzeBtn.click();
 
-    // 6. Test EU AI Act Observability Tab (§5.5 / §20)
+    // 6. Test EU AI Act Observability Tab (§5.5 / §20 EU AI Act)
     const obsTabBtn = page.getByRole('button', { name: /EU AI Act/i });
     await obsTabBtn.click();
     await expect(page.getByText('Art. 50/52 Konform')).toBeVisible();
     await expect(page.getByText('EU AI Act Revisionssicheres Audit-Log')).toBeVisible();
 
-    // 7. Click on an Audit Log Entry to open the Decision Inspector Modal
-    const inspectBtn = page.getByRole('button', { name: /Prüfen/i }).first();
-    await expect(inspectBtn).toBeVisible();
-    await inspectBtn.click();
-
-    // Verify Decision Inspector Modal
-    await expect(page.getByText('KI-Audit & Entscheidungs-Protokoll')).toBeVisible();
-    await expect(page.getByText('Bereinigter Eingabe-Prompt')).toBeVisible();
-    await expect(page.getByText('Extrahierte KI-Entscheidung')).toBeVisible();
-
-    // Close Modal
-    await page.getByRole('button', { name: /Schließen/i }).click();
-    await expect(page.getByText('KI-Audit & Entscheidungs-Protokoll')).not.toBeVisible();
+    // 7. Audit log table: demo mode seeds no KI audit logs (internal/ai/observability.go
+    // is memory-only and only appends on a *successfully completed* KI inference, which
+    // the E2E harness never has) — the table's real content is its empty state.
+    // The former Decision-Inspector click-through asserted modal text that no reachable
+    // log entry can render: AIAuditLog has neither input_prompt nor extracted_decision.
+    await expect(page.getByText('Noch keine KI-Audit-Logs vorhanden.')).toBeVisible();
   });
 
   test('should open global floating AI chat drawer from any page', async ({ page }) => {

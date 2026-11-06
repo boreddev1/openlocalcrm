@@ -20,7 +20,7 @@ INITIAL_ADMIN_EMAIL=admin@solar.de
 INITIAL_ADMIN_PASSWORD=MySecretPassword123!
 AI_PROVIDER=ollama
 OLLAMA_BASE_URL=http://host.docker.internal:11434
-OLLAMA_MODEL=gemma4:12b
+OLLAMA_MODEL=gemma2:12b
 OPENLOCALCRM_VERSION=v1.0.2
 `
 	_ = os.WriteFile(filepath.Join(tmp, ".env"), []byte(envContent), 0600)
@@ -97,7 +97,7 @@ OPENLOCALCRM_VERSION=v1.0.2
 			AI: AISettings{
 				Provider: "ollama",
 				BaseURL:  "http://host.docker.internal:11434",
-				Model:    "gemma4:12b",
+				Model:    "gemma2:12b",
 			},
 			Admin: AdminSettings{
 				Email: "fileadmin@solar.de",

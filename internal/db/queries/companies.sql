@@ -21,12 +21,14 @@ WHERE id = $1 LIMIT 1;
 
 -- name: ListCompanies :many
 SELECT * FROM companies
+WHERE (sqlc.narg('owner_user_id')::uuid IS NULL OR owner_user_id = sqlc.narg('owner_user_id')::uuid)
 ORDER BY name ASC
 LIMIT $1 OFFSET $2;
 
 -- name: SearchCompanies :many
 SELECT * FROM companies
-WHERE name ILIKE '%' || $1 || '%' OR domain ILIKE '%' || $1 || '%'
+WHERE (name ILIKE '%' || $1 || '%' OR domain ILIKE '%' || $1 || '%')
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR owner_user_id = sqlc.narg('owner_user_id')::uuid)
 ORDER BY name ASC
 LIMIT $2;
 

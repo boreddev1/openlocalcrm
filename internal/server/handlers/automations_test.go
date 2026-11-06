@@ -2,11 +2,14 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/db/demo"
 	"github.com/openlocalcrm/openlocalcrm/internal/server/handlers"
@@ -79,4 +82,32 @@ func TestAutomationHandler(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, runs, 2)
 	})
+}
+
+func TestAutomationHandler_TestRun_ValidatesTarget(t *testing.T) {
+	q := demo.NewInMemoryQuerier()
+	svc := automation.NewService(q)
+	h := handlers.NewAutomationHandler(svc)
+
+	// 1. Missing target -> 400
+	reqEmpty := httptest.NewRequest("POST", "/api/v1/automations/wf-1/test-run", strings.NewReader(`{}`))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "wf-1")
+	reqEmpty = reqEmpty.WithContext(context.WithValue(reqEmpty.Context(), chi.RouteCtxKey, rctx))
+	recEmpty := httptest.NewRecorder()
+	h.TestRunWorkflow(recEmpty, reqEmpty)
+	require.Equal(t, http.StatusBadRequest, recEmpty.Code)
+
+	// 2. Valid target with real contact -> 200
+	body, _ := json.Marshal(map[string]string{
+		"target_id":   "44444444-4444-4444-4444-444444444441",
+		"target_type": "CONTACT",
+		"target_name": "Dr. Michael Weber",
+	})
+	reqValid := httptest.NewRequest("POST", "/api/v1/automations/wf-1/test-run", bytes.NewReader(body))
+	reqValid = reqValid.WithContext(context.WithValue(reqValid.Context(), chi.RouteCtxKey, rctx))
+	recValid := httptest.NewRecorder()
+	h.TestRunWorkflow(recValid, reqValid)
+
+	require.Equal(t, http.StatusOK, recValid.Code)
 }

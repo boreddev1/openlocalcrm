@@ -39,7 +39,7 @@ func TestConnectWithRetry_ContextCancelled(t *testing.T) {
 
 	pool, err := ConnectWithRetry(ctx, "postgres://invalid:invalid@127.0.0.1:5432/nonexistent", 3, 10*time.Millisecond)
 	if err == nil {
-		t.Errorf("expected error with cancelled context, got nil")
+		t.Errorf("expected error with canceled context, got nil")
 	}
 	if pool != nil {
 		t.Errorf("expected nil pool, got %v", pool)

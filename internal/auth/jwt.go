@@ -14,19 +14,22 @@ var (
 )
 
 type AccessClaims struct {
-	UserID uuid.UUID `json:"user_id"`
-	Email  string    `json:"email"`
-	Role   string    `json:"role"`
+	UserID       uuid.UUID `json:"user_id"`
+	Email        string    `json:"email"`
+	Role         string    `json:"role"`
+	TokenVersion *int32    `json:"token_version"`
 	jwt.RegisteredClaims
 }
 
 // GenerateAccessToken signs an Ed25519 JWT access token with the given expiration
-func GenerateAccessToken(userID uuid.UUID, email string, role string, privKey ed25519.PrivateKey, duration time.Duration) (string, error) {
+func GenerateAccessToken(userID uuid.UUID, email string, role string, tokenVersion int32, privKey ed25519.PrivateKey, duration time.Duration) (string, error) {
 	now := time.Now().UTC()
+	tv := tokenVersion
 	claims := AccessClaims{
-		UserID: userID,
-		Email:  email,
-		Role:   role,
+		UserID:       userID,
+		Email:        email,
+		Role:         role,
+		TokenVersion: &tv,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -54,7 +57,7 @@ func ValidateAccessToken(tokenStr string, pubKey ed25519.PublicKey) (*AccessClai
 	}
 
 	claims, ok := token.Claims.(*AccessClaims)
-	if !ok || !token.Valid {
+	if !ok || !token.Valid || claims.TokenVersion == nil {
 		return nil, ErrInvalidToken
 	}
 

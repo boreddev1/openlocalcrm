@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
@@ -19,6 +21,8 @@ var (
 	ErrInvalidDealValue    = errors.New("deal value must be >= 0")
 	ErrInvalidProbability  = errors.New("probability must be between 0 and 100")
 	ErrConcurrencyConflict = errors.New("deal was modified by another user, please reload and retry")
+	ErrDealRevoked         = errors.New("revoked deals are terminal")
+	ErrDirectRevocation    = errors.New("direct transition to revoked is prohibited")
 )
 
 type Service struct {
@@ -31,6 +35,53 @@ func NewService(queries db.Querier, audit *audit.Service) *Service {
 		queries: queries,
 		audit:   audit,
 	}
+}
+
+func isRevokedStage(stage string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(stage))
+	return normalized == "WIDERRUFEN" || normalized == "REVOKED"
+}
+
+func dealAuditValues(item db.Deal) audit.DiffMap {
+	return audit.DiffMap{
+		"title":          item.Title,
+		"company_id":     item.CompanyID,
+		"contact_id":     item.ContactID,
+		"value":          item.Value,
+		"currency":       item.Currency,
+		"stage":          item.Stage,
+		"probability":    item.Probability,
+		"assigned_to":    item.AssignedTo,
+		"closed_at":      item.ClosedAt,
+		"custom_fields":  item.CustomFields,
+		"widerrufen_at":  item.WiderrufenAt,
+		"widerruf_grund": item.WiderrufGrund,
+	}
+}
+
+func (s *Service) mutableDeal(ctx context.Context, id pgtype.UUID) (db.Deal, error) {
+	item, err := s.GetByID(ctx, id)
+	if err != nil {
+		return db.Deal{}, err
+	}
+	if isRevokedStage(item.Stage) {
+		return db.Deal{}, ErrDealRevoked
+	}
+	return item, nil
+}
+
+func (s *Service) classifyMutationError(ctx context.Context, id pgtype.UUID, err error) error {
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	item, getErr := s.GetByID(ctx, id)
+	if getErr != nil {
+		return getErr
+	}
+	if isRevokedStage(item.Stage) {
+		return ErrDealRevoked
+	}
+	return ErrDealNotFound
 }
 
 type CreateDealInput struct {
@@ -48,6 +99,9 @@ type CreateDealInput struct {
 func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateDealInput) (db.Deal, error) {
 	if input.Title == "" {
 		return db.Deal{}, ErrInvalidDeal
+	}
+	if isRevokedStage(input.Stage) {
+		return db.Deal{}, ErrDirectRevocation
 	}
 	if input.Probability < 0 || input.Probability > 100 {
 		return db.Deal{}, ErrInvalidProbability
@@ -104,6 +158,13 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateD
 }
 
 func (s *Service) UpdateStage(ctx context.Context, actorID, dealID pgtype.UUID, stage string, probability int32) (db.Deal, error) {
+	existing, err := s.mutableDeal(ctx, dealID)
+	if err != nil {
+		return db.Deal{}, err
+	}
+	if isRevokedStage(stage) {
+		return db.Deal{}, ErrDirectRevocation
+	}
 	if probability < 0 || probability > 100 {
 		return db.Deal{}, ErrInvalidProbability
 	}
@@ -113,31 +174,30 @@ func (s *Service) UpdateStage(ctx context.Context, actorID, dealID pgtype.UUID, 
 		closedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 	}
 
-	deal, err := s.queries.UpdateDealStage(ctx, db.UpdateDealStageParams{
+	dealItem, err := s.queries.UpdateDealStage(ctx, db.UpdateDealStageParams{
 		ID:          dealID,
 		Stage:       stage,
 		Probability: probability,
 		ClosedAt:    closedAt,
 	})
-
 	if err != nil {
-		return db.Deal{}, err
+		return db.Deal{}, s.classifyMutationError(ctx, dealID, err)
 	}
 
 	if s.audit != nil {
-		if err := s.audit.Log(ctx, actorID, "DEAL", deal.ID, "UPDATE_STAGE", map[string]any{
-			"stage":       stage,
-			"probability": probability,
-		}, "", ""); err != nil {
+		if err := s.audit.LogDiff(ctx, actorID, "DEAL", dealItem.ID, "UPDATE_STAGE", dealAuditValues(existing), dealAuditValues(dealItem), "", ""); err != nil {
 			log.Printf("[audit] failed to log deal stage update: %v", err)
 		}
 	}
 
-	return deal, nil
+	return dealItem, nil
 }
 
-func (s *Service) ListByStage(ctx context.Context, stage string, pagination ...int32) ([]db.Deal, error) {
-	deals, err := s.queries.ListDealsByStage(ctx, stage)
+func (s *Service) ListByStage(ctx context.Context, stage string, assignedTo pgtype.UUID, pagination ...int32) ([]db.Deal, error) {
+	deals, err := s.queries.ListDealsByStage(ctx, db.ListDealsByStageParams{
+		Stage:      stage,
+		AssignedTo: assignedTo,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -162,18 +222,27 @@ func (s *Service) ListByStage(ctx context.Context, stage string, pagination ...i
 	return deals[offset:end], nil
 }
 
-func (s *Service) List(ctx context.Context, limit, offset int32) ([]db.Deal, error) {
+func (s *Service) List(ctx context.Context, limit, offset int32, assignedTo ...pgtype.UUID) ([]db.Deal, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
+	var assignee pgtype.UUID
+	if len(assignedTo) > 0 {
+		assignee = assignedTo[0]
+	}
 	return s.queries.ListDeals(ctx, db.ListDealsParams{
-		Limit:  limit,
-		Offset: offset,
+		Limit:      limit,
+		Offset:     offset,
+		AssignedTo: assignee,
 	})
 }
 
 func (s *Service) GetByID(ctx context.Context, id pgtype.UUID) (db.Deal, error) {
-	return s.queries.GetDealByID(ctx, id)
+	item, err := s.queries.GetDealByID(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.Deal{}, ErrDealNotFound
+	}
+	return item, err
 }
 
 type UpdateDealInput struct {
@@ -190,14 +259,22 @@ type UpdateDealInput struct {
 }
 
 func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateDealInput) (db.Deal, error) {
+	existing, err := s.mutableDeal(ctx, input.ID)
+	if err != nil {
+		return db.Deal{}, err
+	}
 	if input.Title == "" {
 		return db.Deal{}, ErrInvalidDeal
 	}
 	if input.Probability < 0 || input.Probability > 100 {
 		return db.Deal{}, ErrInvalidProbability
 	}
+	if isRevokedStage(input.Stage) {
+		return db.Deal{}, ErrDirectRevocation
+	}
 
-	var compID, contID, assignID pgtype.UUID
+	// nil means "unchanged": a partial update must never wipe links or ownership.
+	compID, contID, assignID := existing.CompanyID, existing.ContactID, existing.AssignedTo
 	if input.CompanyID != nil {
 		compID = *input.CompanyID
 	}
@@ -224,7 +301,7 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateD
 		return db.Deal{}, fmt.Errorf("failed to merge custom fields: %w", err)
 	}
 
-	deal, err := s.queries.UpdateDeal(ctx, db.UpdateDealParams{
+	dealItem, err := s.queries.UpdateDeal(ctx, db.UpdateDealParams{
 		ID:           input.ID,
 		Title:        input.Title,
 		CompanyID:    compID,
@@ -238,16 +315,16 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateD
 		CustomFields: mergedFields,
 	})
 	if err != nil {
-		return db.Deal{}, err
+		return db.Deal{}, s.classifyMutationError(ctx, input.ID, err)
 	}
 
 	if s.audit != nil {
-		if err := s.audit.Log(ctx, actorID, "DEAL", deal.ID, "UPDATE", deal, "", ""); err != nil {
+		if err := s.audit.LogDiff(ctx, actorID, "DEAL", dealItem.ID, "UPDATE", dealAuditValues(existing), dealAuditValues(dealItem), "", ""); err != nil {
 			log.Printf("[audit] failed to log deal update: %v", err)
 		}
 	}
 
-	return deal, nil
+	return dealItem, nil
 }
 
 // mergeCustomFields merges new custom fields with existing ones from DB.
@@ -291,9 +368,11 @@ func (s *Service) mergeCustomFields(ctx context.Context, dealID pgtype.UUID, new
 }
 
 func (s *Service) Delete(ctx context.Context, actorID, dealID pgtype.UUID) error {
-	err := s.queries.DeleteDeal(ctx, dealID)
-	if err != nil {
+	if _, err := s.mutableDeal(ctx, dealID); err != nil {
 		return err
+	}
+	if _, err := s.queries.DeleteDeal(ctx, dealID); err != nil {
+		return s.classifyMutationError(ctx, dealID, err)
 	}
 	if s.audit != nil {
 		if err := s.audit.Log(ctx, actorID, "DEAL", dealID, "DELETE", map[string]string{"status": "deleted"}, "", ""); err != nil {
@@ -301,4 +380,34 @@ func (s *Service) Delete(ctx context.Context, actorID, dealID pgtype.UUID) error
 		}
 	}
 	return nil
+}
+
+func (s *Service) Revoke(ctx context.Context, actorID pgtype.UUID, id pgtype.UUID, widerrufenAt time.Time, grund string) (db.Deal, error) {
+	existing, err := s.GetByID(ctx, id)
+	if err != nil {
+		return db.Deal{}, err
+	}
+	if isRevokedStage(existing.Stage) {
+		return existing, nil
+	}
+	if widerrufenAt.IsZero() {
+		widerrufenAt = time.Now().UTC()
+	}
+
+	dealItem, err := s.queries.RevokeDeal(ctx, db.RevokeDealParams{
+		ID:            id,
+		WiderrufenAt:  pgtype.Timestamptz{Time: widerrufenAt, Valid: true},
+		WiderrufGrund: pgtype.Text{String: grund, Valid: grund != ""},
+	})
+	if err != nil {
+		return db.Deal{}, s.classifyMutationError(ctx, id, err)
+	}
+
+	if s.audit != nil {
+		if err := s.audit.LogDiff(ctx, actorID, "DEAL", dealItem.ID, "REVOKE", dealAuditValues(existing), dealAuditValues(dealItem), "", ""); err != nil {
+			log.Printf("[audit] failed to log deal revocation: %v", err)
+		}
+	}
+
+	return dealItem, nil
 }

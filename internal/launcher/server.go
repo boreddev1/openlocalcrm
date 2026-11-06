@@ -46,6 +46,7 @@ func NewServerWithUpdater(baseDir string, engine *Engine, updater *Updater, onRe
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/preflight", s.handlePreflight)
 	mux.HandleFunc("/api/ai/test", s.handleAITest)
+	mux.HandleFunc("/api/ai/models", s.handleAIModels)
 	mux.HandleFunc("/api/setup", s.handleSetup)
 	mux.HandleFunc("/api/control/", s.handleControl)
 	mux.HandleFunc("/api/backup", s.handleBackup)
@@ -142,6 +143,21 @@ func (s *Server) handleAITest(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+func (s *Server) handleAIModels(w http.ResponseWriter, r *http.Request) {
+	provider := r.URL.Query().Get("provider")
+	if provider == "" {
+		http.Error(w, `{"error":"provider is required"}`, http.StatusBadRequest)
+		return
+	}
+	res := ListAIModels(r.Context(), ListAIModelsQuery{
+		Provider: provider,
+		BaseURL:  r.URL.Query().Get("base_url"),
+		APIKey:   r.URL.Query().Get("api_key"),
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
+}
+
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -234,8 +250,8 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 		}()
 		go func() {
 			defer close(logChan)
-			if err := s.engine.Update(context.Background(), logChan); err != nil {
-				s.appendLog(fmt.Sprintf("[FEHLER] Update fehlgeschlagen: %v", err))
+			if updateErr := s.engine.Update(context.Background(), logChan); updateErr != nil {
+				s.appendLog(fmt.Sprintf("[FEHLER] Update fehlgeschlagen: %v", updateErr))
 			}
 		}()
 	case "reset":
@@ -310,13 +326,18 @@ func (s *Server) handleBackupsList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// maxBackupUploadBytes bounds a backup upload request body (500 MB payload plus
+// multipart overhead).
+const maxBackupUploadBytes = 500<<20 + 1<<20
+
 func (s *Server) handleBackupUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	if err := r.ParseMultipartForm(500 << 20); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBackupUploadBytes)
+	if err := r.ParseMultipartForm(maxBackupUploadBytes); err != nil { //nolint:gosec // G120: request body is capped with http.MaxBytesReader on the line above
 		http.Error(w, fmt.Sprintf("failed parsing upload: %v", err), http.StatusBadRequest)
 		return
 	}

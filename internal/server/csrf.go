@@ -11,10 +11,19 @@ const (
 	CSRFHeaderName = auth.CSRFHeaderName
 )
 
-func SetCSRFCookie(w http.ResponseWriter, secure bool) string {
-	return auth.SetCSRFCookie(w, secure)
+func SetCSRFCookie(w http.ResponseWriter, secure bool, userID ...string) (string, error) {
+	return auth.SetCSRFCookie(w, secure, userID...)
+}
+
+func ClearCSRFCookie(w http.ResponseWriter, secure ...bool) {
+	auth.ClearCSRFCookie(w, secure...)
 }
 
 func CSRFProtectionMiddleware(next http.Handler) http.Handler {
 	return auth.CSRFProtectionMiddleware(next)
+}
+
+// CSRFDoubleSubmitMiddleware guards the claim-less session routes (refresh, logout).
+func CSRFDoubleSubmitMiddleware(next http.Handler) http.Handler {
+	return auth.CSRFDoubleSubmitMiddleware(next)
 }

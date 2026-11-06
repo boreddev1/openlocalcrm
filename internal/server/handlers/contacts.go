@@ -2,12 +2,13 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/openlocalcrm/openlocalcrm/internal/auth"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/contact"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
@@ -20,27 +21,54 @@ func NewContactHandler(service *contact.Service) *ContactHandler {
 	return &ContactHandler{service: service}
 }
 
+func writeContactError(w http.ResponseWriter, err error, action string) {
+	switch {
+	case errors.Is(err, contact.ErrContactNotFound):
+		http.Error(w, `{"error":"contact_not_found"}`, http.StatusNotFound)
+	case errors.Is(err, contact.ErrInvalidContact):
+		http.Error(w, `{"error":"validation_error","message":"first_name and last_name are required"}`, http.StatusBadRequest)
+	case errors.Is(err, contact.ErrInvalidEmail):
+		http.Error(w, `{"error":"validation_error","message":"invalid email address"}`, http.StatusBadRequest)
+	case errors.Is(err, contact.ErrInvalidConsent):
+		http.Error(w, `{"error":"validation_error","message":"consent fields must be booleans"}`, http.StatusBadRequest)
+	case errors.Is(err, contact.ErrInvalidEnergy):
+		http.Error(w, `{"error":"validation_error","message":"energy values must be finite non-negative whole numbers within numeric(10,2)"}`, http.StatusBadRequest)
+	default:
+		log.Printf("[contact] failed to %s contact: %v", action, err)
+		http.Error(w, `{"error":"server_error","message":"failed to process contact"}`, http.StatusInternalServerError)
+	}
+}
+
 type CreateContactRequest struct {
-	FirstName     string   `json:"first_name"`
-	LastName      string   `json:"last_name"`
-	Email         string   `json:"email"`
-	Phone         string   `json:"phone"`
-	Mobile        string   `json:"mobile"`
-	Position      string   `json:"position"`
-	LeadSource    string   `json:"lead_source"`
-	AddressStreet string   `json:"address_street"`
-	AddressZip    string   `json:"address_zip"`
-	AddressCity   string   `json:"address_city"`
-	Latitude      *float64 `json:"latitude"`
-	Longitude     *float64 `json:"longitude"`
+	FirstName         string                  `json:"first_name"`
+	LastName          string                  `json:"last_name"`
+	Email             string                  `json:"email"`
+	Phone             string                  `json:"phone"`
+	Mobile            string                  `json:"mobile"`
+	Position          string                  `json:"position"`
+	LeadSource        string                  `json:"lead_source"`
+	AddressStreet     string                  `json:"address_street"`
+	AddressZip        string                  `json:"address_zip"`
+	AddressCity       string                  `json:"address_city"`
+	Latitude          *float64                `json:"latitude"`
+	Longitude         *float64                `json:"longitude"`
+	ConsentPhone      contact.OptionalBool    `json:"consent_phone"`
+	ConsentEmail      contact.OptionalBool    `json:"consent_email"`
+	StromverbrauchKwh contact.OptionalFloat64 `json:"stromverbrauch_kwh"`
+	GasverbrauchKwh   contact.OptionalFloat64 `json:"gasverbrauch_kwh"`
+	Zaehlernummer     string                  `json:"zaehlernummer"`
+	EigentuemerStatus contact.OptionalString  `json:"eigentuemer_status"`
+	OwnerUserID       *string                 `json:"owner_user_id,omitempty"`
 }
 
 func (h *ContactHandler) Create(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	var actorID pgtype.UUID
-	if claims != nil {
-		_ = actorID.Scan(claims.UserID.String())
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
 	}
+	var actorID pgtype.UUID
+	_ = actorID.Scan(claims.UserID.String())
 
 	var req CreateContactRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -48,27 +76,30 @@ func (h *ContactHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An owner_user_id in the body is intentionally ignored; the creator owns the record.
 	res, err := h.service.Create(r.Context(), actorID, contact.CreateContactInput{
-		FirstName:     req.FirstName,
-		LastName:      req.LastName,
-		Email:         req.Email,
-		Phone:         req.Phone,
-		Mobile:        req.Mobile,
-		Position:      req.Position,
-		LeadSource:    req.LeadSource,
-		AddressStreet: req.AddressStreet,
-		AddressZip:    req.AddressZip,
-		AddressCity:   req.AddressCity,
-		Latitude:      req.Latitude,
-		Longitude:     req.Longitude,
+		FirstName:         req.FirstName,
+		LastName:          req.LastName,
+		Email:             req.Email,
+		Phone:             req.Phone,
+		Mobile:            req.Mobile,
+		Position:          req.Position,
+		LeadSource:        req.LeadSource,
+		AddressStreet:     req.AddressStreet,
+		AddressZip:        req.AddressZip,
+		AddressCity:       req.AddressCity,
+		Latitude:          req.Latitude,
+		Longitude:         req.Longitude,
+		ConsentPhone:      req.ConsentPhone,
+		ConsentEmail:      req.ConsentEmail,
+		StromverbrauchKwh: req.StromverbrauchKwh,
+		GasverbrauchKwh:   req.GasverbrauchKwh,
+		Zaehlernummer:     req.Zaehlernummer,
+		EigentuemerStatus: req.EigentuemerStatus,
 	})
 
 	if err != nil {
-		if err == contact.ErrInvalidContact {
-			http.Error(w, `{"error":"validation_error","message":"first_name and last_name are required"}`, http.StatusBadRequest)
-			return
-		}
-		http.Error(w, `{"error":"server_error","message":"failed to create contact"}`, http.StatusInternalServerError)
+		writeContactError(w, err, "create")
 		return
 	}
 
@@ -78,6 +109,16 @@ func (h *ContactHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ContactHandler) List(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var ownerID pgtype.UUID
+	if claims.Role == "BENUTZER" {
+		_ = ownerID.Scan(claims.UserID.String())
+	}
+
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 	searchQuery := r.URL.Query().Get("q")
@@ -86,7 +127,7 @@ func (h *ContactHandler) List(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(offsetStr)
 
 	if searchQuery != "" {
-		results, err := h.service.Search(r.Context(), searchQuery, int32(limit))
+		results, err := h.service.Search(r.Context(), searchQuery, clampInt32(limit), ownerID)
 		if err != nil {
 			http.Error(w, `{"error":"search_failed"}`, http.StatusInternalServerError)
 			return
@@ -99,7 +140,7 @@ func (h *ContactHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contacts, err := h.service.List(r.Context(), int32(limit), int32(offset))
+	contacts, err := h.service.List(r.Context(), clampInt32(limit), clampInt32(offset), ownerID)
 	if err != nil {
 		http.Error(w, `{"error":"failed to list contacts"}`, http.StatusInternalServerError)
 		return
@@ -113,6 +154,12 @@ func (h *ContactHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ContactHandler) Get(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	idStr := chi.URLParam(r, "id")
 	var id pgtype.UUID
 	if err := id.Scan(idStr); err != nil {
@@ -126,16 +173,23 @@ func (h *ContactHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !canRead(claims, contact.OwnerUserID) {
+		http.Error(w, `{"error":"forbidden","message":"insufficient permissions to view contact"}`, http.StatusForbidden)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(contact)
 }
 
 func (h *ContactHandler) Update(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	var actorID pgtype.UUID
-	if claims != nil {
-		_ = actorID.Scan(claims.UserID.String())
+	claims, ok := claimsFrom(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
 	}
+	var actorID pgtype.UUID
+	_ = actorID.Scan(claims.UserID.String())
 
 	idStr := chi.URLParam(r, "id")
 	var id pgtype.UUID
@@ -144,29 +198,77 @@ func (h *ContactHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	existing, err := h.service.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, `{"error":"contact_not_found"}`, http.StatusNotFound)
+		return
+	}
+
+	if !canModify(claims, existing.OwnerUserID) {
+		http.Error(w, `{"error":"forbidden","message":"insufficient permissions to modify contact"}`, http.StatusForbidden)
+		return
+	}
+
 	var req CreateContactRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
 		return
 	}
 
+	if req.OwnerUserID != nil {
+		var requestedOwner pgtype.UUID
+		if *req.OwnerUserID != "" {
+			if err = requestedOwner.Scan(*req.OwnerUserID); err != nil {
+				http.Error(w, `{"error":"invalid_owner_id"}`, http.StatusBadRequest)
+				return
+			}
+		}
+
+		ownerChanged := false
+		if !existing.OwnerUserID.Valid && requestedOwner.Valid {
+			ownerChanged = true
+		} else if existing.OwnerUserID.Valid && !requestedOwner.Valid {
+			ownerChanged = true
+		} else if existing.OwnerUserID.Valid && requestedOwner.Valid && existing.OwnerUserID.Bytes != requestedOwner.Bytes {
+			ownerChanged = true
+		}
+
+		if ownerChanged {
+			if !canReassign(claims, existing.OwnerUserID) {
+				http.Error(w, `{"error":"forbidden","message":"only owner or admin may reassign"}`, http.StatusForbidden)
+				return
+			}
+			if err = h.service.SetOwner(r.Context(), id, requestedOwner); err != nil {
+				log.Printf("[contact] failed to set owner: %v", err)
+				http.Error(w, `{"error":"server_error","message":"failed to update contact owner"}`, http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
 	res, err := h.service.Update(r.Context(), actorID, contact.UpdateContactInput{
-		ID:            id,
-		FirstName:     req.FirstName,
-		LastName:      req.LastName,
-		Email:         req.Email,
-		Phone:         req.Phone,
-		Mobile:        req.Mobile,
-		Position:      req.Position,
-		LeadSource:    req.LeadSource,
-		AddressStreet: req.AddressStreet,
-		AddressZip:    req.AddressZip,
-		AddressCity:   req.AddressCity,
-		Latitude:      req.Latitude,
-		Longitude:     req.Longitude,
+		ID:                id,
+		FirstName:         req.FirstName,
+		LastName:          req.LastName,
+		Email:             req.Email,
+		Phone:             req.Phone,
+		Mobile:            req.Mobile,
+		Position:          req.Position,
+		LeadSource:        req.LeadSource,
+		AddressStreet:     req.AddressStreet,
+		AddressZip:        req.AddressZip,
+		AddressCity:       req.AddressCity,
+		Latitude:          req.Latitude,
+		Longitude:         req.Longitude,
+		ConsentPhone:      req.ConsentPhone,
+		ConsentEmail:      req.ConsentEmail,
+		StromverbrauchKwh: req.StromverbrauchKwh,
+		GasverbrauchKwh:   req.GasverbrauchKwh,
+		Zaehlernummer:     req.Zaehlernummer,
+		EigentuemerStatus: req.EigentuemerStatus,
 	})
 	if err != nil {
-		http.Error(w, `{"error":"failed to update contact: `+err.Error()+`"}`, http.StatusInternalServerError)
+		writeContactError(w, err, "update")
 		return
 	}
 
@@ -175,8 +277,8 @@ func (h *ContactHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ContactHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	claims, _ := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
-	if claims == nil || claims.Role != "ADMIN" {
+	claims, ok := claimsFrom(r)
+	if !ok || claims.Role != "ADMIN" {
 		http.Error(w, `{"error":"forbidden","message":"Löschen von Kontakten erfordert Administrator-Rechte"}`, http.StatusForbidden)
 		return
 	}
@@ -191,7 +293,7 @@ func (h *ContactHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.Delete(r.Context(), actorID, id); err != nil {
-		http.Error(w, `{"error":"failed to delete contact"}`, http.StatusInternalServerError)
+		writeContactError(w, err, "delete")
 		return
 	}
 

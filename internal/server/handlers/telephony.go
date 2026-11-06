@@ -18,13 +18,13 @@ func NewTelephonyHandler(svc *telephony.Service) *TelephonyHandler {
 func (h *TelephonyHandler) LogCall(w http.ResponseWriter, r *http.Request) {
 	var input telephony.LogCallInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "Ungültiger Anfrageinhalt")
 		return
 	}
 
 	call, err := h.svc.LogCall(r.Context(), input)
 	if err != nil {
-		http.Error(w, `{"error":"failed to log call: `+err.Error()+`"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "log_call_failed", "Anruf konnte nicht protokolliert werden")
 		return
 	}
 

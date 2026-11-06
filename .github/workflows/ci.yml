@@ -6,13 +6,19 @@ on:
   pull_request:
     branches: [ main ]
 
+# Least privilege (issue #107): declare what the workflow actually uses instead of
+# inheriting the repo default. Any scope NOT listed here becomes `none`; jobs may
+# add narrow scopes they need (see frontend-and-e2e). Do not blanket `write-all`.
+permissions:
+  contents: read
+
 jobs:
   backend-test:
     name: Go Backend Tests & License Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -35,6 +41,11 @@ jobs:
       - name: Run Go Vet
         run: go vet ./...
 
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+
       - name: Run Unit & Integration Tests (with Race Detector)
         run: go test -race -v ./...
 
@@ -46,9 +57,21 @@ jobs:
   frontend-and-e2e:
     name: Web Frontend Build & Playwright E2E
     runs-on: ubuntu-latest
+    # `issues: read` makes the audit's ORPHANED linked-issue check authenticate
+    # on CI (same missing-token bug class as issue #107 — it never worked on
+    # runners before). NO security-events grant: measured on this repo (PR #119,
+    # 2026-11-06), the Dependabot alerts API answers the workflow GITHUB_TOKEN
+    # with HTTP 403 "Resource not accessible by integration" even when the runner
+    # log shows `SecurityEvents: write` granted — the Actions app behind
+    # GITHUB_TOKEN has no Dependabot-alerts permission, so granting it here would
+    # be misleading surface, not capability. The alerts cross-check therefore
+    # uses the dedicated WEB_AUDIT_ALERTS_TOKEN secret (see step env).
+    permissions:
+      contents: read
+      issues: read
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -56,15 +79,15 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: latest
+          version: 12.4.1
           run_install: false
 
       - name: Get pnpm store directory
@@ -82,8 +105,42 @@ jobs:
       - name: Install Web Dependencies
         run: cd web && pnpm install --frozen-lockfile
 
+      # The web-audit gate is a security control that had no test at all until
+      # #124: scripts/diff-coverage.go filters its diff to *.go, so the 50/50
+      # coverage gate structurally cannot see a change to a .mjs file (issue #110).
+      # That blindness is how an invalid gh flag turned the Dependabot cross-check
+      # into a silent no-op (#104). Run the harness here so a regression in the
+      # gate itself fails the build instead of quietly narrowing what it checks.
+      - name: Run Script-Gate Tests (web audit harness)
+        run: node --test scripts/*.test.mjs
+
       - name: Run Security Audit
-        run: cd web && pnpm audit
+        env:
+          # The runner does NOT export the workflow token into step envs, so the
+          # ORPHANED linked-issue check could never authenticate on CI (issue
+          # #107). GH_TOKEN = GITHUB_TOKEN fixes it (works with the job-level
+          # issues: read). Local runs are unaffected: no env, gh keyring login.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Dedicated credential for the Dependabot alerts API. The workflow
+          # GITHUB_TOKEN cannot read that endpoint at all — measured HTTP 403
+          # "Resource not accessible by integration" even with SecurityEvents:
+          # write granted (PR #119, 2026-11-06). This secret is currently
+          # ABSENT (creating repo secrets is a human action); while it is, the
+          # cross-check degrades loudly with the exact unblock steps, and once a
+          # maintainer adds it — fine-grained PAT, "Dependabot alerts: read",
+          # owner with repo write — the strict flag below starts enforcing with
+          # zero further workflow edits.
+          WEB_AUDIT_ALERTS_TOKEN: ${{ secrets.WEB_AUDIT_ALERTS_TOKEN }}
+          # Strict mode: a cross-check that cannot verify GitHub's open Dependabot
+          # alerts fails the step instead of only warning — enforced where
+          # verification is actually possible (see the script's header). The flag
+          # is set for push-to-main and same-repo PRs; fork PRs and
+          # Dependabot-authored PRs run on non-elevatable tokens and the script
+          # additionally refuses to enforce on CI before a capable credential
+          # exists, so no permanent false red. Transient API failures get bounded
+          # retries first (3 attempts, fixed 2s/4s backoff — see the script).
+          WEB_AUDIT_REQUIRE_CROSSCHECK: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
+        run: cd web && node ../scripts/check-web-audit.mjs
 
       - name: Verify Code Formatting (Prettier)
         run: cd web && pnpm format:check
@@ -97,6 +154,22 @@ jobs:
       - name: Build Web Production Bundle
         run: cd web && pnpm build
 
+      - name: Freshness Gate — committed web/dist must match a fresh build
+        shell: bash
+        run: |
+          cd web
+          pnpm build > /dev/null
+          cd ..
+          STALE=$(git status --porcelain --untracked-files=all -- web/dist)
+          if [ -n "$STALE" ]; then
+            echo "::error::web/dist in git is STALE: a fresh 'cd web && pnpm build' (pnpm 12.4.1, node 22) produces different output than the committed bundle, so the Go binary would embed an SPA that does not match web/src (violates repo invariant #5). Typical cause: a commit changed web/src, package.json or pnpm-lock.yaml without rebuilding dist."
+            echo "Committed dist vs freshly built dist:"
+            printf '%s\n' "$STALE"
+            echo "Fix: run 'cd web && pnpm install --frozen-lockfile && pnpm build' and commit the resulting web/dist changes."
+            exit 1
+          fi
+          echo "OK: committed web/dist is byte-identical to a fresh production build."
+
       - name: Install Playwright Browsers & OS Dependencies
         run: npx playwright install --with-deps chromium
 
@@ -105,7 +178,7 @@ jobs:
 
       - name: Upload Playwright Artifacts on Failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: test-results/

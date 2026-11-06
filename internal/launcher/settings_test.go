@@ -49,13 +49,22 @@ OPENLOCALCRM_VERSION=v1.0.2
 	if exported.System.Port != 8080 {
 		t.Errorf("expected port 8080, got %d", exported.System.Port)
 	}
-	if exported.System.ConnectorAPIToken != "custom-token-xyz" {
-		t.Errorf("expected custom-token-xyz, got %s", exported.System.ConnectorAPIToken)
+	if exported.System.ConnectorAPIToken != "" {
+		t.Errorf("expected redacted connector token, got %s", exported.System.ConnectorAPIToken)
+	}
+	if !exported.System.HasConnectorAPIToken {
+		t.Errorf("expected HasConnectorAPIToken true")
+	}
+	if exported.Admin.Password != "" {
+		t.Errorf("expected redacted admin password, got %s", exported.Admin.Password)
+	}
+	if !exported.Admin.HasPassword {
+		t.Errorf("expected HasPassword true")
 	}
 
 	// 3. Save to settings.json and load back
 	settingsFile := filepath.Join(tmp, "openlocalcrm-settings.json")
-	if err := SaveSettingsToFile(settingsFile, exported); err != nil {
+	if err = SaveSettingsToFile(settingsFile, exported); err != nil {
 		t.Fatalf("failed saving settings file: %v", err)
 	}
 
@@ -67,9 +76,14 @@ OPENLOCALCRM_VERSION=v1.0.2
 		t.Errorf("loaded email mismatch: %s vs %s", loaded.Admin.Email, exported.Admin.Email)
 	}
 
-	// 4. Simulate clean rebuild directory without .env
+	// 4. Simulate clean rebuild directory with existing .env secrets
 	rebuildDir := t.TempDir()
-	if err := ImportSettingsToEnv(rebuildDir, loaded, false); err != nil {
+	existingEnv := `INITIAL_ADMIN_PASSWORD=GeheimesPasswort123!
+CONNECTOR_API_TOKEN=custom-token-xyz
+`
+	_ = os.WriteFile(filepath.Join(rebuildDir, ".env"), []byte(existingEnv), 0600)
+
+	if err = ImportSettingsToEnv(rebuildDir, loaded, true); err != nil {
 		t.Fatalf("failed importing settings to rebuild dir: %v", err)
 	}
 
@@ -88,6 +102,9 @@ OPENLOCALCRM_VERSION=v1.0.2
 	}
 	if !strings.Contains(content, "INITIAL_ADMIN_PASSWORD=GeheimesPasswort123!") {
 		t.Errorf("expected admin password in rebuilt .env")
+	}
+	if !strings.Contains(content, "CONNECTOR_API_TOKEN=custom-token-xyz") {
+		t.Errorf("expected connector token in rebuilt .env")
 	}
 	if !strings.Contains(content, "AI_PROVIDER=ollama") {
 		t.Errorf("expected AI_PROVIDER=ollama in rebuilt .env")
@@ -136,5 +153,40 @@ PORT=80
 	}
 	if !strings.Contains(content, "AI_PROVIDER=openai") {
 		t.Errorf("expected AI_PROVIDER=openai in .env")
+	}
+}
+
+func TestSettingsExportImportEmbeddingModel(t *testing.T) {
+	dir := t.TempDir()
+	env := "AI_PROVIDER=ollama\nAI_MODEL=gemma4:12b\nOLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0600); err != nil {
+		t.Fatal(err)
+	}
+	exported, err := ExportSettingsFromEnv(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exported.AI.EmbeddingModel != "qwen3-embedding:0.6b" {
+		t.Fatalf("expected alias-resolved export value, got %q", exported.AI.EmbeddingModel)
+	}
+
+	imported := &ExportedSettings{AI: AISettings{Provider: "ollama", Model: "gemma4:12b", EmbeddingModel: "mistral-embed"}}
+	if err = ValidateSettingsValues(imported); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if err = ValidateSettingsValues(&ExportedSettings{AI: AISettings{EmbeddingModel: "bad\nmodel"}}); err == nil {
+		t.Fatalf("expected newline injection to be rejected")
+	}
+
+	outDir := t.TempDir()
+	if err = ImportSettingsToEnv(outDir, imported, false); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(outDir, ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "AI_EMBEDDING_MODEL=mistral-embed") {
+		t.Fatalf("expected import to write AI_EMBEDDING_MODEL, got:\n%s", content)
 	}
 }

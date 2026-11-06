@@ -8,7 +8,12 @@ Vielen Dank für Ihr Interesse an **OpenLocalCRM**! Wir freuen uns über Beiträ
 
 ### Voraussetzungen:
 - **Go 1.26+**
-- **Node.js 22+** und **pnpm 9+**
+- **Node.js 22+** und **pnpm 12.4.1** — die `overrides` liegen in `web/pnpm-workspace.yaml`,
+  und pnpm 9 liest sie weder dort noch aus den Lockfile-`settings`, die sie dort recorden
+  (gemessen: `9.15.9` ❌ `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, `12.4.1` ✅). Dieselbe Version nutzen `ci.yml`,
+  `docker-publish.yml` und `Dockerfile.server`. `packageManager` in `web/package.json` ist bewusst
+  **nicht** gesetzt: pnpm 12.4 verweigert mit dem Feld `--frozen-lockfile`, solange der
+  `pnpm-lock.yaml` keine pm-dependencies recordet.
 - **Docker & Docker Compose** (optional für lokalen Komplett-Stack)
 
 ### Repository klonen & Abhängigkeiten installieren:
@@ -39,9 +44,28 @@ make lint
 # Lizenz-Compliance-Scan:
 make check-licenses
 
+# Playwright E2E (baut bin/crm-server, startet Demo-Backend + Vite-Dev-Server):
+make test-e2e
+
 # Vollständige Suite (Hooks, Formatierung, Linting, Tests):
 make check
 ```
+
+### E2E-Port, wenn 8080 belegt ist
+
+`make test-e2e` startet das Demo-Backend auf Port **8080** — dem dokumentierten Standard,
+der auch in CI gilt. Auf Rechnern, wo 8080 schon vergeben ist (z. B. ein IDE-Server),
+lässt sich der Port verschieben:
+
+```bash
+E2E_BACKEND_PORT=8090 make test-e2e
+```
+
+Die Variable wirkt an **zwei** Stellen gleichzeitig, weil beide zusammengehören:
+`playwright.config.ts` (Port des Demo-Backends) und `web/vite.config.ts` (Ziel des
+`/api`- und `/events`-Proxys). Nur den einen zu ändern, lässt die SPA gegen einen Port
+proxyen, an dem nichts lauscht — jede API-Spec schlägt dann fehl, ohne dass die App
+defekt ist. Ohne die Variable bleibt es bei 8080.
 
 ---
 

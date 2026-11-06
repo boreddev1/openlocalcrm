@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
@@ -47,7 +48,7 @@ func (s *Service) Create(ctx context.Context, input CreateNotificationInput) (db
 	}
 
 	if s.sseHub != nil {
-		s.sseHub.Broadcast(sse.Event{
+		evt := sse.Event{
 			Type: "notification_created",
 			Data: map[string]any{
 				"id":         n.ID,
@@ -57,7 +58,12 @@ func (s *Service) Create(ctx context.Context, input CreateNotificationInput) (db
 				"link":       n.Link.String,
 				"created_at": n.CreatedAt.Time,
 			},
-		})
+		}
+		if input.UserID != nil && input.UserID.Valid {
+			s.sseHub.SendToUser(input.UserID.Bytes, evt)
+		} else {
+			s.sseHub.Broadcast(evt)
+		}
 	}
 
 	return n, nil
@@ -77,7 +83,30 @@ func (s *Service) ListUnread(ctx context.Context, userID *pgtype.UUID, limit int
 	})
 }
 
-func (s *Service) MarkAsRead(ctx context.Context, id pgtype.UUID) error {
+func (s *Service) MarkAsRead(ctx context.Context, id pgtype.UUID, userID *pgtype.UUID) error {
+	if userID == nil || !userID.Valid {
+		return fmt.Errorf("user_id required")
+	}
+	if s.queries != nil {
+		notifications, err := s.queries.ListAllNotifications(ctx, db.ListAllNotificationsParams{
+			UserID: *userID,
+			Limit:  1000,
+			Offset: 0,
+		})
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, n := range notifications {
+			if n.ID.Valid && id.Valid && n.ID.Bytes == id.Bytes {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("forbidden: notification does not belong to user")
+		}
+	}
 	return s.queries.MarkNotificationAsRead(ctx, id)
 }
 

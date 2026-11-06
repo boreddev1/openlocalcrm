@@ -26,28 +26,43 @@ INSERT INTO contacts (
     address_city,
     latitude,
     longitude,
+    consent_phone,
+    consent_email,
+    consent_updated_at,
+    stromverbrauch_kwh,
+    gasverbrauch_kwh,
+    zaehlernummer,
+    eigentuemer_status,
     custom_fields
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+    $14, $15, $16, $17, $18, $19, $20, $21
 )
-RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status
+RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id
 `
 
 type CreateContactParams struct {
-	CompanyID     pgtype.UUID   `json:"company_id"`
-	FirstName     string        `json:"first_name"`
-	LastName      string        `json:"last_name"`
-	Email         pgtype.Text   `json:"email"`
-	Phone         pgtype.Text   `json:"phone"`
-	Mobile        pgtype.Text   `json:"mobile"`
-	Position      pgtype.Text   `json:"position"`
-	LeadSource    pgtype.Text   `json:"lead_source"`
-	AddressStreet pgtype.Text   `json:"address_street"`
-	AddressZip    pgtype.Text   `json:"address_zip"`
-	AddressCity   pgtype.Text   `json:"address_city"`
-	Latitude      pgtype.Float8 `json:"latitude"`
-	Longitude     pgtype.Float8 `json:"longitude"`
-	CustomFields  []byte        `json:"custom_fields"`
+	CompanyID         pgtype.UUID        `json:"company_id"`
+	FirstName         string             `json:"first_name"`
+	LastName          string             `json:"last_name"`
+	Email             pgtype.Text        `json:"email"`
+	Phone             pgtype.Text        `json:"phone"`
+	Mobile            pgtype.Text        `json:"mobile"`
+	Position          pgtype.Text        `json:"position"`
+	LeadSource        pgtype.Text        `json:"lead_source"`
+	AddressStreet     pgtype.Text        `json:"address_street"`
+	AddressZip        pgtype.Text        `json:"address_zip"`
+	AddressCity       pgtype.Text        `json:"address_city"`
+	Latitude          pgtype.Float8      `json:"latitude"`
+	Longitude         pgtype.Float8      `json:"longitude"`
+	ConsentPhone      bool               `json:"consent_phone"`
+	ConsentEmail      bool               `json:"consent_email"`
+	ConsentUpdatedAt  pgtype.Timestamptz `json:"consent_updated_at"`
+	StromverbrauchKwh pgtype.Numeric     `json:"stromverbrauch_kwh"`
+	GasverbrauchKwh   pgtype.Numeric     `json:"gasverbrauch_kwh"`
+	Zaehlernummer     pgtype.Text        `json:"zaehlernummer"`
+	EigentuemerStatus pgtype.Text        `json:"eigentuemer_status"`
+	CustomFields      []byte             `json:"custom_fields"`
 }
 
 // internal/db/queries/contacts.sql
@@ -66,6 +81,13 @@ func (q *Queries) CreateContact(ctx context.Context, arg CreateContactParams) (C
 		arg.AddressCity,
 		arg.Latitude,
 		arg.Longitude,
+		arg.ConsentPhone,
+		arg.ConsentEmail,
+		arg.ConsentUpdatedAt,
+		arg.StromverbrauchKwh,
+		arg.GasverbrauchKwh,
+		arg.Zaehlernummer,
+		arg.EigentuemerStatus,
 		arg.CustomFields,
 	)
 	var i Contact
@@ -94,6 +116,8 @@ func (q *Queries) CreateContact(ctx context.Context, arg CreateContactParams) (C
 		&i.GasverbrauchKwh,
 		&i.Zaehlernummer,
 		&i.EigentuemerStatus,
+		&i.Tags,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -109,7 +133,7 @@ func (q *Queries) DeleteContact(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getContactByID = `-- name: GetContactByID :one
-SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status FROM contacts
+SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
 WHERE id = $1 LIMIT 1
 `
 
@@ -141,23 +165,27 @@ func (q *Queries) GetContactByID(ctx context.Context, id pgtype.UUID) (Contact, 
 		&i.GasverbrauchKwh,
 		&i.Zaehlernummer,
 		&i.EigentuemerStatus,
+		&i.Tags,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
 
 const listContacts = `-- name: ListContacts :many
-SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status FROM contacts
+SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
+WHERE ($3::uuid IS NULL OR owner_user_id = $3::uuid)
 ORDER BY last_name ASC, first_name ASC
 LIMIT $1 OFFSET $2
 `
 
 type ListContactsParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit       int32       `json:"limit"`
+	Offset      int32       `json:"offset"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
 }
 
 func (q *Queries) ListContacts(ctx context.Context, arg ListContactsParams) ([]Contact, error) {
-	rows, err := q.db.Query(ctx, listContacts, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listContacts, arg.Limit, arg.Offset, arg.OwnerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -190,6 +218,8 @@ func (q *Queries) ListContacts(ctx context.Context, arg ListContactsParams) ([]C
 			&i.GasverbrauchKwh,
 			&i.Zaehlernummer,
 			&i.EigentuemerStatus,
+			&i.Tags,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -202,7 +232,7 @@ func (q *Queries) ListContacts(ctx context.Context, arg ListContactsParams) ([]C
 }
 
 const listContactsByCompany = `-- name: ListContactsByCompany :many
-SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status FROM contacts
+SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
 WHERE company_id = $1
 ORDER BY last_name ASC, first_name ASC
 `
@@ -241,6 +271,8 @@ func (q *Queries) ListContactsByCompany(ctx context.Context, companyID pgtype.UU
 			&i.GasverbrauchKwh,
 			&i.Zaehlernummer,
 			&i.EigentuemerStatus,
+			&i.Tags,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -252,23 +284,20 @@ func (q *Queries) ListContactsByCompany(ctx context.Context, companyID pgtype.UU
 	return items, nil
 }
 
-const searchContacts = `-- name: SearchContacts :many
-SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status FROM contacts
-WHERE first_name ILIKE '%' || $1 || '%'
-   OR last_name ILIKE '%' || $1 || '%'
-   OR email ILIKE '%' || $1 || '%'
-   OR phone ILIKE '%' || $1 || '%'
-ORDER BY last_name ASC
+const listInactiveContacts = `-- name: ListInactiveContacts :many
+SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
+WHERE updated_at < $1
+ORDER BY updated_at ASC
 LIMIT $2
 `
 
-type SearchContactsParams struct {
-	Column1 pgtype.Text `json:"column_1"`
-	Limit   int32       `json:"limit"`
+type ListInactiveContactsParams struct {
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	Limit     int32              `json:"limit"`
 }
 
-func (q *Queries) SearchContacts(ctx context.Context, arg SearchContactsParams) ([]Contact, error) {
-	rows, err := q.db.Query(ctx, searchContacts, arg.Column1, arg.Limit)
+func (q *Queries) ListInactiveContacts(ctx context.Context, arg ListInactiveContactsParams) ([]Contact, error) {
+	rows, err := q.db.Query(ctx, listInactiveContacts, arg.UpdatedAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -301,6 +330,72 @@ func (q *Queries) SearchContacts(ctx context.Context, arg SearchContactsParams) 
 			&i.GasverbrauchKwh,
 			&i.Zaehlernummer,
 			&i.EigentuemerStatus,
+			&i.Tags,
+			&i.OwnerUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchContacts = `-- name: SearchContacts :many
+SELECT id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id FROM contacts
+WHERE (first_name ILIKE '%' || $1 || '%'
+   OR last_name ILIKE '%' || $1 || '%'
+   OR email ILIKE '%' || $1 || '%'
+   OR phone ILIKE '%' || $1 || '%')
+  AND ($3::uuid IS NULL OR owner_user_id = $3::uuid)
+ORDER BY last_name ASC
+LIMIT $2
+`
+
+type SearchContactsParams struct {
+	Column1     pgtype.Text `json:"column_1"`
+	Limit       int32       `json:"limit"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) SearchContacts(ctx context.Context, arg SearchContactsParams) ([]Contact, error) {
+	rows, err := q.db.Query(ctx, searchContacts, arg.Column1, arg.Limit, arg.OwnerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Contact
+	for rows.Next() {
+		var i Contact
+		if err := rows.Scan(
+			&i.ID,
+			&i.CompanyID,
+			&i.FirstName,
+			&i.LastName,
+			&i.Email,
+			&i.Phone,
+			&i.Mobile,
+			&i.Position,
+			&i.LeadSource,
+			&i.AddressStreet,
+			&i.AddressZip,
+			&i.AddressCity,
+			&i.Latitude,
+			&i.Longitude,
+			&i.CustomFields,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ConsentPhone,
+			&i.ConsentEmail,
+			&i.ConsentUpdatedAt,
+			&i.StromverbrauchKwh,
+			&i.GasverbrauchKwh,
+			&i.Zaehlernummer,
+			&i.EigentuemerStatus,
+			&i.Tags,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -327,28 +422,42 @@ SET company_id = $2,
     address_city = $12,
     latitude = $13,
     longitude = $14,
-    custom_fields = $15,
+    consent_phone = $15,
+    consent_email = $16,
+    consent_updated_at = $17,
+    stromverbrauch_kwh = $18,
+    gasverbrauch_kwh = $19,
+    zaehlernummer = $20,
+    eigentuemer_status = $21,
+    custom_fields = $22,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status
+RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id
 `
 
 type UpdateContactParams struct {
-	ID            pgtype.UUID   `json:"id"`
-	CompanyID     pgtype.UUID   `json:"company_id"`
-	FirstName     string        `json:"first_name"`
-	LastName      string        `json:"last_name"`
-	Email         pgtype.Text   `json:"email"`
-	Phone         pgtype.Text   `json:"phone"`
-	Mobile        pgtype.Text   `json:"mobile"`
-	Position      pgtype.Text   `json:"position"`
-	LeadSource    pgtype.Text   `json:"lead_source"`
-	AddressStreet pgtype.Text   `json:"address_street"`
-	AddressZip    pgtype.Text   `json:"address_zip"`
-	AddressCity   pgtype.Text   `json:"address_city"`
-	Latitude      pgtype.Float8 `json:"latitude"`
-	Longitude     pgtype.Float8 `json:"longitude"`
-	CustomFields  []byte        `json:"custom_fields"`
+	ID                pgtype.UUID        `json:"id"`
+	CompanyID         pgtype.UUID        `json:"company_id"`
+	FirstName         string             `json:"first_name"`
+	LastName          string             `json:"last_name"`
+	Email             pgtype.Text        `json:"email"`
+	Phone             pgtype.Text        `json:"phone"`
+	Mobile            pgtype.Text        `json:"mobile"`
+	Position          pgtype.Text        `json:"position"`
+	LeadSource        pgtype.Text        `json:"lead_source"`
+	AddressStreet     pgtype.Text        `json:"address_street"`
+	AddressZip        pgtype.Text        `json:"address_zip"`
+	AddressCity       pgtype.Text        `json:"address_city"`
+	Latitude          pgtype.Float8      `json:"latitude"`
+	Longitude         pgtype.Float8      `json:"longitude"`
+	ConsentPhone      bool               `json:"consent_phone"`
+	ConsentEmail      bool               `json:"consent_email"`
+	ConsentUpdatedAt  pgtype.Timestamptz `json:"consent_updated_at"`
+	StromverbrauchKwh pgtype.Numeric     `json:"stromverbrauch_kwh"`
+	GasverbrauchKwh   pgtype.Numeric     `json:"gasverbrauch_kwh"`
+	Zaehlernummer     pgtype.Text        `json:"zaehlernummer"`
+	EigentuemerStatus pgtype.Text        `json:"eigentuemer_status"`
+	CustomFields      []byte             `json:"custom_fields"`
 }
 
 func (q *Queries) UpdateContact(ctx context.Context, arg UpdateContactParams) (Contact, error) {
@@ -367,6 +476,13 @@ func (q *Queries) UpdateContact(ctx context.Context, arg UpdateContactParams) (C
 		arg.AddressCity,
 		arg.Latitude,
 		arg.Longitude,
+		arg.ConsentPhone,
+		arg.ConsentEmail,
+		arg.ConsentUpdatedAt,
+		arg.StromverbrauchKwh,
+		arg.GasverbrauchKwh,
+		arg.Zaehlernummer,
+		arg.EigentuemerStatus,
 		arg.CustomFields,
 	)
 	var i Contact
@@ -395,6 +511,55 @@ func (q *Queries) UpdateContact(ctx context.Context, arg UpdateContactParams) (C
 		&i.GasverbrauchKwh,
 		&i.Zaehlernummer,
 		&i.EigentuemerStatus,
+		&i.Tags,
+		&i.OwnerUserID,
+	)
+	return i, err
+}
+
+const updateContactTags = `-- name: UpdateContactTags :one
+UPDATE contacts
+SET tags = CASE WHEN tags @> $1::jsonb THEN tags ELSE tags || $1::jsonb END,
+    updated_at = NOW()
+WHERE id = $2
+RETURNING id, company_id, first_name, last_name, email, phone, mobile, position, lead_source, address_street, address_zip, address_city, latitude, longitude, custom_fields, created_at, updated_at, consent_phone, consent_email, consent_updated_at, stromverbrauch_kwh, gasverbrauch_kwh, zaehlernummer, eigentuemer_status, tags, owner_user_id
+`
+
+type UpdateContactTagsParams struct {
+	Tags []byte      `json:"tags"`
+	ID   pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateContactTags(ctx context.Context, arg UpdateContactTagsParams) (Contact, error) {
+	row := q.db.QueryRow(ctx, updateContactTags, arg.Tags, arg.ID)
+	var i Contact
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.Phone,
+		&i.Mobile,
+		&i.Position,
+		&i.LeadSource,
+		&i.AddressStreet,
+		&i.AddressZip,
+		&i.AddressCity,
+		&i.Latitude,
+		&i.Longitude,
+		&i.CustomFields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ConsentPhone,
+		&i.ConsentEmail,
+		&i.ConsentUpdatedAt,
+		&i.StromverbrauchKwh,
+		&i.GasverbrauchKwh,
+		&i.Zaehlernummer,
+		&i.EigentuemerStatus,
+		&i.Tags,
+		&i.OwnerUserID,
 	)
 	return i, err
 }

@@ -5,8 +5,99 @@
 package db
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type UserRole string
+
+const (
+	UserRoleADMIN      UserRole = "ADMIN"
+	UserRoleBENUTZER   UserRole = "BENUTZER"
+	UserRoleVERTRIEB   UserRole = "VERTRIEB"
+	UserRoleBACKOFFICE UserRole = "BACKOFFICE"
+)
+
+func (e *UserRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UserRole(s)
+	case string:
+		*e = UserRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UserRole: %T", src)
+	}
+	return nil
+}
+
+type NullUserRole struct {
+	UserRole UserRole `json:"user_role"`
+	Valid    bool     `json:"valid"` // Valid is true if UserRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUserRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.UserRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UserRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUserRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UserRole), nil
+}
+
+type UserStatus string
+
+const (
+	UserStatusACTIVE      UserStatus = "ACTIVE"
+	UserStatusINVITED     UserStatus = "INVITED"
+	UserStatusDEACTIVATED UserStatus = "DEACTIVATED"
+)
+
+func (e *UserStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UserStatus(s)
+	case string:
+		*e = UserStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UserStatus: %T", src)
+	}
+	return nil
+}
+
+type NullUserStatus struct {
+	UserStatus UserStatus `json:"user_status"`
+	Valid      bool       `json:"valid"` // Valid is true if UserStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUserStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.UserStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UserStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUserStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UserStatus), nil
+}
 
 type AiAuditLog struct {
 	ID                 pgtype.UUID        `json:"id"`
@@ -20,6 +111,7 @@ type AiAuditLog struct {
 	PiiRedactionsCount int32              `json:"pii_redactions_count"`
 	HumanApproved      pgtype.Bool        `json:"human_approved"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UserID             pgtype.UUID        `json:"user_id"`
 }
 
 type AiResearchJob struct {
@@ -52,6 +144,7 @@ type Appointment struct {
 	IsPrivate  bool               `json:"is_private"`
 	IsPushed   bool               `json:"is_pushed"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	UserID     pgtype.UUID        `json:"user_id"`
 }
 
 type AuditLog struct {
@@ -64,6 +157,10 @@ type AuditLog struct {
 	IpAddress  pgtype.Text        `json:"ip_address"`
 	UserAgent  pgtype.Text        `json:"user_agent"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	OldValues  []byte             `json:"old_values"`
+	NewValues  []byte             `json:"new_values"`
+	PrevHash   pgtype.Text        `json:"prev_hash"`
+	Hash       pgtype.Text        `json:"hash"`
 }
 
 type CallActivity struct {
@@ -88,6 +185,7 @@ type Company struct {
 	CustomFields   []byte             `json:"custom_fields"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	OwnerUserID    pgtype.UUID        `json:"owner_user_id"`
 }
 
 type CompanyResearch struct {
@@ -126,6 +224,8 @@ type Contact struct {
 	GasverbrauchKwh   pgtype.Numeric     `json:"gasverbrauch_kwh"`
 	Zaehlernummer     pgtype.Text        `json:"zaehlernummer"`
 	EigentuemerStatus pgtype.Text        `json:"eigentuemer_status"`
+	Tags              json.RawMessage    `json:"tags"`
+	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
 }
 
 type Deal struct {
@@ -144,6 +244,7 @@ type Deal struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	WiderrufenAt  pgtype.Timestamptz `json:"widerrufen_at"`
 	WiderrufGrund pgtype.Text        `json:"widerruf_grund"`
+	Tags          json.RawMessage    `json:"tags"`
 }
 
 type EmailAccount struct {
@@ -161,6 +262,10 @@ type EmailAccount struct {
 	LastSyncedAt      pgtype.Timestamptz `json:"last_synced_at"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	AccountType       string             `json:"account_type"`
+	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
+	LastSyncAt        pgtype.Timestamptz `json:"last_sync_at"`
+	LastUid           int64              `json:"last_uid"`
 }
 
 type EmailAttachment struct {
@@ -191,6 +296,20 @@ type EmailMessage struct {
 	ContactID       pgtype.UUID        `json:"contact_id"`
 	DealID          pgtype.UUID        `json:"deal_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	Tags            json.RawMessage    `json:"tags"`
+	IsDraft         bool               `json:"is_draft"`
+}
+
+type EmailTemplate struct {
+	ID        pgtype.UUID        `json:"id"`
+	Key       string             `json:"key"`
+	Name      string             `json:"name"`
+	Subject   string             `json:"subject"`
+	Body      string             `json:"body"`
+	Category  string             `json:"category"`
+	Locale    string             `json:"locale"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type IntakeForm struct {
@@ -203,14 +322,16 @@ type IntakeForm struct {
 }
 
 type KnowledgeBaseArticle struct {
-	ID        pgtype.UUID        `json:"id"`
-	Title     string             `json:"title"`
-	Category  string             `json:"category"`
-	Content   string             `json:"content"`
-	Tags      []string           `json:"tags"`
-	Author    string             `json:"author"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID             pgtype.UUID        `json:"id"`
+	Title          string             `json:"title"`
+	Category       string             `json:"category"`
+	Content        string             `json:"content"`
+	Tags           []string           `json:"tags"`
+	Author         string             `json:"author"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Embedding      string             `json:"embedding"`
+	EmbeddingModel pgtype.Text        `json:"embedding_model"`
 }
 
 type Note struct {
@@ -222,6 +343,7 @@ type Note struct {
 	Content    string             `json:"content"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	UserID     pgtype.UUID        `json:"user_id"`
 }
 
 type Notification struct {
@@ -243,6 +365,8 @@ type RefreshToken struct {
 	IpAddress pgtype.Text        `json:"ip_address"`
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	FamilyID  pgtype.UUID        `json:"family_id"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
 }
 
 type Todo struct {
@@ -272,6 +396,20 @@ type User struct {
 	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TotpLastUsedStep    int64              `json:"totp_last_used_step"`
+	TokenVersion        int32              `json:"token_version"`
+	MustChangePassword  bool               `json:"must_change_password"`
+}
+
+type UserInvite struct {
+	ID         pgtype.UUID        `json:"id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	TokenHash  string             `json:"token_hash"`
+	CreatedBy  pgtype.UUID        `json:"created_by"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type Workflow struct {

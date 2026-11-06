@@ -2,27 +2,55 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/openlocalcrm/openlocalcrm/internal/ai"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/launcher"
 )
 
 type SettingsHandler struct {
 	baseDir string
+	audit   *audit.Service
 }
 
+// NewSettingsHandler builds the handler for the deployment's .env file.
+//
+// The directory is taken from the explicit argument (the launcher and the tests
+// pass one), otherwise from $CONFIG_DIR, otherwise the working directory. An
+// import writes a regenerated .env - with a fresh database password, connector
+// token and admin password - so the working-directory fallback must never be
+// relied on: inside a `go test` binary the working directory is the package
+// directory, and that fallback dropped a live production-style configuration
+// file straight into the source tree (issue #122), visible to git only as long
+// as the file is named `.env`.
 func NewSettingsHandler(baseDir ...string) *SettingsHandler {
-	dir := "."
+	dir := defaultConfigDir()
 	if len(baseDir) > 0 && baseDir[0] != "" {
 		dir = baseDir[0]
 	}
 	return &SettingsHandler{baseDir: dir}
+}
+
+// defaultConfigDir is the fallback every settings handler gets when no base
+// directory was passed. Unset $CONFIG_DIR keeps the historic behavior (working
+// directory), which is what the containerised server has always used.
+func defaultConfigDir() string {
+	if dir := os.Getenv("CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	return "."
+}
+
+func (h *SettingsHandler) WithAudit(auditSvc *audit.Service) *SettingsHandler {
+	h.audit = auditSvc
+	return h
 }
 
 // ExportSettings exports current system configuration (AI settings, Admin, Port, Connector token) without full database dump.
@@ -63,7 +91,7 @@ func (h *SettingsHandler) ExportSettings(w http.ResponseWriter, r *http.Request)
 
 		aiModel := os.Getenv("OLLAMA_MODEL")
 		if aiModel == "" {
-			aiModel = "gemma4:12b"
+			aiModel = ai.DefaultOllamaModel
 		}
 
 		exported = &launcher.ExportedSettings{
@@ -71,26 +99,34 @@ func (h *SettingsHandler) ExportSettings(w http.ResponseWriter, r *http.Request)
 			Version:    launcher.DefaultVersion,
 			ExportedAt: time.Now().UTC().Format(time.RFC3339),
 			AI: launcher.AISettings{
-				Provider: aiProv,
-				BaseURL:  aiBaseURL,
-				Model:    aiModel,
-				APIKey:   os.Getenv("AI_API_KEY"),
+				Provider:  aiProv,
+				BaseURL:   aiBaseURL,
+				Model:     aiModel,
+				HasAPIKey: os.Getenv("AI_API_KEY") != "",
 			},
 			Admin: launcher.AdminSettings{
-				Email: adminEmail,
+				Email:       adminEmail,
+				HasPassword: os.Getenv("INITIAL_ADMIN_PASSWORD") != "",
 			},
 			System: launcher.SystemSettings{
-				Port:              port,
-				DemoMode:          strings.EqualFold(os.Getenv("DEMO_MODE"), "true"),
-				ConnectorAPIToken: os.Getenv("CONNECTOR_API_TOKEN"),
-				Version:           launcher.DefaultVersion,
+				Port:                 port,
+				DemoMode:             strings.EqualFold(os.Getenv("DEMO_MODE"), "true"),
+				HasConnectorAPIToken: os.Getenv("CONNECTOR_API_TOKEN") != "",
+				Version:              launcher.DefaultVersion,
 			},
 		}
 	}
 
+	if h.audit != nil {
+		actingUserID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
+		_ = h.audit.Log(r.Context(), actingUserID, "SYSTEM", pgtype.UUID{}, "SETTINGS_EXPORTED", map[string]any{
+			"action": "export",
+		}, auth.ClientIP(r), r.UserAgent())
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="openlocalcrm-settings.json"`)
-	_ = json.NewEncoder(w).Encode(exported)
+	_ = json.NewEncoder(w).Encode(exported.RedactSecrets())
 }
 
 // ImportSettings imports settings from a JSON payload and updates the configuration.
@@ -107,30 +143,41 @@ func (h *SettingsHandler) ImportSettings(w http.ResponseWriter, r *http.Request)
 	if strings.Contains(contentType, "multipart/form-data") {
 		file, _, err := r.FormFile("settings")
 		if err != nil {
-			http.Error(w, `{"error":"missing_file","message":"Einstellungsdatei erforderlich"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "missing_file", "Einstellungsdatei erforderlich")
 			return
 		}
 		defer file.Close()
 		if err := json.NewDecoder(file).Decode(&settings); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"invalid_json","message":"%s"}`, err.Error()), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "invalid_json", "Ungültiges JSON-Format")
 			return
 		}
 	} else {
 		if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"invalid_body","message":"%s"}`, err.Error()), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "invalid_body", "Ungültiger Anfrageinhalt")
 			return
 		}
 	}
 
 	if err := launcher.ImportSettingsToEnv(h.baseDir, &settings, true); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"import_failed","message":"%s"}`, err.Error()), http.StatusInternalServerError)
+		if strings.Contains(err.Error(), "invalid control characters") || strings.Contains(err.Error(), "cannot be nil") {
+			writeJSONError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "import_failed", "Einstellungen konnten nicht importiert werden")
 		return
+	}
+
+	if h.audit != nil {
+		actingUserID := pgtype.UUID{Bytes: claims.UserID, Valid: true}
+		_ = h.audit.Log(r.Context(), actingUserID, "SYSTEM", pgtype.UUID{}, "SETTINGS_IMPORTED", map[string]any{
+			"action": "import",
+		}, auth.ClientIP(r), r.UserAgent())
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success":  true,
 		"message":  "Einstellungen erfolgreich importiert. Bitte starten Sie die Container bei Bedarf neu.",
-		"settings": settings,
+		"settings": settings.RedactSecrets(),
 	})
 }

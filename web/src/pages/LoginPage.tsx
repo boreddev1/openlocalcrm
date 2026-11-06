@@ -1,28 +1,31 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Mail, ShieldCheck, KeyRound, Sparkles, UserCheck } from 'lucide-react';
 import { apiFetch } from '../api/client';
 
 export const LoginPage: React.FC = () => {
-  const [email, setEmail] = useState('admin@openlocalcrm.local');
-  const [password, setPassword] = useState('demo123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [totpRequired, setTotpRequired] = useState(false);
-  const [isDemo, setIsDemo] = useState(true);
+  const [isDemo, setIsDemo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
+  const userEditedRef = useRef(false);
 
   useEffect(() => {
     apiFetch<{ demo_mode?: boolean }>('/api/v1/health')
       .then((res) => {
-        if (res && res.demo_mode === false) {
-          setIsDemo(false);
-          setEmail('');
-          setPassword('');
+        if (res && res.demo_mode === true) {
+          setIsDemo(true);
+          if (!userEditedRef.current) {
+            setEmail('admin@openlocalcrm.local');
+            setPassword('demo123');
+          }
         }
       })
       .catch(() => {});
@@ -48,6 +51,7 @@ export const LoginPage: React.FC = () => {
   };
 
   const handleQuickFill = (demoEmail: string) => {
+    userEditedRef.current = true;
     setEmail(demoEmail);
     setPassword('demo123');
     setTotpRequired(false);
@@ -132,7 +136,10 @@ export const LoginPage: React.FC = () => {
                 required
                 value={email}
                 disabled={totpRequired}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  userEditedRef.current = true;
+                  setEmail(e.target.value);
+                }}
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 disabled:opacity-60"
                 placeholder="name@unternehmen.de"
               />
@@ -148,7 +155,10 @@ export const LoginPage: React.FC = () => {
                 required
                 value={password}
                 disabled={totpRequired}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  userEditedRef.current = true;
+                  setPassword(e.target.value);
+                }}
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 disabled:opacity-60"
                 placeholder="••••••••"
               />

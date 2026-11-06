@@ -42,10 +42,16 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     queryFn: () => apiFetch('/api/v1/companies'),
     enabled: isOpen,
   });
+  const { data: rawAppointments = [] } = useQuery<any[]>({
+    queryKey: ['appointments-palette'],
+    queryFn: () => apiFetch('/api/v1/appointments'),
+    enabled: isOpen,
+  });
 
   const contacts = Array.isArray(rawContacts) ? rawContacts : [];
   const deals = Array.isArray(rawDeals) ? rawDeals : [];
   const companies = Array.isArray(rawCompanies) ? rawCompanies : [];
+  const appointments = Array.isArray(rawAppointments) ? rawAppointments : [];
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -111,12 +117,19 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       icon: KanbanSquare,
       category: 'Deals',
     })),
+    ...appointments.map((a: any) => ({
+      label: `${a.title || ''} (Termin)`.trim(),
+      path: '/calendar',
+      icon: Calendar,
+      category: 'Termine',
+    })),
   ].filter(
     (item) =>
       item.label.length > 0 &&
       item.label !== '(Kontakt)' &&
       item.label !== '(Firma)' &&
-      item.label !== '(Deal)',
+      item.label !== '(Deal)' &&
+      item.label !== '(Termin)',
   );
 
   const filteredLinks = quickLinks.filter((item) =>

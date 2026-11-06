@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const defaultDockerCompose = `name: openlocalcrm
@@ -44,6 +45,8 @@ services:
       - AI_PROVIDER=${AI_PROVIDER:-ollama}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma4:12b}
+      - AI_EMBEDDING_MODEL=${AI_EMBEDDING_MODEL:-}
+      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-}
       - AI_API_KEY=${AI_API_KEY:-}
       - AI_BASE_URL=${AI_BASE_URL:-}
       - CONNECTOR_API_TOKEN=${CONNECTOR_API_TOKEN:-}
@@ -152,17 +155,47 @@ const defaultCaddyfile = `# Caddyfile for OpenLocalCRM (Single-Tenant v3)
 func EnsureComposeAndCaddyFiles(baseDir string) error {
 	composePath := filepath.Join(baseDir, "docker-compose.yml")
 	if _, err := os.Stat(composePath); os.IsNotExist(err) {
-		if err := os.WriteFile(composePath, []byte(defaultDockerCompose), 0644); err != nil {
+		if err := os.WriteFile(composePath, []byte(defaultDockerCompose), 0644); err != nil { //nolint:gosec // G306: non-secret default/compose config that must stay readable by the docker/caddy containers
 			return fmt.Errorf("failed to write default docker-compose.yml: %w", err)
 		}
 	}
 
 	caddyPath := filepath.Join(baseDir, "Caddyfile")
 	if _, err := os.Stat(caddyPath); os.IsNotExist(err) {
-		if err := os.WriteFile(caddyPath, []byte(defaultCaddyfile), 0644); err != nil {
+		if err := os.WriteFile(caddyPath, []byte(defaultCaddyfile), 0644); err != nil { //nolint:gosec // G306: non-secret default/compose config that must stay readable by the docker/caddy containers
 			return fmt.Errorf("failed to write default Caddyfile: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// PatchComposeEmbeddingDefaults replaces embedding env lines that hardcode a
+// qwen3 compose default with the empty-default form. Missing lines stay
+// missing — absence is the safe state (the gateway then falls back to its own
+// provider-scoped default or the honest config error).
+func PatchComposeEmbeddingDefaults(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	changed := false
+	for i, line := range lines {
+		if strings.Contains(line, "OLLAMA_EMBEDDING_MODEL=") && strings.Contains(line, ":-qwen3-embedding:0.6b}") {
+			lines[i] = strings.Replace(line, ":-qwen3-embedding:0.6b}", ":-}", 1)
+			changed = true
+		}
+		if strings.Contains(line, "AI_EMBEDDING_MODEL=") && strings.Contains(line, ":-qwen3-embedding:0.6b}") {
+			lines[i] = strings.Replace(line, ":-qwen3-embedding:0.6b}", ":-}", 1)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644) //nolint:gosec // G306: non-secret default/compose config that must stay readable by the docker/caddy containers
 }

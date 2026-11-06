@@ -26,10 +26,17 @@ test.describe('Companies Management (§3.2 Full CRUD & AI Research)', () => {
     await expect(page.getByText('Hessen Solar Power GmbH')).toBeVisible();
     await expect(page.getByText('hessen-solar-power.de')).toBeVisible();
 
-    // 2. Trigger Gemma 12B AI Research on Company
+    // 2. Trigger AI Research on Company. Issue #72: the modal titles itself
+    // with the model the backend actually serves — read from the same
+    // observability endpoint the UI uses, so the expectation can never be a
+    // hardcoded model name again.
+    const obsRes = await page.request.get('/api/v1/ai/observability');
+    await expect(obsRes.ok()).toBeTruthy();
+    const servedModel: string = (await obsRes.json())?.stats?.active_model;
+    expect(servedModel.length).toBeGreaterThan(0);
     const compCard = page.locator('div.bg-slate-900').filter({ hasText: 'Hessen Solar Power GmbH' });
     await compCard.getByRole('button', { name: /KI-Recherche/i }).click();
-    await expect(page.getByText(/Gemma 12B Recherche: Hessen Solar Power GmbH/i)).toBeVisible();
+    await expect(page.getByText(`${servedModel} Recherche: Hessen Solar Power GmbH`)).toBeVisible();
     await expect(page.getByText(/KI-Zusammenfassung & Angebot/i)).toBeVisible();
 
     await page.getByRole('button', { name: /Als Firmennotiz übernehmen/i }).click();

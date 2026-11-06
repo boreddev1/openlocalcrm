@@ -3,6 +3,8 @@ package handlers
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
@@ -58,11 +61,10 @@ type UserPayload struct {
 }
 
 type LoginResponse struct {
-	Token        string       `json:"token,omitempty"`
-	RefreshToken string       `json:"refresh_token,omitempty"`
-	TOTPRequired bool         `json:"totp_required,omitempty"`
-	Message      string       `json:"message,omitempty"`
-	User         *UserPayload `json:"user,omitempty"`
+	TOTPRequired       bool         `json:"totp_required,omitempty"`
+	MustChangePassword bool         `json:"must_change_password,omitempty"`
+	Message            string       `json:"message,omitempty"`
+	User               *UserPayload `json:"user,omitempty"`
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -78,15 +80,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip := r.RemoteAddr
+	ip := auth.ClientIP(r)
 	userAgent := r.UserAgent()
 
 	res, err := h.service.Login(r.Context(), req.Email, req.Password, req.TotpCode, ip, userAgent)
 	if err != nil {
 		status := http.StatusUnauthorized
-		if err == auth.ErrUserNotActive {
-			status = http.StatusForbidden
-		} else if strings.Contains(err.Error(), "gesperrt") {
+		if strings.Contains(err.Error(), "gesperrt") {
 			status = http.StatusTooManyRequests
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -108,18 +108,18 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set HttpOnly Cookies
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 		Name:     "access_token",
 		Value:    res.Token,
 		Path:     "/",
 		Expires:  time.Now().Add(auth.AccessTokenDuration),
 		HttpOnly: true,
 		Secure:   isSecureRequest(r),
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 	})
 
 	if res.RefreshToken != "" {
-		http.SetCookie(w, &http.Cookie{
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 			Name:     "refresh_token",
 			Value:    res.RefreshToken,
 			Path:     "/api/v1/auth",
@@ -130,12 +130,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	auth.SetCSRFCookie(w, isSecureRequest(r))
+	if _, err := auth.SetCSRFCookie(w, isSecureRequest(r), uuid.UUID(res.User.ID.Bytes).String()); err != nil {
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(LoginResponse{
-		Token:        res.Token,
-		RefreshToken: res.RefreshToken,
+		MustChangePassword: res.User.MustChangePassword,
 		User: &UserPayload{
 			UserID:    uuid.UUID(res.User.ID.Bytes).String(),
 			Email:     res.User.Email,
@@ -146,44 +147,32 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type RefreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
-}
-
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
-	var token string
-
-	// Check body first
-	var req RefreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
-		token = req.RefreshToken
-	} else if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
-		token = cookie.Value
-	}
-
-	if token == "" {
+	cookie, err := r.Cookie("refresh_token")
+	if err != nil || cookie.Value == "" {
 		http.Error(w, `{"error":"missing_token","message":"refresh token required"}`, http.StatusBadRequest)
 		return
 	}
+	token := cookie.Value
 
-	newToken, newRefreshToken, err := h.service.RefreshToken(r.Context(), token, r.RemoteAddr, r.UserAgent())
+	newToken, newRefreshToken, err := h.service.RefreshToken(r.Context(), token, auth.ClientIP(r), r.UserAgent())
 	if err != nil {
-		http.Error(w, `{"error":"invalid_token","message":"`+err.Error()+`"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, "invalid_token", "Ungültiger oder abgelaufener Refresh-Token")
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 		Name:     "access_token",
 		Value:    newToken,
 		Path:     "/",
 		Expires:  time.Now().Add(auth.AccessTokenDuration),
 		HttpOnly: true,
 		Secure:   isSecureRequest(r),
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 	})
 
 	if newRefreshToken != "" {
-		http.SetCookie(w, &http.Cookie{
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 			Name:     "refresh_token",
 			Value:    newRefreshToken,
 			Path:     "/api/v1/auth",
@@ -194,12 +183,13 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	auth.SetCSRFCookie(w, isSecureRequest(r))
+	if _, err := auth.SetCSRFCookie(w, isSecureRequest(r)); err != nil {
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"token":         newToken,
-		"refresh_token": newRefreshToken,
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
 	})
 }
 
@@ -208,21 +198,25 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
 		refreshToken = cookie.Value
 	}
+	ip := auth.ClientIP(r)
+	ua := r.UserAgent()
 	if refreshToken != "" {
-		_ = h.service.RevokeRefreshToken(r.Context(), refreshToken)
+		_ = h.service.RevokeRefreshTokenWithAudit(r.Context(), refreshToken, ip, ua)
+	} else if claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims); ok && claims != nil {
+		if h.service != nil {
+			h.service.AuditLogout(r.Context(), claims.UserID, ip, ua)
+		}
 	}
 
-	var accessToken string
-	if cookie, err := r.Cookie("access_token"); err == nil && cookie.Value != "" {
-		accessToken = cookie.Value
-	} else if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
-		accessToken = strings.TrimPrefix(authHeader, "Bearer ")
-	}
-	if accessToken != "" {
-		h.service.RevokeAccessToken(accessToken)
-	}
+	ClearAuthCookies(w, r)
 
-	http.SetCookie(w, &http.Cookie{
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// ClearAuthCookies removes the session cookies (access_token, refresh_token, csrf_token).
+func ClearAuthCookies(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 		Name:     "access_token",
 		Value:    "",
 		Path:     "/",
@@ -232,7 +226,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: cookie Secure/HttpOnly/SameSite attributes are set dynamically from configuration
 		Name:     "refresh_token",
 		Value:    "",
 		Path:     "/api/v1/auth",
@@ -242,10 +236,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteStrictMode,
 	})
-	auth.ClearCSRFCookie(w)
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	auth.ClearCSRFCookie(w, isSecureRequest(r))
 }
 
 type ChangePasswordRequest struct {
@@ -272,7 +263,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		if err == auth.ErrInvalidOldPassword {
 			status = http.StatusUnauthorized
 		}
-		http.Error(w, `{"error":"password_change_failed","message":"`+err.Error()+`"}`, status)
+		writeJSONError(w, status, "password_change_failed", "Passwortänderung fehlgeschlagen")
 		return
 	}
 
@@ -283,40 +274,51 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) SetupTOTP(w http.ResponseWriter, r *http.Request) {
 	claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 	if !ok || claims == nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
 		return
 	}
 
 	res, err := h.service.SetupTOTP(r.Context(), claims.UserID)
 	if err != nil {
-		http.Error(w, `{"error":"totp_setup_failed","message":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "totp_setup_failed", "Zwei-Faktor-Authentifizierung konnte nicht initialisiert werden")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(res) //nolint:gosec // G117: intentional: the TOTP secret is exchanged between setup and verify so the user can enroll an authenticator app
 }
 
 type VerifyTOTPRequest struct {
-	Code string `json:"code"`
+	Secret string `json:"secret"`
+	Code   string `json:"code"`
 }
 
 func (h *AuthHandler) VerifyTOTP(w http.ResponseWriter, r *http.Request) {
 	claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 	if !ok || claims == nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
 		return
 	}
 
 	var req VerifyTOTPRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" {
-		http.Error(w, `{"error":"invalid_request","message":"code is required"}`, http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" || req.Secret == "" {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "code and secret are required")
 		return
 	}
 
-	err := h.service.VerifyTOTP(r.Context(), claims.UserID, req.Code)
+	err := h.service.VerifyTOTP(r.Context(), claims.UserID, req.Secret, req.Code)
 	if err != nil {
-		http.Error(w, `{"error":"totp_verification_failed","message":"`+err.Error()+`"}`, http.StatusBadRequest)
+		if errors.Is(err, crypto.ErrKeyUnusable) {
+			// The code the user entered may be perfectly correct; the server
+			// just cannot store the secret behind it (issue #128 fail-closed).
+			// Answering "invalid code" would send the user in circles, so this
+			// is reported honestly as a server-side problem. The detailed
+			// cause names filesystem paths and belongs in the log only.
+			log.Printf("[Auth] [ERROR] cannot store the TOTP secret, the server master key is unusable: %v", err) //nolint:gosec // G706: operator-configured path, logged for the operator, never returned to a caller
+			writeJSONError(w, http.StatusInternalServerError, "totp_setup_failed", "Zwei-Faktor-Authentifizierung konnte nicht initialisiert werden (Server-Konfiguration prüfen)")
+			return
+		}
+		writeJSONError(w, http.StatusBadRequest, "totp_verification_failed", "Ungültiger Bestätigungscode")
 		return
 	}
 
@@ -331,19 +333,19 @@ type DisableTOTPRequest struct {
 func (h *AuthHandler) DisableTOTP(w http.ResponseWriter, r *http.Request) {
 	claims, ok := r.Context().Value(auth.UserContextKey).(*auth.AccessClaims)
 	if !ok || claims == nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Nicht angemeldet")
 		return
 	}
 
 	var req DisableTOTPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" {
-		http.Error(w, `{"error":"invalid_request","message":"password is required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "password is required")
 		return
 	}
 
 	err := h.service.DisableTOTP(r.Context(), claims.UserID, req.Password)
 	if err != nil {
-		http.Error(w, `{"error":"totp_disable_failed","message":"`+err.Error()+`"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, "totp_disable_failed", "Deaktivierung fehlgeschlagen: falsches Passwort")
 		return
 	}
 

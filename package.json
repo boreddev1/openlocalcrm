@@ -1,0 +1,6 @@
+{
+  "name": "openlocalcrm",
+  "private": true,
+  "type": "commonjs",
+  "description": "Pins the module type at the repository root so playwright.config.ts is loaded as CommonJS regardless of where the repo is checked out. Without it, an ancestor package.json declaring \"type\": \"module\" (e.g. a tooling repo the CRM is nested in) makes Node load the config as ESM, where __dirname is undefined and bare imports resolve differently — see scripts/run-e2e.sh."
+}

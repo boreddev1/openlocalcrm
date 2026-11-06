@@ -6,9 +6,10 @@ INSERT INTO notes (
     entity_id,
     type,
     author,
-    content
+    content,
+    user_id
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6
 )
 RETURNING *;
 
@@ -18,11 +19,13 @@ WHERE id = $1 LIMIT 1;
 
 -- name: ListNotes :many
 SELECT * FROM notes
+WHERE (sqlc.narg('user_id')::uuid IS NULL OR user_id = sqlc.narg('user_id')::uuid)
 ORDER BY created_at DESC;
 
 -- name: ListNotesByEntity :many
 SELECT * FROM notes
 WHERE entity_type = $1 AND entity_id = $2
+  AND (sqlc.narg('user_id')::uuid IS NULL OR user_id = sqlc.narg('user_id')::uuid)
 ORDER BY created_at DESC;
 
 -- name: UpdateNote :one

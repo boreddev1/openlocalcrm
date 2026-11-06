@@ -1,21 +1,89 @@
 package contact
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"math"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
+	"github.com/openlocalcrm/openlocalcrm/internal/geocoding"
 )
 
 var (
 	ErrContactNotFound = errors.New("contact not found")
 	ErrInvalidContact  = errors.New("first name and last name are required")
 	ErrInvalidEmail    = errors.New("invalid email address format")
+	ErrInvalidConsent  = errors.New("consent fields must be booleans")
+	ErrInvalidEnergy   = errors.New("energy values must be finite non-negative whole numbers within numeric(10,2)")
 )
+
+type OptionalBool struct {
+	Value   bool
+	Present bool
+	Null    bool
+}
+
+func (value *OptionalBool) UnmarshalJSON(data []byte) error {
+	value.Value = false
+	value.Present = true
+	value.Null = false
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		value.Null = true
+		return nil
+	}
+	if err := json.Unmarshal(data, &value.Value); err != nil {
+		return err
+	}
+	return nil
+}
+
+type OptionalFloat64 struct {
+	Value   float64
+	Present bool
+	Null    bool
+}
+
+func (value *OptionalFloat64) UnmarshalJSON(data []byte) error {
+	value.Value = 0
+	value.Present = true
+	value.Null = false
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		value.Null = true
+		return nil
+	}
+	if err := json.Unmarshal(data, &value.Value); err != nil {
+		return err
+	}
+	return nil
+}
+
+type OptionalString struct {
+	Value   string
+	Present bool
+	Null    bool
+}
+
+func (value *OptionalString) UnmarshalJSON(data []byte) error {
+	value.Value = ""
+	value.Present = true
+	value.Null = false
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		value.Null = true
+		return nil
+	}
+	if err := json.Unmarshal(data, &value.Value); err != nil {
+		return err
+	}
+	return nil
+}
 
 // validateEmail performs basic email syntax validation.
 func validateEmail(email string) bool {
@@ -28,6 +96,90 @@ func validateEmail(email string) bool {
 	}
 	dot := strings.LastIndex(email[at:], ".")
 	return dot > 1 && dot < len(email[at:])-1
+}
+
+func consentCreate(input OptionalBool) (bool, error) {
+	if input.Null {
+		return false, ErrInvalidConsent
+	}
+	return input.Value, nil
+}
+
+func consentUpdate(input OptionalBool, existing bool) (bool, error) {
+	if input.Null {
+		return false, ErrInvalidConsent
+	}
+	if !input.Present {
+		return existing, nil
+	}
+	return input.Value, nil
+}
+
+func energyValue(input OptionalFloat64) (pgtype.Numeric, error) {
+	if !input.Present || input.Null {
+		return pgtype.Numeric{}, nil
+	}
+	if math.IsNaN(input.Value) || math.IsInf(input.Value, 0) || input.Value < 0 || math.Trunc(input.Value) != input.Value || input.Value > 99999999 {
+		return pgtype.Numeric{}, ErrInvalidEnergy
+	}
+	var result pgtype.Numeric
+	if err := result.Scan(fmt.Sprintf("%.2f", input.Value)); err != nil {
+		return pgtype.Numeric{}, fmt.Errorf("%w: %v", ErrInvalidEnergy, err)
+	}
+	return result, nil
+}
+
+func updatedEnergyValue(input OptionalFloat64, existing pgtype.Numeric) (pgtype.Numeric, error) {
+	if !input.Present {
+		return existing, nil
+	}
+	return energyValue(input)
+}
+
+func ownerValue(input OptionalString) pgtype.Text {
+	if !input.Present || input.Null || input.Value == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: input.Value, Valid: true}
+}
+
+func updatedOwnerValue(input OptionalString, existing pgtype.Text) pgtype.Text {
+	if !input.Present {
+		return existing
+	}
+	return ownerValue(input)
+}
+
+func textAuditValue(value pgtype.Text) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.String
+}
+
+func timestampAuditValue(value pgtype.Timestamptz) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Time.Format(time.RFC3339)
+}
+
+func numericAuditValue(value pgtype.Numeric) (any, error) {
+	if !value.Valid {
+		return nil, nil
+	}
+	converted, err := value.Float64Value()
+	if err != nil {
+		return nil, err
+	}
+	return converted.Float64, nil
+}
+
+func uuidAuditValue(value pgtype.UUID) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.String()
 }
 
 type Service struct {
@@ -43,20 +195,26 @@ func NewService(queries db.Querier, audit *audit.Service) *Service {
 }
 
 type CreateContactInput struct {
-	CompanyID     *pgtype.UUID
-	FirstName     string
-	LastName      string
-	Email         string
-	Phone         string
-	Mobile        string
-	Position      string
-	LeadSource    string
-	AddressStreet string
-	AddressZip    string
-	AddressCity   string
-	Latitude      *float64
-	Longitude     *float64
-	CustomFields  []byte
+	CompanyID         *pgtype.UUID
+	FirstName         string
+	LastName          string
+	Email             string
+	Phone             string
+	Mobile            string
+	Position          string
+	LeadSource        string
+	AddressStreet     string
+	AddressZip        string
+	AddressCity       string
+	Latitude          *float64
+	Longitude         *float64
+	ConsentPhone      OptionalBool
+	ConsentEmail      OptionalBool
+	StromverbrauchKwh OptionalFloat64
+	GasverbrauchKwh   OptionalFloat64
+	Zaehlernummer     string
+	EigentuemerStatus OptionalString
+	CustomFields      []byte
 }
 
 func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateContactInput) (db.Contact, error) {
@@ -65,6 +223,22 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateC
 	}
 	if !validateEmail(input.Email) {
 		return db.Contact{}, ErrInvalidEmail
+	}
+	consentPhone, err := consentCreate(input.ConsentPhone)
+	if err != nil {
+		return db.Contact{}, err
+	}
+	consentEmail, err := consentCreate(input.ConsentEmail)
+	if err != nil {
+		return db.Contact{}, err
+	}
+	stromVal, err := energyValue(input.StromverbrauchKwh)
+	if err != nil {
+		return db.Contact{}, err
+	}
+	gasVal, err := energyValue(input.GasverbrauchKwh)
+	if err != nil {
+		return db.Contact{}, err
 	}
 
 	var compID pgtype.UUID
@@ -79,31 +253,61 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateC
 	if input.Longitude != nil {
 		lon = pgtype.Float8{Float64: *input.Longitude, Valid: true}
 	}
+	if input.Latitude == nil && input.Longitude == nil && strings.TrimSpace(input.AddressZip) != "" {
+		if glat, glon, ok := geocoding.LookupPLZ(input.AddressZip); ok {
+			lat = pgtype.Float8{Float64: glat, Valid: true}
+			lon = pgtype.Float8{Float64: glon, Valid: true}
+		}
+	}
 
 	customFields := input.CustomFields
 	if len(customFields) == 0 {
 		customFields = []byte("{}")
 	}
 
+	var consentUpdatedAt pgtype.Timestamptz
+	if consentPhone || consentEmail {
+		consentUpdatedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	}
+	status := ownerValue(input.EigentuemerStatus)
+
 	contact, err := s.queries.CreateContact(ctx, db.CreateContactParams{
-		CompanyID:     compID,
-		FirstName:     input.FirstName,
-		LastName:      input.LastName,
-		Email:         pgtype.Text{String: input.Email, Valid: input.Email != ""},
-		Phone:         pgtype.Text{String: input.Phone, Valid: input.Phone != ""},
-		Mobile:        pgtype.Text{String: input.Mobile, Valid: input.Mobile != ""},
-		Position:      pgtype.Text{String: input.Position, Valid: input.Position != ""},
-		LeadSource:    pgtype.Text{String: input.LeadSource, Valid: input.LeadSource != ""},
-		AddressStreet: pgtype.Text{String: input.AddressStreet, Valid: input.AddressStreet != ""},
-		AddressZip:    pgtype.Text{String: input.AddressZip, Valid: input.AddressZip != ""},
-		AddressCity:   pgtype.Text{String: input.AddressCity, Valid: input.AddressCity != ""},
-		Latitude:      lat,
-		Longitude:     lon,
-		CustomFields:  customFields,
+		CompanyID:         compID,
+		FirstName:         input.FirstName,
+		LastName:          input.LastName,
+		Email:             pgtype.Text{String: input.Email, Valid: input.Email != ""},
+		Phone:             pgtype.Text{String: input.Phone, Valid: input.Phone != ""},
+		Mobile:            pgtype.Text{String: input.Mobile, Valid: input.Mobile != ""},
+		Position:          pgtype.Text{String: input.Position, Valid: input.Position != ""},
+		LeadSource:        pgtype.Text{String: input.LeadSource, Valid: input.LeadSource != ""},
+		AddressStreet:     pgtype.Text{String: input.AddressStreet, Valid: input.AddressStreet != ""},
+		AddressZip:        pgtype.Text{String: input.AddressZip, Valid: input.AddressZip != ""},
+		AddressCity:       pgtype.Text{String: input.AddressCity, Valid: input.AddressCity != ""},
+		Latitude:          lat,
+		Longitude:         lon,
+		ConsentPhone:      consentPhone,
+		ConsentEmail:      consentEmail,
+		ConsentUpdatedAt:  consentUpdatedAt,
+		StromverbrauchKwh: stromVal,
+		GasverbrauchKwh:   gasVal,
+		Zaehlernummer:     pgtype.Text{String: input.Zaehlernummer, Valid: input.Zaehlernummer != ""},
+		EigentuemerStatus: status,
+		CustomFields:      customFields,
 	})
 
 	if err != nil {
 		return db.Contact{}, err
+	}
+
+	if actorID.Valid {
+		if updated, err := s.queries.SetContactOwner(ctx, db.SetContactOwnerParams{
+			ID:          contact.ID,
+			OwnerUserID: actorID,
+		}); err != nil {
+			log.Printf("[contact] failed to set initial owner: %v", err)
+		} else {
+			contact = updated
+		}
 	}
 
 	if s.audit != nil {
@@ -115,46 +319,70 @@ func (s *Service) Create(ctx context.Context, actorID pgtype.UUID, input CreateC
 	return contact, nil
 }
 
+func (s *Service) SetOwner(ctx context.Context, id pgtype.UUID, ownerID pgtype.UUID) error {
+	_, err := s.queries.SetContactOwner(ctx, db.SetContactOwnerParams{
+		ID:          id,
+		OwnerUserID: ownerID,
+	})
+	return err
+}
+
 func (s *Service) GetByID(ctx context.Context, id pgtype.UUID) (db.Contact, error) {
 	return s.queries.GetContactByID(ctx, id)
 }
 
-func (s *Service) List(ctx context.Context, limit, offset int32) ([]db.Contact, error) {
+func (s *Service) List(ctx context.Context, limit, offset int32, ownerID ...pgtype.UUID) ([]db.Contact, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
+	var owner pgtype.UUID
+	if len(ownerID) > 0 {
+		owner = ownerID[0]
+	}
 	return s.queries.ListContacts(ctx, db.ListContactsParams{
-		Limit:  limit,
-		Offset: offset,
+		Limit:       limit,
+		Offset:      offset,
+		OwnerUserID: owner,
 	})
 }
 
-func (s *Service) Search(ctx context.Context, query string, limit int32) ([]db.Contact, error) {
+func (s *Service) Search(ctx context.Context, query string, limit int32, ownerID ...pgtype.UUID) ([]db.Contact, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
+	var owner pgtype.UUID
+	if len(ownerID) > 0 {
+		owner = ownerID[0]
+	}
 	return s.queries.SearchContacts(ctx, db.SearchContactsParams{
-		Column1: pgtype.Text{String: query, Valid: true},
-		Limit:   limit,
+		Column1:     pgtype.Text{String: query, Valid: true},
+		Limit:       limit,
+		OwnerUserID: owner,
 	})
 }
 
 type UpdateContactInput struct {
-	ID            pgtype.UUID
-	CompanyID     *pgtype.UUID
-	FirstName     string
-	LastName      string
-	Email         string
-	Phone         string
-	Mobile        string
-	Position      string
-	LeadSource    string
-	AddressStreet string
-	AddressZip    string
-	AddressCity   string
-	Latitude      *float64
-	Longitude     *float64
-	CustomFields  []byte
+	ID                pgtype.UUID
+	CompanyID         *pgtype.UUID
+	FirstName         string
+	LastName          string
+	Email             string
+	Phone             string
+	Mobile            string
+	Position          string
+	LeadSource        string
+	AddressStreet     string
+	AddressZip        string
+	AddressCity       string
+	Latitude          *float64
+	Longitude         *float64
+	ConsentPhone      OptionalBool
+	ConsentEmail      OptionalBool
+	StromverbrauchKwh OptionalFloat64
+	GasverbrauchKwh   OptionalFloat64
+	Zaehlernummer     string
+	EigentuemerStatus OptionalString
+	CustomFields      []byte
 }
 
 func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateContactInput) (db.Contact, error) {
@@ -163,6 +391,11 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateC
 	}
 	if !validateEmail(input.Email) {
 		return db.Contact{}, ErrInvalidEmail
+	}
+
+	existing, err := s.queries.GetContactByID(ctx, input.ID)
+	if err != nil {
+		return db.Contact{}, ErrContactNotFound
 	}
 
 	var compID pgtype.UUID
@@ -177,35 +410,146 @@ func (s *Service) Update(ctx context.Context, actorID pgtype.UUID, input UpdateC
 	if input.Longitude != nil {
 		lon = pgtype.Float8{Float64: *input.Longitude, Valid: true}
 	}
+	if input.Latitude == nil && input.Longitude == nil && strings.TrimSpace(input.AddressZip) != "" {
+		if glat, glon, ok := geocoding.LookupPLZ(input.AddressZip); ok {
+			lat = pgtype.Float8{Float64: glat, Valid: true}
+			lon = pgtype.Float8{Float64: glon, Valid: true}
+		}
+	}
 
 	customFields := input.CustomFields
 	if len(customFields) == 0 {
 		customFields = []byte("{}")
 	}
 
+	consentPhone, err := consentUpdate(input.ConsentPhone, existing.ConsentPhone)
+	if err != nil {
+		return db.Contact{}, err
+	}
+	consentEmail, err := consentUpdate(input.ConsentEmail, existing.ConsentEmail)
+	if err != nil {
+		return db.Contact{}, err
+	}
+	consentChanged := consentPhone != existing.ConsentPhone || consentEmail != existing.ConsentEmail
+	consentUpdatedAt := existing.ConsentUpdatedAt
+	if consentChanged {
+		consentUpdatedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	}
+	stromVal, err := updatedEnergyValue(input.StromverbrauchKwh, existing.StromverbrauchKwh)
+	if err != nil {
+		return db.Contact{}, err
+	}
+	gasVal, err := updatedEnergyValue(input.GasverbrauchKwh, existing.GasverbrauchKwh)
+	if err != nil {
+		return db.Contact{}, err
+	}
+	status := updatedOwnerValue(input.EigentuemerStatus, existing.EigentuemerStatus)
+
+	zaehler := input.Zaehlernummer
+	if zaehler == "" && existing.Zaehlernummer.Valid {
+		zaehler = existing.Zaehlernummer.String
+	}
+
+	var oldAuditValues, newAuditValues audit.DiffMap
+	if s.audit != nil {
+		oldStrom, auditErr := numericAuditValue(existing.StromverbrauchKwh)
+		if auditErr != nil {
+			return db.Contact{}, fmt.Errorf("convert existing stromverbrauch_kwh: %w", auditErr)
+		}
+		oldGas, auditErr := numericAuditValue(existing.GasverbrauchKwh)
+		if auditErr != nil {
+			return db.Contact{}, fmt.Errorf("convert existing gasverbrauch_kwh: %w", auditErr)
+		}
+		newStrom, auditErr := numericAuditValue(stromVal)
+		if auditErr != nil {
+			return db.Contact{}, fmt.Errorf("convert stromverbrauch_kwh: %w", auditErr)
+		}
+		newGas, auditErr := numericAuditValue(gasVal)
+		if auditErr != nil {
+			return db.Contact{}, fmt.Errorf("convert gasverbrauch_kwh: %w", auditErr)
+		}
+		oldAuditValues = audit.DiffMap{
+			"company_id":         uuidAuditValue(existing.CompanyID),
+			"first_name":         existing.FirstName,
+			"last_name":          existing.LastName,
+			"email":              textAuditValue(existing.Email),
+			"phone":              textAuditValue(existing.Phone),
+			"mobile":             textAuditValue(existing.Mobile),
+			"position":           textAuditValue(existing.Position),
+			"lead_source":        textAuditValue(existing.LeadSource),
+			"address_street":     textAuditValue(existing.AddressStreet),
+			"address_zip":        textAuditValue(existing.AddressZip),
+			"address_city":       textAuditValue(existing.AddressCity),
+			"latitude":           existing.Latitude,
+			"longitude":          existing.Longitude,
+			"consent_phone":      existing.ConsentPhone,
+			"consent_email":      existing.ConsentEmail,
+			"consent_updated_at": timestampAuditValue(existing.ConsentUpdatedAt),
+			"stromverbrauch_kwh": oldStrom,
+			"gasverbrauch_kwh":   oldGas,
+			"zaehlernummer":      textAuditValue(existing.Zaehlernummer),
+			"eigentuemer_status": textAuditValue(existing.EigentuemerStatus),
+			"custom_fields":      existing.CustomFields,
+		}
+		newAuditValues = audit.DiffMap{
+			"company_id":         uuidAuditValue(compID),
+			"first_name":         input.FirstName,
+			"last_name":          input.LastName,
+			"email":              textAuditValue(pgtype.Text{String: input.Email, Valid: input.Email != ""}),
+			"phone":              textAuditValue(pgtype.Text{String: input.Phone, Valid: input.Phone != ""}),
+			"mobile":             textAuditValue(pgtype.Text{String: input.Mobile, Valid: input.Mobile != ""}),
+			"position":           textAuditValue(pgtype.Text{String: input.Position, Valid: input.Position != ""}),
+			"lead_source":        textAuditValue(pgtype.Text{String: input.LeadSource, Valid: input.LeadSource != ""}),
+			"address_street":     textAuditValue(pgtype.Text{String: input.AddressStreet, Valid: input.AddressStreet != ""}),
+			"address_zip":        textAuditValue(pgtype.Text{String: input.AddressZip, Valid: input.AddressZip != ""}),
+			"address_city":       textAuditValue(pgtype.Text{String: input.AddressCity, Valid: input.AddressCity != ""}),
+			"latitude":           lat,
+			"longitude":          lon,
+			"consent_phone":      consentPhone,
+			"consent_email":      consentEmail,
+			"consent_updated_at": timestampAuditValue(consentUpdatedAt),
+			"stromverbrauch_kwh": newStrom,
+			"gasverbrauch_kwh":   newGas,
+			"zaehlernummer":      textAuditValue(pgtype.Text{String: zaehler, Valid: zaehler != ""}),
+			"eigentuemer_status": textAuditValue(status),
+			"custom_fields":      customFields,
+		}
+	}
+
 	contact, err := s.queries.UpdateContact(ctx, db.UpdateContactParams{
-		ID:            input.ID,
-		CompanyID:     compID,
-		FirstName:     input.FirstName,
-		LastName:      input.LastName,
-		Email:         pgtype.Text{String: input.Email, Valid: input.Email != ""},
-		Phone:         pgtype.Text{String: input.Phone, Valid: input.Phone != ""},
-		Mobile:        pgtype.Text{String: input.Mobile, Valid: input.Mobile != ""},
-		Position:      pgtype.Text{String: input.Position, Valid: input.Position != ""},
-		LeadSource:    pgtype.Text{String: input.LeadSource, Valid: input.LeadSource != ""},
-		AddressStreet: pgtype.Text{String: input.AddressStreet, Valid: input.AddressStreet != ""},
-		AddressZip:    pgtype.Text{String: input.AddressZip, Valid: input.AddressZip != ""},
-		AddressCity:   pgtype.Text{String: input.AddressCity, Valid: input.AddressCity != ""},
-		Latitude:      lat,
-		Longitude:     lon,
-		CustomFields:  customFields,
+		ID:                input.ID,
+		CompanyID:         compID,
+		FirstName:         input.FirstName,
+		LastName:          input.LastName,
+		Email:             pgtype.Text{String: input.Email, Valid: input.Email != ""},
+		Phone:             pgtype.Text{String: input.Phone, Valid: input.Phone != ""},
+		Mobile:            pgtype.Text{String: input.Mobile, Valid: input.Mobile != ""},
+		Position:          pgtype.Text{String: input.Position, Valid: input.Position != ""},
+		LeadSource:        pgtype.Text{String: input.LeadSource, Valid: input.LeadSource != ""},
+		AddressStreet:     pgtype.Text{String: input.AddressStreet, Valid: input.AddressStreet != ""},
+		AddressZip:        pgtype.Text{String: input.AddressZip, Valid: input.AddressZip != ""},
+		AddressCity:       pgtype.Text{String: input.AddressCity, Valid: input.AddressCity != ""},
+		Latitude:          lat,
+		Longitude:         lon,
+		ConsentPhone:      consentPhone,
+		ConsentEmail:      consentEmail,
+		ConsentUpdatedAt:  consentUpdatedAt,
+		StromverbrauchKwh: stromVal,
+		GasverbrauchKwh:   gasVal,
+		Zaehlernummer:     pgtype.Text{String: zaehler, Valid: zaehler != ""},
+		EigentuemerStatus: status,
+		CustomFields:      customFields,
 	})
 	if err != nil {
 		return db.Contact{}, err
 	}
 
 	if s.audit != nil {
-		if err := s.audit.Log(ctx, actorID, "CONTACT", contact.ID, "UPDATE", contact, "", ""); err != nil {
+		action := "UPDATE"
+		if consentChanged {
+			action = "CONSENT_UPDATE"
+		}
+		if err := s.audit.LogDiff(ctx, actorID, "CONTACT", contact.ID, action, oldAuditValues, newAuditValues, "", ""); err != nil {
 			log.Printf("[audit] failed to log contact update: %v", err)
 		}
 	}

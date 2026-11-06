@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../api/client';
+import { MODEL_NOT_CONNECTED } from '../hooks/useAIModel';
 import {
   Sparkles,
   ShieldCheck,
@@ -37,23 +38,6 @@ export const AIAssistantPage: React.FC = () => {
   >('copilot');
   const [selectedAuditLog, setSelectedAuditLog] = useState<any>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
-
-  const { data: healthData } = useQuery<any>({
-    queryKey: ['health'],
-    queryFn: () => apiFetch('/api/v1/health'),
-    staleTime: 60000,
-  });
-
-  const formatModelBadge = (m?: string) => {
-    if (!m) return 'Mistral';
-    const lower = m.toLowerCase();
-    if (lower.startsWith('mistral')) return 'Mistral';
-    if (lower.includes('gemma')) return 'Gemma 12B';
-    if (lower.includes('gpt-4')) return 'GPT-4o';
-    if (lower.includes('claude')) return 'Claude';
-    return m.split(':')[0].toUpperCase();
-  };
-  const activeModel = formatModelBadge(healthData?.ai_model);
 
   // --- TAB 1: Chat Copilot State ---
   const [chatInput, setChatInput] = useState('');
@@ -146,7 +130,7 @@ export const AIAssistantPage: React.FC = () => {
       setIsKbModalOpen(false);
       setKbForm({ title: '', category: 'Photovoltaik & Speicher', source: '', content: '' });
       setFeedbackBanner(
-        'Wissensdokument erfolgreich in pgvector vektorisiert (384-dim Embeddings gespeichert)!',
+        'Wissensdokument erfolgreich in Wissensdatenbank gespeichert und indexiert!',
       );
       setTimeout(() => setFeedbackBanner(null), 4000);
     },
@@ -248,9 +232,16 @@ export const AIAssistantPage: React.FC = () => {
     total_pii_blocked: 0,
     average_latency_ms: 0,
     compliance_standard: 'EU AI Act konform (Art. 50/52 Transparenz & Auditierbarkeit)',
-    active_model: 'gemma4:12b (Ollama On-Premise)',
+    // No data from the API: show nothing rather than name a model this page
+    // cannot know. /api/v1/ai/observability returns the model the serving
+    // gateway actually uses (issue #72), demo marker included.
+    active_model: MODEL_NOT_CONNECTED,
     provider: 'Ollama Local / Isolated Single-Tenant',
   };
+
+  // Issue #72: every model label on this page names the actually served
+  // model from the observability stats — never a hardcoded string.
+  const activeModel: string = stats.active_model;
 
   const recentLogs = Array.isArray(observabilityData?.recent_logs)
     ? observabilityData.recent_logs
@@ -263,7 +254,7 @@ export const AIAssistantPage: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-100">KI-Zentrale & Copilot</h1>
           <p className="text-sm text-slate-400">
-            Gemma 12B Assistenz, Evidence-Ledger, Wissensbasis, Web-Recherche und EU AI Act
+            {activeModel} Assistenz, Evidence-Ledger, Wissensbasis, Web-Recherche und EU AI Act
             Observability
           </p>
         </div>
@@ -271,8 +262,12 @@ export const AIAssistantPage: React.FC = () => {
           <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold rounded-full">
             <ShieldCheck className="w-3.5 h-3.5" /> Prompt Guards Aktiv
           </span>
-          <span className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-semibold rounded-full">
-            <Cpu className="w-3.5 h-3.5" /> {activeModel} (Lokal)
+          <span
+            className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-semibold rounded-full max-w-xs"
+            title={activeModel}
+          >
+            <Cpu className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{activeModel}</span>
           </span>
         </div>
       </div>
@@ -564,7 +559,7 @@ export const AIAssistantPage: React.FC = () => {
             <div>
               <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
                 <Database className="w-4 h-4 text-emerald-400" />
-                Wissensbasis & RAG pgvector-Index (§5.5)
+                Wissensbasis & Dokumenten-Index (§5.5)
               </h3>
               <p className="text-xs text-slate-400">
                 Unternehmensspezifisches Wissen, Preismodelle und technische Datenblätter für den
@@ -626,9 +621,13 @@ export const AIAssistantPage: React.FC = () => {
                         {entry.source || 'Manuelle Eingabe'}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1 text-emerald-400 font-mono font-semibold">
+                    <div
+                      className={`flex items-center gap-1 font-mono font-semibold ${entry.indexed ? 'text-emerald-400' : 'text-slate-500'}`}
+                    >
                       <Layers className="w-3 h-3" />
-                      <span>{entry.chunks_count || 4} Chunks (384-dim pgvector)</span>
+                      <span>
+                        {entry.indexed ? entry.embedding_model || 'indexiert' : 'nicht indexiert'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -648,8 +647,8 @@ export const AIAssistantPage: React.FC = () => {
               <span>Neuen Research-Auftrag starten (§5.4)</span>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Automatisierte Web-Recherche per Gemma 12B & SSRF-geschütztem Web-Crawl. Analysiert
-              Impressum, Gewerbedachflächen, Entscheider und technologische Eignung.
+              Automatisierte Web-Recherche per {activeModel} & SSRF-geschütztem Web-Crawl.
+              Analysiert Impressum, Gewerbedachflächen, Entscheider und technologische Eignung.
             </p>
 
             <form onSubmit={handleStartResearchJob} className="space-y-4">
@@ -776,7 +775,7 @@ export const AIAssistantPage: React.FC = () => {
               </span>
               {selectedResearchJob && (
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
-                  Gemma 12B Analyse abgeschlossen
+                  {activeModel} Analyse abgeschlossen
                 </span>
               )}
             </div>
@@ -960,7 +959,7 @@ export const AIAssistantPage: React.FC = () => {
                 <textarea
                   required
                   rows={5}
-                  placeholder="Inhalt einfügen... Wird automatisch in Chunks aufgeteilt und per pgvector vektorisiert."
+                  placeholder="Inhalt einfügen... Wird als Embedding generiert und semantisch indexiert."
                   value={kbForm.content}
                   onChange={(e) => setKbForm({ ...kbForm, content: e.target.value })}
                   className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-emerald-500 leading-relaxed"
@@ -971,10 +970,7 @@ export const AIAssistantPage: React.FC = () => {
               <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between text-[11px] text-emerald-400">
                 <span className="flex items-center gap-1.5 font-medium">
                   <Layers className="w-3.5 h-3.5" />
-                  Vektorisierung: 384-dim Embeddings in pgvector
-                </span>
-                <span className="font-mono font-bold">
-                  {Math.max(1, Math.ceil(kbForm.content.length / 250))} Chunks
+                  Semantische Indexierung als 1024-dimensionales Embedding
                 </span>
               </div>
 
@@ -991,7 +987,7 @@ export const AIAssistantPage: React.FC = () => {
                   disabled={createKbMutation.isPending}
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs transition-colors shadow-lg shadow-emerald-600/20 cursor-pointer"
                 >
-                  {createKbMutation.isPending ? 'Vektorisiere...' : 'Wissen in pgvector ablegen'}
+                  {createKbMutation.isPending ? 'Speichere...' : 'Wissen in Datenbank ablegen'}
                 </button>
               </div>
             </form>
@@ -1032,7 +1028,7 @@ export const AIAssistantPage: React.FC = () => {
           <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <span className="text-sm font-bold text-slate-200">
-                Strukturierte KI-Ergebnisse (Gemma 12B)
+                Strukturierte KI-Ergebnisse ({activeModel})
               </span>
               {triageResult && (
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">

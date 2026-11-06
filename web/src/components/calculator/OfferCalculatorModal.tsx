@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../api/client';
+import { useAIModel } from '../../hooks/useAIModel';
 import {
   X,
   Sparkles,
@@ -22,11 +23,27 @@ interface OfferCalculatorModalProps {
   onClose: () => void;
 }
 
+// The calculator's "Demo-Mustervorlage laden" button must feed the real
+// /api/v1/ai/parse-bill contract, which rejects empty document_text with 400
+// (internal/server/handlers/ai.go). This sample bill text is the template.
+const DEMO_BILL_TEMPLATE = [
+  'STROMRECHNUNG – Demo-Mustervorlage',
+  'Kunde: Demo Gewerbebetrieb Nord GmbH',
+  'Zählernummer: 1EMH00000000000',
+  'Abrechnungszeitraum: 01.01.2026 – 31.12.2026',
+  'Jahresverbrauch: 6.500 kWh',
+  'Arbeitstpreis: 0,385 €/kWh',
+  'Zählerstand alt: 48.210 kWh',
+  'Zählerstand neu: 54.710 kWh',
+].join('\n');
+
 export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
   initialCustomerName = 'Familie Müller',
   onClose,
 }) => {
   const queryClient = useQueryClient();
+  // Issue #72: the OCR banner names the model the backend actually serves.
+  const aiModel = useAIModel();
   const [activeTab, setActiveTab] = useState<'consumption' | 'hardware' | 'pricing'>('consumption');
 
   // Extraction & Customer State
@@ -131,7 +148,10 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
     try {
       const res = await apiFetch<any>('/api/v1/ai/parse-bill', {
         method: 'POST',
-        body: JSON.stringify({ customer_name: customerName }),
+        body: JSON.stringify({
+          customer_name: customerName,
+          document_text: DEMO_BILL_TEMPLATE,
+        }),
       });
       if (res.extracted) {
         setCustomerName(res.extracted.customer_name);
@@ -142,9 +162,20 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
         setRoofOrientation(res.extracted.roof_orientation);
         handleKwpChange(res.extracted.recommended_kwp);
         setStorageKwh(res.extracted.recommended_storage_kwh);
-        setFeedbackBanner('Gemma 12B OCR: Stromrechnung & Zählerdaten erfolgreich eingelesen!');
+        // There is exactly one success banner. The old 'demo_template' /
+        // 'simulated' branch consumed a response shape that commit 5e9f4fd
+        // ("eliminate simulated responses") deleted from the backend: ParseBill
+        // always answers mode "ai_ocr_extraction", simulated false (or a 400/502
+        // honest failure). A branch that can never fire is debt, not a feature —
+        // see #70.
+        setFeedbackBanner('Stromrechnung: Verbrauchs- & Zählerdaten erfolgreich extrahiert.');
         setTimeout(() => setFeedbackBanner(null), 4000);
       }
+    } catch {
+      setFeedbackBanner(
+        'Demo-Mustervorlage konnte nicht eingelesen werden (KI-Dienst nicht erreichbar).',
+      );
+      setTimeout(() => setFeedbackBanner(null), 4000);
     } finally {
       setIsExtracting(false);
     }
@@ -189,7 +220,7 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                 KI-Dokumentenextraktion & Manuell anpassbarer Angebotsrechner (§5.2 / §5.6 / §6.3)
               </h2>
               <p className="text-xs text-slate-400">
-                OCR-Extraktion mit Gemma 12B ➔ Deterministischer Rechner ➔ Volle manuelle
+                OCR-Extraktion mit {aiModel} ➔ Deterministischer Rechner ➔ Volle manuelle
                 Anpassungskontrolle für Vertriebler
               </p>
             </div>
@@ -226,7 +257,7 @@ export const OfferCalculatorModal: React.FC<OfferCalculatorModalProps> = ({
                 className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition-colors inline-flex items-center gap-1.5 shadow-lg shadow-purple-600/20 cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{isExtracting ? 'Analysiert...' : '📄 Demo-Rechnung einlesen'}</span>
+                <span>{isExtracting ? 'Lädt...' : '📄 Demo-Mustervorlage laden'}</span>
               </button>
             </div>
 

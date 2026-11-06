@@ -42,6 +42,14 @@ done
 
 mkdir -p "${COVERAGE_DIR}"
 
+# Diff-coverage only sees *.go; the security gate scripts/check-web-audit.mjs
+# (and any future scripts/*.test.mjs) is unreachable for the Go gate (#110).
+# Run its Node harness right here so the pre-push gate that enforces 50/50
+# also enforces the script gates. Fail-closed on purpose: no `command -v node`
+# skip — a check that cannot run must not report success.
+echo "🧪 Node-Test-Harness für Script-Gates (Web-Audit #110): node --test scripts/*.test.mjs"
+node --test scripts/*.test.mjs
+
 echo "📊 Führe Tests mit Code-Coverage-Analyse (inkl. Cross-Package-Tracking) aus..."
 go test -coverpkg=./... -coverprofile="${COVERAGE_OUT}" -covermode=atomic ./...
 

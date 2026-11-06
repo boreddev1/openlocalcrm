@@ -18,31 +18,51 @@ INSERT INTO knowledge_base_articles (
     category,
     content,
     tags,
-    author
+    author,
+    embedding,
+    embedding_model
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6::vector, $7
 )
-RETURNING id, title, category, content, tags, author, created_at, updated_at
+RETURNING id, title, category, content, tags, author, embedding_model,
+    (embedding IS NOT NULL)::boolean AS indexed, created_at, updated_at
 `
 
 type CreateKBArticleParams struct {
-	Title    string   `json:"title"`
-	Category string   `json:"category"`
-	Content  string   `json:"content"`
-	Tags     []string `json:"tags"`
-	Author   string   `json:"author"`
+	Title          string      `json:"title"`
+	Category       string      `json:"category"`
+	Content        string      `json:"content"`
+	Tags           []string    `json:"tags"`
+	Author         string      `json:"author"`
+	Embedding      string      `json:"embedding"`
+	EmbeddingModel pgtype.Text `json:"embedding_model"`
+}
+
+type CreateKBArticleRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	Title          string             `json:"title"`
+	Category       string             `json:"category"`
+	Content        string             `json:"content"`
+	Tags           []string           `json:"tags"`
+	Author         string             `json:"author"`
+	EmbeddingModel pgtype.Text        `json:"embedding_model"`
+	Indexed        bool               `json:"indexed"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 // internal/db/queries/knowledge_base.sql
-func (q *Queries) CreateKBArticle(ctx context.Context, arg CreateKBArticleParams) (KnowledgeBaseArticle, error) {
+func (q *Queries) CreateKBArticle(ctx context.Context, arg CreateKBArticleParams) (CreateKBArticleRow, error) {
 	row := q.db.QueryRow(ctx, createKBArticle,
 		arg.Title,
 		arg.Category,
 		arg.Content,
 		arg.Tags,
 		arg.Author,
+		arg.Embedding,
+		arg.EmbeddingModel,
 	)
-	var i KnowledgeBaseArticle
+	var i CreateKBArticleRow
 	err := row.Scan(
 		&i.ID,
 		&i.Title,
@@ -50,6 +70,8 @@ func (q *Queries) CreateKBArticle(ctx context.Context, arg CreateKBArticleParams
 		&i.Content,
 		&i.Tags,
 		&i.Author,
+		&i.EmbeddingModel,
+		&i.Indexed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -67,13 +89,28 @@ func (q *Queries) DeleteKBArticle(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getKBArticleByID = `-- name: GetKBArticleByID :one
-SELECT id, title, category, content, tags, author, created_at, updated_at FROM knowledge_base_articles
+SELECT id, title, category, content, tags, author, embedding_model,
+    (embedding IS NOT NULL)::boolean AS indexed, created_at, updated_at
+FROM knowledge_base_articles
 WHERE id = $1 LIMIT 1
 `
 
-func (q *Queries) GetKBArticleByID(ctx context.Context, id pgtype.UUID) (KnowledgeBaseArticle, error) {
+type GetKBArticleByIDRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	Title          string             `json:"title"`
+	Category       string             `json:"category"`
+	Content        string             `json:"content"`
+	Tags           []string           `json:"tags"`
+	Author         string             `json:"author"`
+	EmbeddingModel pgtype.Text        `json:"embedding_model"`
+	Indexed        bool               `json:"indexed"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetKBArticleByID(ctx context.Context, id pgtype.UUID) (GetKBArticleByIDRow, error) {
 	row := q.db.QueryRow(ctx, getKBArticleByID, id)
-	var i KnowledgeBaseArticle
+	var i GetKBArticleByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Title,
@@ -81,6 +118,8 @@ func (q *Queries) GetKBArticleByID(ctx context.Context, id pgtype.UUID) (Knowled
 		&i.Content,
 		&i.Tags,
 		&i.Author,
+		&i.EmbeddingModel,
+		&i.Indexed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -88,19 +127,34 @@ func (q *Queries) GetKBArticleByID(ctx context.Context, id pgtype.UUID) (Knowled
 }
 
 const listKBArticles = `-- name: ListKBArticles :many
-SELECT id, title, category, content, tags, author, created_at, updated_at FROM knowledge_base_articles
+SELECT id, title, category, content, tags, author, embedding_model,
+    (embedding IS NOT NULL)::boolean AS indexed, created_at, updated_at
+FROM knowledge_base_articles
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListKBArticles(ctx context.Context) ([]KnowledgeBaseArticle, error) {
+type ListKBArticlesRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	Title          string             `json:"title"`
+	Category       string             `json:"category"`
+	Content        string             `json:"content"`
+	Tags           []string           `json:"tags"`
+	Author         string             `json:"author"`
+	EmbeddingModel pgtype.Text        `json:"embedding_model"`
+	Indexed        bool               `json:"indexed"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListKBArticles(ctx context.Context) ([]ListKBArticlesRow, error) {
 	rows, err := q.db.Query(ctx, listKBArticles)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []KnowledgeBaseArticle
+	var items []ListKBArticlesRow
 	for rows.Next() {
-		var i KnowledgeBaseArticle
+		var i ListKBArticlesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Title,
@@ -108,6 +162,8 @@ func (q *Queries) ListKBArticles(ctx context.Context) ([]KnowledgeBaseArticle, e
 			&i.Content,
 			&i.Tags,
 			&i.Author,
+			&i.EmbeddingModel,
+			&i.Indexed,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -119,4 +175,82 @@ func (q *Queries) ListKBArticles(ctx context.Context) ([]KnowledgeBaseArticle, e
 		return nil, err
 	}
 	return items, nil
+}
+
+const searchKBArticlesByEmbedding = `-- name: SearchKBArticlesByEmbedding :many
+SELECT id, title, category, content, tags, author, embedding_model,
+    (embedding IS NOT NULL)::boolean AS indexed, created_at, updated_at,
+    (embedding <=> $1::vector)::float8 AS distance
+FROM knowledge_base_articles
+WHERE embedding IS NOT NULL
+ORDER BY embedding <=> $1::vector
+LIMIT $2
+`
+
+type SearchKBArticlesByEmbeddingParams struct {
+	Embedding  string `json:"embedding"`
+	LimitCount int32  `json:"limit_count"`
+}
+
+type SearchKBArticlesByEmbeddingRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	Title          string             `json:"title"`
+	Category       string             `json:"category"`
+	Content        string             `json:"content"`
+	Tags           []string           `json:"tags"`
+	Author         string             `json:"author"`
+	EmbeddingModel pgtype.Text        `json:"embedding_model"`
+	Indexed        bool               `json:"indexed"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Distance       float64            `json:"distance"`
+}
+
+func (q *Queries) SearchKBArticlesByEmbedding(ctx context.Context, arg SearchKBArticlesByEmbeddingParams) ([]SearchKBArticlesByEmbeddingRow, error) {
+	rows, err := q.db.Query(ctx, searchKBArticlesByEmbedding, arg.Embedding, arg.LimitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchKBArticlesByEmbeddingRow
+	for rows.Next() {
+		var i SearchKBArticlesByEmbeddingRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Category,
+			&i.Content,
+			&i.Tags,
+			&i.Author,
+			&i.EmbeddingModel,
+			&i.Indexed,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Distance,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateKBArticleEmbedding = `-- name: UpdateKBArticleEmbedding :exec
+UPDATE knowledge_base_articles
+SET embedding = $1::vector, embedding_model = $2
+WHERE id = $3
+`
+
+type UpdateKBArticleEmbeddingParams struct {
+	Embedding      string      `json:"embedding"`
+	EmbeddingModel pgtype.Text `json:"embedding_model"`
+	ID             pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateKBArticleEmbedding(ctx context.Context, arg UpdateKBArticleEmbeddingParams) error {
+	_, err := q.db.Exec(ctx, updateKBArticleEmbedding, arg.Embedding, arg.EmbeddingModel, arg.ID)
+	return err
 }

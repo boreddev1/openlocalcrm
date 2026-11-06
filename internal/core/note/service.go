@@ -27,14 +27,16 @@ type Note struct {
 	Author     string    `json:"author"`
 	Content    string    `json:"content"`
 	CreatedAt  time.Time `json:"created_at"`
+	UserID     *string   `json:"user_id,omitempty"`
 }
 
 type CreateNoteInput struct {
-	EntityType string `json:"entity_type"`
-	EntityID   string `json:"entity_id"`
-	Type       string `json:"type"`
-	Author     string `json:"author"`
-	Content    string `json:"content"`
+	EntityType string  `json:"entity_type"`
+	EntityID   string  `json:"entity_id"`
+	Type       string  `json:"type"`
+	Author     string  `json:"author"`
+	Content    string  `json:"content"`
+	UserID     *string `json:"user_id,omitempty"`
 }
 
 type Service struct {
@@ -52,6 +54,14 @@ func NewService(querier db.Querier, sseHub *sse.Hub) *Service {
 	}
 }
 
+func uuidToStrPtr(u pgtype.UUID) *string {
+	if !u.Valid {
+		return nil
+	}
+	str := uuid.UUID(u.Bytes).String()
+	return &str
+}
+
 func parseUUID(s string) pgtype.UUID {
 	u, err := uuid.Parse(s)
 	if err != nil {
@@ -60,17 +70,22 @@ func parseUUID(s string) pgtype.UUID {
 	return pgtype.UUID{Bytes: u, Valid: true}
 }
 
-func (s *Service) List(ctx context.Context, entityType, entityID string) ([]Note, error) {
+func (s *Service) List(ctx context.Context, entityType, entityID string, userID ...pgtype.UUID) ([]Note, error) {
 	if s.querier != nil {
 		var dbNotes []db.Note
 		var err error
+		var uID pgtype.UUID
+		if len(userID) > 0 {
+			uID = userID[0]
+		}
 		if entityID != "" && entityType != "" {
 			dbNotes, err = s.querier.ListNotesByEntity(ctx, db.ListNotesByEntityParams{
 				EntityType: entityType,
 				EntityID:   parseUUID(entityID),
+				UserID:     uID,
 			})
 		} else {
-			dbNotes, err = s.querier.ListNotes(ctx)
+			dbNotes, err = s.querier.ListNotes(ctx, uID)
 		}
 		if err != nil {
 			return nil, err
@@ -86,6 +101,7 @@ func (s *Service) List(ctx context.Context, entityType, entityID string) ([]Note
 				Author:     n.Author,
 				Content:    n.Content,
 				CreatedAt:  n.CreatedAt.Time,
+				UserID:     uuidToStrPtr(n.UserID),
 			}
 		}
 		return result, nil
@@ -101,6 +117,11 @@ func (s *Service) List(ctx context.Context, entityType, entityID string) ([]Note
 		}
 		if entityType != "" && n.EntityType != "" && !strings.EqualFold(n.EntityType, entityType) {
 			continue
+		}
+		if len(userID) > 0 && userID[0].Valid {
+			if n.UserID == nil || *n.UserID != uuid.UUID(userID[0].Bytes).String() {
+				continue
+			}
 		}
 		result = append(result, n)
 	}
@@ -128,6 +149,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (Note, error) {
 			Author:     n.Author,
 			Content:    n.Content,
 			CreatedAt:  n.CreatedAt.Time,
+			UserID:     uuidToStrPtr(n.UserID),
 		}, nil
 	}
 
@@ -160,6 +182,11 @@ func (s *Service) Create(ctx context.Context, input CreateNoteInput) (Note, erro
 		entityType = "contact"
 	}
 
+	var noteUserID pgtype.UUID
+	if input.UserID != nil && *input.UserID != "" {
+		noteUserID = parseUUID(*input.UserID)
+	}
+
 	if s.querier != nil {
 		created, err := s.querier.CreateNote(ctx, db.CreateNoteParams{
 			EntityType: entityType,
@@ -167,6 +194,7 @@ func (s *Service) Create(ctx context.Context, input CreateNoteInput) (Note, erro
 			Type:       noteType,
 			Author:     author,
 			Content:    input.Content,
+			UserID:     noteUserID,
 		})
 		if err == nil {
 			n := Note{
@@ -177,6 +205,7 @@ func (s *Service) Create(ctx context.Context, input CreateNoteInput) (Note, erro
 				Author:     created.Author,
 				Content:    created.Content,
 				CreatedAt:  created.CreatedAt.Time,
+				UserID:     uuidToStrPtr(created.UserID),
 			}
 			s.broadcast("note.created", n)
 			return n, nil
@@ -191,6 +220,7 @@ func (s *Service) Create(ctx context.Context, input CreateNoteInput) (Note, erro
 		Author:     author,
 		Content:    input.Content,
 		CreatedAt:  time.Now().UTC(),
+		UserID:     input.UserID,
 	}
 
 	s.mu.Lock()

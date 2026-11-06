@@ -22,6 +22,186 @@ Die API unterstützt zwei Authentifizierungsmodi:
 
 ## 📋 Endpunkt-Übersicht
 
+### Routen-Inventur (maschinell erzeugt)
+
+Vollständige Liste aller Endpunkte, die `internal/server/router.go` registriert —
+die Gruppe `/api/v1/…` und der SSE-Stream `/events/stream`. Der eingebettete SPA-
+Mount (`r.Mount("/", web.DistHandler())`) ist bewusst ausgenommen: er bedient
+Frontend-Dateien statt API-Endpunkte und hat keine abgrenzbare Pfadliste. Die
+Tabelle ist **generiert, nicht gepflegt**: Sie wird aus dem
+Router-Registrierungsbaum und der Auth-Klassen-Tabelle `server.RouteAuthClasses`
+(`internal/server/route_auth.go`) gelesen und darf nicht von Hand editiert werden.
+
+```bash
+UPDATE_ROUTE_INVENTORY=1 go test ./internal/server/ -run TestAPIReferenceInventoryUpdate -count=1
+```
+
+`internal/server/api_reference_test.go` vergleicht die Tabelle bei jedem
+`go test`-Lauf bidirektional mit dem Router: ein Endpunkt, der im Router
+existiert und hier fehlt, lässt die Tests genauso durchfallen wie ein
+dokumentierter Endpunkt, den der Router nicht mehr registriert. Fehlt die
+Tabelle, ist sie leer, fehlt die Spalte **Authentifizierung** oder ist eine
+ihrer Zellen leer, schlägt die Prüfung fehl (fail-closed); es existiert kein
+Pfad, der die Prüfung überspringt oder nur protokolliert.
+
+Pfadparameter stehen in Chi-Schreibweise (`{id}`), genau so, wie der Router sie
+registriert.
+
+### Die Spalte `Authentifizierung` (Issue #115)
+
+Chi-Routes melden nur Mount-Muster und HTTP-Methoden, **niemals** die
+Middleware-Kette dahinter. Eine Auth-Klasse ließe sich also nicht aus dem
+Router-Registrierungsbaum *ablesen* — sie muss *deklariert* werden. Genau das
+leistet `server.RouteAuthClasses` in `internal/server/route_auth.go`: eine
+Zeile pro Pfad-Präfix, verankert an denselben Pfad-Konstanten, die
+`router.go` für die Mounts benutzt. Die Spalte ist generiert, nicht
+abgeschrieben; drei Prüfungen halten sie ehrlich:
+
+1. **Vollständigkeit:** Jede Route, die der Router registriert, muss in der
+   Tabelle genau eine Klasse finden. Eine neue Route ohne deklarierte Klasse
+   lässt `go test` durchfallen — niemals „unklassifiziert = okay". (Die
+   breiteste Zeile `/api/v1` deklariert dabei die strenge Session-Klasse; ein
+   vergessener Eintrag rutscht also nie versehentlich in „öffentlich".)
+2. **Keine Leichen:** Jede Tabellenzeile muss mindestens eine registrierte
+   Route abdecken; Mount entfernen, ohne die Zeile zu löschen, scheitert.
+3. **Verhalten:** `internal/server/route_auth_class_test.go` schickt pro
+   Route **einen** Request ohne jegliche Anmeldedaten gegen den aufgebauten
+   Router (in-process, kein Netzwerk) und verlangt die zur Klasse passende
+   Antwort: `401` bei `jwt+csrf` (zuerst greift `auth.AuthMiddleware`, vor
+   CSRF, RBAC und Rate-Limitern), `403` bei `csrf-only` (die CSRF-Middleware
+   sitzt vor allen anderen Schichten), bei `none` alles außer 401/403 — ein
+   ausgelöstes Rate-Limit (`429`) lässt die Prüfung ebenfalls durchfallen,
+   weil die Antwort dann keine Aussage über die Auth-Klasse trägt. Wer z. B.
+   `AuthMiddleware` aus der geschützten Gruppe entfernt, fällt bei diesem
+   Test durch — auch wenn die Tabelle unangetastet bliebe.
+
+Bedeutung der Klassen:
+
+| Klasse | Bedeutung |
+| --- | --- |
+| `none` | ohne Anmeldedaten erreichbar (Health, Login, Einladungsannahme). Rate-Limiting gilt trotzdem, denn Login und Invite akzeptieren erratbare Geheimnisse. |
+| `csrf-only` | kein Access-Token erforderlich; `CSRFDoubleSubmitMiddleware` verlangt Deckung von CSRF-Cookie und `X-CSRF-Token`-Header (sonst 403). Die eigentliche Authentifizierung läuft über das HttpOnly-Refresh-Cookie (`SameSite=Strict`), das ein Browser cross-site nie mitsendet. |
+| `jwt+csrf` | die geschützte Gruppe: Ed25519-Access-Token via `Authorization: Bearer` oder `access_token`-Cookie, inkl. `token_version`-Prüfung. Bei schreibenden Methoden verlangt die CSRF-Middleware zusätzlich Cookie/Header-Deckung — **mit einer Ausnahme**: eine Anfrage, die über ein geprüftes Bearer-Token authentifiziert wurde, ist befreit, weil sie keine Browser-Ambiente-Credentials trägt. Ob *ein bestimmter Aufrufer* also ein `X-CSRF-Token` braucht, hängt weiterhin davon ab, wie er sich authentifiziert. RBAC-Berechtigungen (`auth.RequirePermission`) setzen oberhalb dieser Klasse an, pro Mount. |
+| `connector-token` | das Lead-Intake-Webhook prüft sein statisches Bearer-Token (`CONNECTOR_API_TOKEN`) im Handler selbst. |
+| `jwt-inline` | der SSE-Stream prüft dasselbe Access-Token im Handler selbst (GET-only; EventSource kann keinen CSRF-Header senden, deshalb ist hier bewusst keine CSRF-Middleware montiert). |
+
+**Grenzen des Beweises** (damit das Grün nicht mehr verspricht, als es ist):
+
+* Der Probe beweist für `connector-token` und `jwt-inline` nur „abgelehnt ohne
+  Anmeldedaten (401)" — dieselbe Beobachtung wie bei `jwt+csrf`. Ob die
+  Ablehnung von `AuthMiddleware` oder vom Handler selbst kommt, entscheidet
+  die deklarierte Tabellenzeile (Autorschaft direkt am Mount, dort mit
+  Anker-Kommentaren), nicht der HTTP-Status.
+* Die Bearer-Ausnahme der CSRF-Regel ist Eigenschaft des Aufrufers, nicht der
+  Route; sie ist deshalb in der Klassenbeschreibung dokumentiert, nicht als
+  eigene Spalte.
+* RBAC-Berechtigungen pro Endpoint sind nicht Gegenstand der Spalte und auch
+  nicht maschinell abgeleitet; `internal/server/rbac_routes_test.go` prüft
+  sie verhaltensbasiert, die Beschreibungen in den Abschnitten unten bleiben
+  menschengepflegt.
+
+<!-- route-inventory:start -->
+| Methode | Pfad | Authentifizierung |
+| --- | --- | --- |
+| POST | /api/v1/ai/chat | jwt+csrf |
+| GET | /api/v1/ai/kb | jwt+csrf |
+| POST | /api/v1/ai/kb | jwt+csrf |
+| GET | /api/v1/ai/kb/search | jwt+csrf |
+| DELETE | /api/v1/ai/kb/{id} | jwt+csrf |
+| GET | /api/v1/ai/observability | jwt+csrf |
+| POST | /api/v1/ai/parse-bill | jwt+csrf |
+| POST | /api/v1/ai/research/company | jwt+csrf |
+| GET | /api/v1/ai/research/jobs | jwt+csrf |
+| POST | /api/v1/ai/research/jobs | jwt+csrf |
+| POST | /api/v1/ai/synthesize-notes | jwt+csrf |
+| POST | /api/v1/ai/triage | jwt+csrf |
+| GET | /api/v1/appointments | jwt+csrf |
+| POST | /api/v1/appointments | jwt+csrf |
+| DELETE | /api/v1/appointments/{id} | jwt+csrf |
+| PUT | /api/v1/appointments/{id} | jwt+csrf |
+| GET | /api/v1/appointments/{id}/ics | jwt+csrf |
+| GET | /api/v1/auth/accept-invite | none |
+| POST | /api/v1/auth/accept-invite | none |
+| POST | /api/v1/auth/change-password | jwt+csrf |
+| POST | /api/v1/auth/login | none |
+| POST | /api/v1/auth/logout | csrf-only |
+| POST | /api/v1/auth/logout-all | jwt+csrf |
+| POST | /api/v1/auth/refresh | csrf-only |
+| POST | /api/v1/auth/totp/disable | jwt+csrf |
+| POST | /api/v1/auth/totp/setup | jwt+csrf |
+| POST | /api/v1/auth/totp/verify | jwt+csrf |
+| GET | /api/v1/automations | jwt+csrf |
+| POST | /api/v1/automations | jwt+csrf |
+| GET | /api/v1/automations/runs | jwt+csrf |
+| POST | /api/v1/automations/runs/{id}/approve | jwt+csrf |
+| POST | /api/v1/automations/{id}/test-run | jwt+csrf |
+| POST | /api/v1/backup/drill | jwt+csrf |
+| GET | /api/v1/backup/export | jwt+csrf |
+| POST | /api/v1/backup/restore | jwt+csrf |
+| POST | /api/v1/calculator/solar | jwt+csrf |
+| GET | /api/v1/companies | jwt+csrf |
+| POST | /api/v1/companies | jwt+csrf |
+| DELETE | /api/v1/companies/{id} | jwt+csrf |
+| GET | /api/v1/companies/{id} | jwt+csrf |
+| PUT | /api/v1/companies/{id} | jwt+csrf |
+| POST | /api/v1/connectors/lead-intake | connector-token |
+| GET | /api/v1/contacts | jwt+csrf |
+| POST | /api/v1/contacts | jwt+csrf |
+| DELETE | /api/v1/contacts/{id} | jwt+csrf |
+| GET | /api/v1/contacts/{id} | jwt+csrf |
+| PUT | /api/v1/contacts/{id} | jwt+csrf |
+| GET | /api/v1/deals | jwt+csrf |
+| POST | /api/v1/deals | jwt+csrf |
+| DELETE | /api/v1/deals/{id} | jwt+csrf |
+| GET | /api/v1/deals/{id} | jwt+csrf |
+| PUT | /api/v1/deals/{id} | jwt+csrf |
+| POST | /api/v1/deals/{id}/revoke | jwt+csrf |
+| POST | /api/v1/deals/{id}/solar-calculation | jwt+csrf |
+| GET | /api/v1/email-templates | jwt+csrf |
+| POST | /api/v1/email-templates | jwt+csrf |
+| POST | /api/v1/email-templates/generate | jwt+csrf |
+| DELETE | /api/v1/email-templates/{key} | jwt+csrf |
+| PUT | /api/v1/email-templates/{key} | jwt+csrf |
+| GET | /api/v1/emails/accounts | jwt+csrf |
+| POST | /api/v1/emails/accounts | jwt+csrf |
+| DELETE | /api/v1/emails/accounts/{id} | jwt+csrf |
+| PATCH | /api/v1/emails/accounts/{id} | jwt+csrf |
+| POST | /api/v1/emails/accounts/{id}/sync | jwt+csrf |
+| POST | /api/v1/emails/accounts/{id}/test | jwt+csrf |
+| POST | /api/v1/emails/demo-ingest | jwt+csrf |
+| GET | /api/v1/emails/messages | jwt+csrf |
+| POST | /api/v1/emails/send | jwt+csrf |
+| GET | /api/v1/emails/threads/{threadID} | jwt+csrf |
+| PATCH | /api/v1/emails/{id}/tags | jwt+csrf |
+| GET | /api/v1/export/contacts.csv | jwt+csrf |
+| GET | /api/v1/health | none |
+| POST | /api/v1/import/contacts | jwt+csrf |
+| GET | /api/v1/me | jwt+csrf |
+| GET | /api/v1/notes | jwt+csrf |
+| POST | /api/v1/notes | jwt+csrf |
+| DELETE | /api/v1/notes/{id} | jwt+csrf |
+| GET | /api/v1/notes/{id} | jwt+csrf |
+| PUT | /api/v1/notes/{id} | jwt+csrf |
+| POST | /api/v1/notifications/read-all | jwt+csrf |
+| GET | /api/v1/notifications/unread | jwt+csrf |
+| POST | /api/v1/notifications/{id}/read | jwt+csrf |
+| POST | /api/v1/ownership/bulk-assign | jwt+csrf |
+| GET | /api/v1/reports/sales | jwt+csrf |
+| GET | /api/v1/settings/export | jwt+csrf |
+| POST | /api/v1/settings/import | jwt+csrf |
+| POST | /api/v1/telephony/calls | jwt+csrf |
+| GET | /api/v1/todos | jwt+csrf |
+| POST | /api/v1/todos | jwt+csrf |
+| DELETE | /api/v1/todos/{id} | jwt+csrf |
+| GET | /api/v1/todos/{id} | jwt+csrf |
+| PUT | /api/v1/todos/{id} | jwt+csrf |
+| GET | /api/v1/users | jwt+csrf |
+| POST | /api/v1/users/invite | jwt+csrf |
+| PUT | /api/v1/users/{id}/role | jwt+csrf |
+| PUT | /api/v1/users/{id}/status | jwt+csrf |
+| GET | /events/stream | jwt-inline |
+<!-- route-inventory:end -->
+
 ### 1. Healthcheck & Systemstatus
 
 ```bash
@@ -67,7 +247,8 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
     "role": "ADMIN",
     "first_name": "Max",
     "last_name": "Administrator",
-    "totp_enabled": true
+    "totp_enabled": true,
+    "must_change_password": false
   }
 }
 ```
@@ -75,22 +256,32 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 *Hinweis:* Falls 2FA aktiv ist und kein `totp_code` übergeben wird, antwortet die API mit `401 Unauthorized` und `{ "error": "TOTP code required", "code": "TOTP_REQUIRED" }`.
 
 #### Token erneuern (`/refresh`)
-Verlängert die Sitzung und gibt ein frisches JWT-Token aus.
+Verlängert die Sitzung via Single-Use Refresh Token Rotation. Aus Sicherheitsgründen wird der Refresh-Token ausschließlich über das HttpOnly-Cookie `refresh_token` übergeben (kein Bearer-Header). Erzeugt ein neues Access-Token und rotiert den Refresh-Token.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/refresh \
-  -H "Authorization: Bearer <token>"
+  --cookie "refresh_token=<token>"
+```
+
+#### Alle Sitzungen abmelden (`/auth/logout-all`)
+Meldet alle aktiven Sitzungen des Benutzers auf allen Geräten sofort ab, indem die `token_version` des Benutzers inkrementiert und alle Refresh-Tokens der Token-Familie revidiert werden.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/logout-all \
+  -H "Authorization: Bearer <token>" \
+  -H "X-CSRF-Token: <csrf_token>"
 ```
 
 #### Passwort ändern (`/change-password`)
-Aktualisiert das Passwort mittels Argon2id Hash nach Prüfung des aktuellen Passworts.
+Aktualisiert das Passwort mittels Argon2id Hash nach Prüfung des aktuellen Passworts (Mindestlänge 8 Zeichen). Setzt `must_change_password` auf `false` und invalidiert bestehende Sessions durch Hochzählen der `token_version`.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/change-password \
   -H "Authorization: Bearer <token>" \
+  -H "X-CSRF-Token: <csrf_token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "current_password": "AltesPasswort123!",
+    "old_password": "AltesPasswort123!",
     "new_password": "NeuesSicheresPasswort456!"
   }'
 ```
@@ -107,7 +298,7 @@ curl -X POST http://localhost:8080/api/v1/auth/totp/setup \
 ```json
 {
   "secret": "JBSWY3DPEHPK3PXP",
-  "qr_uri": "otpauth://totp/OpenLocalCRM:admin@openlocalcrm.local?secret=JBSWY3DPEHPK3PXP&issuer=OpenLocalCRM"
+  "url": "otpauth://totp/OpenLocalCRM:admin@openlocalcrm.local?secret=JBSWY3DPEHPK3PXP&issuer=OpenLocalCRM"
 }
 ```
 
@@ -119,7 +310,8 @@ curl -X POST http://localhost:8080/api/v1/auth/totp/verify \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "code": "123456"
+    "code": "123456",
+    "secret": "JBSWY3DPEHPK3PXP"
   }'
 ```
 
@@ -141,14 +333,49 @@ curl -X GET http://localhost:8080/api/v1/me \
   -H "Authorization: Bearer <token>"
 ```
 
-#### Abmelden (Logout)
-```bash
-curl -X POST http://localhost:8080/api/v1/auth/logout
+##### Response (`200 OK`)
+```json
+{
+  "user_id": "00000000-0000-0000-0000-000000000001",
+  "email": "admin@openlocalcrm.local",
+  "role": "ADMIN",
+  "first_name": "Max",
+  "last_name": "Administrator",
+  "totp_enabled": false,
+  "must_change_password": false
+}
 ```
 
 ---
 
-### 3. Lead-Intake Webhook (Website-Formulare & Portale)
+#### Abmelden (Logout)
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/logout \
+  -H "Authorization: Bearer <token>" \
+  -H "X-CSRF-Token: <csrf_token>"
+```
+
+---
+
+### 3. Datensatz-Eigentümerschaft & Neuzuweisung (`/api/v1/ownership`)
+
+Administrativer Endpunkt zur Massen-Neuzuweisung von CRM-Datensätzen (Kontakte, Firmen, Deals, Termine, Aufgaben, Notizen) von einem Vorbesitzer auf einen neuen Eigentümer.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/ownership/bulk-assign \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "X-CSRF-Token: <csrf_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from_user_id": "11111111-1111-1111-1111-111111111111",
+    "to_user_id": "22222222-2222-2222-2222-222222222222",
+    "entity_types": ["contacts", "companies", "deals", "appointments", "todos", "notes"]
+  }'
+```
+
+---
+
+### 4. Lead-Intake Webhook (Website-Formulare & Portale)
 
 Nimmt externe Leads entgegen, führt Deduplizierung durch und legt automatisch Kontakte/Deals an.
 

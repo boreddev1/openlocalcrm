@@ -70,4 +70,21 @@ func TestLocalStorageOperations(t *testing.T) {
 	if _, err := store.Open(ctx, relPath); err != storage.ErrFileNotFound {
 		t.Fatalf("expected ErrFileNotFound after deletion, got: %v", err)
 	}
+
+	// 7. Allowed types: plain text, CSV, PDF
+	validCSV := []byte("first_name,last_name,email\nMax,Mustermann,max@example.de\n")
+	if _, err := store.Save(ctx, "contacts.csv", bytes.NewReader(validCSV)); err != nil {
+		t.Fatalf("expected CSV save to succeed, got: %v", err)
+	}
+
+	// 8. Disallowed types: HTML, SVG, executable scripts
+	disallowedHTML := []byte("<!DOCTYPE html><html><body><h1>XSS</h1></body></html>")
+	if _, err := store.Save(ctx, "evil.html", bytes.NewReader(disallowedHTML)); err == nil {
+		t.Fatalf("expected HTML upload to be rejected by MIME allowlist")
+	}
+
+	disallowedSVG := []byte("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>")
+	if _, err := store.Save(ctx, "evil.svg", bytes.NewReader(disallowedSVG)); err == nil {
+		t.Fatalf("expected SVG upload to be rejected by MIME allowlist")
+	}
 }

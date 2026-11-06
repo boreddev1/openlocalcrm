@@ -1,4 +1,4 @@
-.PHONY: help build up down restart logs test test-e2e check-licenses run-local clean
+.PHONY: help build up down restart logs test test-e2e check-licenses run-local clean check-backup-integration check-dist-freshness
 
 help: ## Show help instructions
 	@echo "OpenLocalCRM — Single-Tenant Production & Development Commands:"
@@ -10,6 +10,7 @@ help: ## Show help instructions
 	@echo "  make test            - Run all unit and integration tests"
 	@echo "  make test-e2e        - Run all 20 Playwright E2E UI tests"
 	@echo "  make check-licenses  - Audit 100% Permissive Open Source License Compliance"
+	@echo "  make check-dist-freshness - Rebuild web/ and verify web/dist on disk == git index (incl. gitignored files, #130)"
 	@echo "  make run-local       - Run server locally on :8080"
 
 build-web:
@@ -57,8 +58,9 @@ restart: down up ## Restart Docker stack
 logs: ## View real-time container logs
 	docker compose logs -f
 
-test: ## Run Go tests
+test: ## Run Go tests plus the Node harness for script gates (web audit, #110)
 	go test -v ./...
+	node --test scripts/*.test.mjs
 
 coverage: ## Run Go test coverage analysis with 50% minimum threshold
 	./scripts/coverage.sh --min 50.0 --diff 50.0
@@ -75,11 +77,15 @@ test-e2e: ## Run Playwright E2E tests
 fmt: ## Format Go source code with gofmt
 	gofmt -s -w .
 
-lint: ## Run Go static analysis, frontend ESLint and TypeScript checks
+GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || echo "$(shell go env GOPATH)/bin/golangci-lint")
+
+lint: ## Run go vet, golangci-lint (v2, .golangci.yml), frontend ESLint and TypeScript checks
 	go vet ./...
+	@test -x "$(GOLANGCI_LINT)" || { echo "golangci-lint v2 not found. Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 (or see https://golangci-lint.run/welcome/install/)"; exit 1; }
+	$(GOLANGCI_LINT) run ./...
 	cd web && pnpm lint && pnpm typecheck
 
-check: setup-hooks fmt lint check-licenses test ## Run full suite of local quality checks
+check: setup-hooks fmt lint check-licenses check-backup-integration test check-dist-freshness ## Run full suite of local quality checks
 
 setup-hooks: ## Configure and enable enterprise Git pre-commit and pre-push hooks
 	git config core.hooksPath .githooks
@@ -92,8 +98,14 @@ simulate: ## Run 10-minute visual live simulation in browser
 check-licenses: ## Verify Open Source License compliance
 	./scripts/check-licenses.sh
 
+check-backup-integration: ## Verify the backup round trip against a real pgvector database
+	./scripts/test-backup-integration.sh
+
 run-local: build-web ## Run Go binary locally
 	go run ./cmd/server
 
 clean: ## Clean build artifacts
 	rm -rf bin/ web/dist/
+
+check-dist-freshness: ## Rebuild web/ and compare web/dist on disk vs git index by hash — catches files .gitignore hides from git status (issue #130)
+	./scripts/check-dist-freshness.sh

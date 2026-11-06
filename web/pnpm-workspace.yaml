@@ -2,3 +2,18 @@ packages:
   - '.'
 allowBuilds:
   esbuild: true
+overrides:
+  postcss-selector-parser: ^7.1.6
+  # minimatch: Advisory GHSA-g3hv-75wg-m249 (DoS via globparts-Amplifikation) betrifft
+  # >=7.0.0 <11.0.1, gepatcht ab 11.0.1 (kein gepatchtes 10.x vorhanden). Direkt-
+  # Consumers in unserem Baum sind drei: eslint (minimatch ^10.2.6),
+  # @eslint/config-array (^10.2.4) und @typescript-eslint/typescript-estree
+  # (^10.2.2) — alle drei kappen bei <11.0.0, ohne Override loest pnpm daher maximal
+  # auf 10.2.6 und der Audit-Check feuert weiter, obwohl keine der von uns genutzten
+  # API-Aenderungen zwischen 10 und 11 den Pfad beruehrt. Die Deklarationen sind also
+  # enger als noetig. Entfernbar, sobald ein Paket der eslint-Linie >=11.0.1
+  # zulaesst. Die Kompatibilitaet wurde nachgeprueft, nicht unterstellt: mit
+  # 11.0.4 meldet eslint einen absichtlich eingebauten no-debugger-Verstoss weiterhin
+  # als error, sowohl direkt als auch im Gesamtlauf von `pnpm lint`. Reines
+  # Dev-Tool, landet nicht im Bundle und aendert damit auch web/dist nicht.
+  minimatch: ^11.0.1

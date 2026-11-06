@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -125,6 +126,8 @@ func TestParseDockerInspectJSON_AndExtractEnv(t *testing.T) {
 					"CONNECTOR_API_TOKEN=conn_secret_token_123",
 					"AI_PROVIDER=openai",
 					"AI_API_KEY=sk-test-key-abc",
+					"AI_EMBEDDING_MODEL=text-embedding-3-small",
+					"OLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b",
 					"DEMO_MODE=false"
 				]
 			}
@@ -161,6 +164,12 @@ func TestParseDockerInspectJSON_AndExtractEnv(t *testing.T) {
 	}
 	if env["APP_PORT"] != "8080" {
 		t.Errorf("expected APP_PORT 8080, got %s", env["APP_PORT"])
+	}
+	if env["AI_EMBEDDING_MODEL"] != "text-embedding-3-small" {
+		t.Errorf("expected AI_EMBEDDING_MODEL pass-through, got %s", env["AI_EMBEDDING_MODEL"])
+	}
+	if env["OLLAMA_EMBEDDING_MODEL"] != "qwen3-embedding:0.6b" {
+		t.Errorf("expected OLLAMA_EMBEDDING_MODEL pass-through, got %s", env["OLLAMA_EMBEDDING_MODEL"])
 	}
 }
 
@@ -231,6 +240,17 @@ func TestResetAll(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := NewEngine(tmpDir)
 
+	// The engine no longer talks to the host Docker daemon in tests: every
+	// command is recorded and answered by a test-binary stand-in (see
+	// newExecStub / TestLauncherExecHelperProcess). The canned "daemon
+	// inventory" below mixes stack-owned names with unrelated containers and
+	// volumes so the test can prove the dynamic sweeps are name-scoped.
+	rec, stub := newExecStub(t, map[string]string{
+		"docker ps -a --format {{.Names}}":    "crm-db\n/crm-slashy\nopenlocalcrm-worker-2\nmavalio-proxy-1\nCRM-WeirdCase\nnginx\npostgres16\n",
+		"docker volume ls --format {{.Name}}": "crm_pg_data\nopenlocalcrm_crm_keys\nmavalio_backup\nnginx_cache\n",
+	})
+	engine.execFn = stub
+
 	// Create a dummy .env file
 	envFile := filepath.Join(tmpDir, ".env")
 	if err := os.WriteFile(envFile, []byte("INITIAL_ADMIN_EMAIL=test@test.local\n"), 0644); err != nil {
@@ -260,8 +280,81 @@ func TestResetAll(t *testing.T) {
 		t.Errorf("expected .env to be deleted, but it still exists")
 	}
 
-	// Verify logs were emitted
+	// Verify logs were emitted, including the documented reset milestones.
 	if len(logs) == 0 {
 		t.Errorf("expected log messages during ResetAll")
 	}
+	for _, milestone := range []string{
+		"[Reset] Starte vollständigen Factory Reset...",
+		"[Reset] Bereinige verbleibende CRM-Container...",
+		"[Reset] Bereinige persistente Docker-Volumes...",
+		"[Reset] Lokale Konfiguration (.env) entfernt.",
+		"[Reset] ✅ Factory Reset erfolgreich abgeschlossen.",
+	} {
+		found := false
+		for _, line := range logs {
+			if strings.Contains(line, milestone) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected ResetAll log to contain %q, got:\n%s", milestone, strings.Join(logs, "\n"))
+		}
+	}
+
+	// The factory reset must keep issuing the genuine, thorough command
+	// sequence (this is the product feature — nothing was softened), but the
+	// test observes it through the recorded argv instead of executing it on a
+	// live daemon.
+	staticContainers := []string{
+		"crm-db", "crm-server", "crm-proxy", "crm-worker",
+		"openlocalcrm-db-1", "openlocalcrm-server-1", "openlocalcrm-caddy-1", "openlocalcrm-worker-1",
+		"mavalio-db-1", "mavalio-server-1", "mavalio-caddy-1", "mavalio-worker-1",
+	}
+	staticVolumes := []string{
+		"openlocalcrm_pg_data", "crm_pg_data", "mavalio_pg_data",
+		"openlocalcrm_crm_storage", "crm_storage", "mavalio_crm_storage",
+		"openlocalcrm_crm_keys", "crm_keys", "mavalio_crm_keys",
+		"openlocalcrm_crm_caddy_data", "crm_caddy_data", "mavalio_crm_caddy_data",
+		"openlocalcrm_crm_caddy_config", "crm_caddy_config", "mavalio_crm_caddy_config",
+	}
+	// Names matched by the dynamic sweeps — "/crm-slashy" proves the leading
+	// slash trim, "CRM-WeirdCase" proves the case-insensitive match — while
+	// nginx/postgres16/nginx_cache must never be touched.
+	dynamicContainers := []string{"crm-db", "crm-slashy", "openlocalcrm-worker-2", "mavalio-proxy-1", "CRM-WeirdCase"}
+	dynamicVolumes := []string{"crm_pg_data", "openlocalcrm_crm_keys", "mavalio_backup"}
+
+	want := []string{"docker compose down -v --remove-orphans"}
+	for _, name := range staticContainers {
+		want = append(want, "docker rm -f "+name)
+	}
+	want = append(want, "docker ps -a --format {{.Names}}")
+	for _, name := range dynamicContainers {
+		want = append(want, "docker rm -f "+name)
+	}
+	for _, vol := range staticVolumes {
+		want = append(want, "docker volume rm -f "+vol)
+	}
+	want = append(want, "docker volume ls --format {{.Name}}")
+	for _, vol := range dynamicVolumes {
+		want = append(want, "docker volume rm -f "+vol)
+	}
+
+	got := rec.recorded()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ResetAll issued the wrong docker command sequence.\nwant:\n  %s\ngot:\n  %s",
+			strings.Join(want, "\n  "), strings.Join(got, "\n  "))
+	}
+
+	for _, noise := range []string{"docker rm -f nginx", "docker rm -f postgres16", "docker volume rm -f nginx_cache"} {
+		rec.mustNotRecord(t, strings.Fields(noise)...)
+	}
+
+	// compose down is scoped to the engine's BaseDir, not some global context.
+	down := rec.mustFind(t, "docker", "compose", "down", "-v", "--remove-orphans")
+	if down.cmd.Dir != tmpDir {
+		t.Errorf("expected compose down to run in BaseDir %q, got %q", tmpDir, down.cmd.Dir)
+	}
+
 }

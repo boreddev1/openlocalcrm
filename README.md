@@ -215,7 +215,7 @@ Für Windows-Anwender und Test-Nutzer steht mit dem Setup-Launcher (als Release-
 | **🔄 Docker-Daemon Auto-Start** | Erkennt inaktive Docker-Dienste | Startet Docker Desktop bei Bedarf automatisch im Hintergrund und wartet auf Einsatzbereitschaft. |
 | **🛡️ Kollisionsfreie Port-Prüfung** | Automatische Konflikterkennung | Prüft Port 80 und 443. Bei Konflikten (z. B. durch IIS, Skype oder VMware) schlägt der Assistent freie Alternativports (z. B. 8080) vor. |
 | **🧙 4-Stufen Setup-Assistent** | Geführte Erstkonfiguration | Generiert sichere Passwörter, konfiguriert E-Mail, Port, Demo-Modus und bindet KI-Gateways ein. |
-| **🧠 KI-Gateway Konfiguration** | Flexible LLM-Anbindung mit Live-Test | Unterstützt lokales Ollama (`gemma4:12b`), OpenAI, Anthropic und Groq inklusive 1-Klick-Verbindungstest ("Verbindung prüfen"). |
+| **🧠 KI-Gateway Konfiguration** | Flexible LLM-Anbindung mit Live-Test | Unterstützt lokales Ollama (`gemma2:12b`), OpenAI, Anthropic und Groq inklusive 1-Klick-Verbindungstest ("Verbindung prüfen"). |
 | **📊 Interaktive Steuerungszentrale** | Zentrales Dashboard im Browser | Zeigt Live-Status aller Container (`crm-proxy`, `crm-server`, `crm-worker`, `crm-db`) mit Uptime und Health-Checks. |
 | **🎮 Stack-Steuerung** | Starten, Stoppen, Neustarten | Ermöglicht das Starten (`▶️`), Neustarten (`🔄`) und Stoppen (`⏹️`) aller Container per Mausklick. |
 | **🔄 1-Klick System-Update (Rebuild)** | Code-Aktualisierung ohne Datenverlust | Erstellt vorab ein automatisches Sicherheits-Backup und baut alle Container (`docker compose up -d --build --remove-orphans`) mit neuem Code neu. |

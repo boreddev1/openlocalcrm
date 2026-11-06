@@ -16,9 +16,10 @@ INSERT INTO appointments (
     is_external,
     provider,
     is_private,
-    is_pushed
+    is_pushed,
+    user_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 )
 RETURNING *;
 
@@ -28,6 +29,7 @@ WHERE id = $1 LIMIT 1;
 
 -- name: ListAppointments :many
 SELECT * FROM appointments
+WHERE (sqlc.narg('user_id')::uuid IS NULL OR user_id = sqlc.narg('user_id')::uuid)
 ORDER BY start_time ASC;
 
 -- name: UpdateAppointment :one
