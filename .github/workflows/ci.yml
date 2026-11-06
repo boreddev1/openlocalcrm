@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main ]
 
+# Least privilege (issue #107): declare what the workflow actually uses instead of
+# inheriting the repo default. Any scope NOT listed here becomes `none`; jobs may
+# add narrow scopes they need (see frontend-and-e2e). Do not blanket `write-all`.
+permissions:
+  contents: read
+
 jobs:
   backend-test:
     name: Go Backend Tests & License Check
@@ -51,6 +57,18 @@ jobs:
   frontend-and-e2e:
     name: Web Frontend Build & Playwright E2E
     runs-on: ubuntu-latest
+    # `issues: read` makes the audit's ORPHANED linked-issue check authenticate
+    # on CI (same missing-token bug class as issue #107 — it never worked on
+    # runners before). NO security-events grant: measured on this repo (PR #119,
+    # 2026-11-06), the Dependabot alerts API answers the workflow GITHUB_TOKEN
+    # with HTTP 403 "Resource not accessible by integration" even when the runner
+    # log shows `SecurityEvents: write` granted — the Actions app behind
+    # GITHUB_TOKEN has no Dependabot-alerts permission, so granting it here would
+    # be misleading surface, not capability. The alerts cross-check therefore
+    # uses the dedicated WEB_AUDIT_ALERTS_TOKEN secret (see step env).
+    permissions:
+      contents: read
+      issues: read
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -88,6 +106,31 @@ jobs:
         run: cd web && pnpm install --frozen-lockfile
 
       - name: Run Security Audit
+        env:
+          # The runner does NOT export the workflow token into step envs, so the
+          # ORPHANED linked-issue check could never authenticate on CI (issue
+          # #107). GH_TOKEN = GITHUB_TOKEN fixes it (works with the job-level
+          # issues: read). Local runs are unaffected: no env, gh keyring login.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Dedicated credential for the Dependabot alerts API. The workflow
+          # GITHUB_TOKEN cannot read that endpoint at all — measured HTTP 403
+          # "Resource not accessible by integration" even with SecurityEvents:
+          # write granted (PR #119, 2026-11-06). This secret is currently
+          # ABSENT (creating repo secrets is a human action); while it is, the
+          # cross-check degrades loudly with the exact unblock steps, and once a
+          # maintainer adds it — fine-grained PAT, "Dependabot alerts: read",
+          # owner with repo write — the strict flag below starts enforcing with
+          # zero further workflow edits.
+          WEB_AUDIT_ALERTS_TOKEN: ${{ secrets.WEB_AUDIT_ALERTS_TOKEN }}
+          # Strict mode: a cross-check that cannot verify GitHub's open Dependabot
+          # alerts fails the step instead of only warning — enforced where
+          # verification is actually possible (see the script's header). The flag
+          # is set for push-to-main and same-repo PRs; fork PRs and
+          # Dependabot-authored PRs run on non-elevatable tokens and the script
+          # additionally refuses to enforce on CI before a capable credential
+          # exists, so no permanent false red. Transient API failures get bounded
+          # retries first (3 attempts, fixed 2s/4s backoff — see the script).
+          WEB_AUDIT_REQUIRE_CROSSCHECK: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
         run: cd web && node ../scripts/check-web-audit.mjs
 
       - name: Verify Code Formatting (Prettier)

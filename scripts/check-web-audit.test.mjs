@@ -222,23 +222,42 @@ describe("gh degradation reasons — missing CLI, 401/403, generic failure", () 
     assert.equal(ghFailureResult({ status: 1, stderr: long }).reason.length, 180);
   });
 
-  it("401/403 name the missing permission explicitly", () => {
+  // Adapted on the #119 x #124 merge: the old guidance ("the alerts API needs
+  // security-events: read") was MEASURED to be wrong — the workflow GITHUB_TOKEN
+  // gets HTTP 403 "Resource not accessible by integration" even with
+  // security-events: write granted (PR #119 CI, 2026-11-06). The gate now names
+  // the credential that can actually read the endpoint, split by whether
+  // WEB_AUDIT_ALERTS_TOKEN is present (injected second argument; default = this
+  // run's env, pinned both ways below so host env cannot flip the assertion).
+  it("401/403 name the alerts-capable credential for both token states", () => {
     for (const status of [401, 403]) {
       const run = ghFailureResult({ status: 1, stderr: `gh: HTTP ${status} Forbidden` });
-      assert.match(alertFailureReason(run), /security-events: read$/);
-      assert.match(alertFailureReason(run), new RegExp(`^gh: HTTP ${status} Forbidden; `));
+      const noToken = alertFailureReason(run, false);
+      assert.match(noToken, new RegExp(`^gh: HTTP ${status} Forbidden; `));
+      assert.match(
+        noToken,
+        /no alerts-capable credential — GITHUB_TOKEN cannot read this endpoint \(measured 403 with SecurityEvents: write\)\. Set the repo secret WEB_AUDIT_ALERTS_TOKEN \(fine-grained PAT, "Dependabot alerts: read"\)$/,
+      );
+      const rejected = alertFailureReason(run, true);
+      assert.match(
+        rejected,
+        new RegExp(`^gh: HTTP ${status} Forbidden; WEB_AUDIT_ALERTS_TOKEN was rejected — it needs "Dependabot alerts: read"`),
+      );
+      // The env default mirrors the explicit argument for this run's own state.
+      const hasTokenEnv = (process.env.WEB_AUDIT_ALERTS_TOKEN ?? "").trim() !== "";
+      assert.equal(alertFailureReason(run), hasTokenEnv ? rejected : noToken);
     }
   });
 
   it("the 401/403 branch wins over the auth-keyword branch", () => {
-    const out = alertFailureReason({ status: 403, reason: "HTTP authentication failed" });
-    assert.match(out, /security-events: read$/);
+    const out = alertFailureReason({ status: 403, reason: "HTTP authentication failed" }, false);
+    assert.match(out, /no alerts-capable credential/);
   });
 
   it("auth-mentioning reasons without 401/403 get the login hint", () => {
     assert.equal(
       alertFailureReason({ status: undefined, reason: "GH_TOKEN expired" }),
-      "GH_TOKEN expired; gh needs a local login or an exported GH_TOKEN/GITHUB_TOKEN",
+      "GH_TOKEN expired; gh needs a local login, WEB_AUDIT_ALERTS_TOKEN, or an exported GH_TOKEN/GITHUB_TOKEN",
     );
   });
 
@@ -621,6 +640,12 @@ if (process.argv.slice(2).join(" ") === "config --get remote.origin.url") {
         PNPM_AUDIT_JSON: auditJsonPath,
       };
       delete env.WEB_AUDIT_OFFLINE;
+      // The merged gate (#119) gained env-driven branches — a dedicated alerts
+      // token and strict mode. Pin every e2e scenario to the non-strict,
+      // no-dedicated-token path these tests describe, whatever the invoking
+      // shell happens to export, exactly like WEB_AUDIT_OFFLINE above.
+      delete env.WEB_AUDIT_ALERTS_TOKEN;
+      delete env.WEB_AUDIT_REQUIRE_CROSSCHECK;
       const run = spawnSync(process.execPath, [join(root, "scripts", "check-web-audit.mjs")], {
         cwd: join(root, "web"),
         env,
@@ -691,7 +716,7 @@ if (process.argv.slice(2).join(" ") === "config --get remote.origin.url") {
     assert.equal(out.rc, 0);
     assert.match(
       out.stdout,
-      /COULD NOT CHECK — UNVERIFIED \(gh: HTTP 401 Unauthorized - Bad credentials; the token lacks permission — the alerts API needs security-events: read\)/,
+      /COULD NOT CHECK — UNVERIFIED \(gh: HTTP 401 Unauthorized - Bad credentials; no alerts-capable credential — GITHUB_TOKEN cannot read this endpoint \(measured 403 with SecurityEvents: write\)\. Set the repo secret WEB_AUDIT_ALERTS_TOKEN \(fine-grained PAT, "Dependabot alerts: read"\)\)/,
     );
   });
 
