@@ -40,21 +40,49 @@ tab had an open alert. (The inverse also happens: the source catches up overnigh
 `main` goes red through no one's merge.)
 
 To make that gap visible instead of structural, every run of the gate also queries the
-GitHub Dependabot alerts API (`dependabot/alerts?state=open`, via `gh api`) and prints,
-with a query timestamp, the advisory ids (GHSA) seen by **each** source plus their
-difference:
+GitHub Dependabot alerts API (`dependabot/alerts?state=open`, via `gh api --paginate`)
+and prints, with a query timestamp, the advisory ids (GHSA) seen by **each** source
+plus their difference. The paginated call is parsed as a sequence of concatenated
+JSON documents — one array per page, back to back. Deliberately **without** `gh api
+--slurp`: the flag does not exist in every gh 2.x build (gh 2.46.0 fails it with
+`unknown flag: --slurp`), and when it is unsupported the whole cross-check used to die
+on that CLI error while the gate still exited on the old rules alone — silently
+disarmed from the day PR #78 merged until 2026-11-06.
 
-- Alerts that GitHub reports but `pnpm audit` does not yet know are printed as a
-  visible, **non-blocking `WARNING`** — the source lag made them unavoidable, and a
-  second blocking source would tie CI to external database sync.
+Each GitHub-only alert is classified against `web/pnpm-lock.yaml` before it is
+printed, so "GitHub-only" never means one uniform reassurance:
+
+- The package **is** in the locked tree → the pnpm advisory source is lagging. Printed
+  as a visible, **non-blocking `WARNING`** ("source lag, not absence") — a second
+  blocking source would tie CI to external database sync.
+- The package is **not** in `web/pnpm-lock.yaml` → a stale alert, a different
+  manifest, or a tree mismatch. Printed as `UNVERIFIED, not accepted`: the
+  cross-check explicitly cannot rule it out, and the fix is to close the alert in the
+  Security tab with a reason or explain it in an issue — never to shrug.
+- The lockfile itself cannot be read → also `UNVERIFIED`, with the unreadable
+  lockfile named.
+- An **empty** alert list (`none (0)`) is verified-and-empty, distinct from "could not
+  check" — the two must never be conflated.
+
 - **Blocking behaviour is unchanged: only the pnpm source (part of the lockfile
   decision) and the exception file itself can fail the gate.** If the cross-check
-  cannot run, the gate prints `COULD NOT CHECK (<reason>)` and exits per the old
-  rules — a network hiccup never turns CI red.
+  cannot run, the gate prints `COULD NOT CHECK — UNVERIFIED (<reason>)`, adds a
+  `WARNING` entry saying the Dependabot state is unverified this run, and exits per
+  the old rules — a network hiccup never turns CI red, but it must never be readable
+  as "no open alerts" either. Failure reasons are classified: missing `gh`, missing
+  authentication (`gh` login or an exported `GH_TOKEN`/`GITHUB_TOKEN`), and HTTP 401/403
+  with a note that the alerts API needs `security-events: read`.
+
+**Known gap on CI:** for the cross-check to query live data the step needs a `gh`
+that can authenticate. Locally that is the keyring login; on a runner nothing is
+exported today — `ci.yml` grants the audit step no token and the workflow no
+`security-events: read` permission — so on CI the cross-check currently takes the
+loud degraded path above. Closing that gap is a workflow change (export
+`GITHUB_TOKEN`, grant `security-events: read`), not a weakening of the gate.
 
 Set `WEB_AUDIT_OFFLINE=1` to skip all network calls (offline tests, air-gapped work);
-the gate then prints the skipped cross-check as a warning and still evaluates the old
-rules.
+the gate then prints the skipped cross-check as `COULD NOT CHECK — UNVERIFIED` and a
+`WARNING` and still evaluates the old rules.
 
 ## What an acceptance must contain
 

@@ -22,12 +22,22 @@
  * source has already synced. Measured on 2026-10-20: GitHub carried the vite/
  * launch-editor advisory for ~33 minutes before `pnpm audit` reported it. So every
  * run also queries the GitHub Dependabot alerts API (`dependabot/alerts?state=open`,
- * via `gh api`), prints the advisory ids seen by EACH source with a timestamp, and
- * prints the difference (GitHub-only alerts) as a visible WARNING. Blocking behaviour
- * is unchanged: only the pnpm source (part of the lockfile decision) can fail the
- * gate. A network hiccup, a missing `gh`, or a token without `security-events: read`
- * degrades to a printed "could not check" and exits per the old rules — a check that
- * cannot reach GitHub must never turn CI red.
+ * via `gh api --paginate` — plain `--paginate`, never `--slurp`: gh builds older than
+ * the flag's release reject it with "unknown flag: --slurp" and did silently degrade
+ * this cross-check to a no-op until 2026-11-06; the pages it does print are parsed as
+ * concatenated JSON documents instead), prints the advisory ids seen by EACH source
+ * with a timestamp, and prints the difference (GitHub-only alerts) as a visible
+ * WARNING — classified against `web/pnpm-lock.yaml`: a GitHub-only alert that IS in
+ * the tree is the pnpm source lagging behind, one whose package is NOT in the
+ * lockfile is an alert about something this gate cannot see (stale alert, another
+ * manifest, or a lockfile mismatch) and says so. Blocking behaviour is unchanged:
+ * only the pnpm source (part of the lockfile decision) can fail the gate. A network
+ * hiccup, a missing `gh`, or a token without `security-events: read` degrades loudly
+ * — "COULD NOT CHECK — UNVERIFIED" on the per-source line AND as a WARNING — and
+ * exits per the old rules: a check that cannot reach GitHub must never turn CI red,
+ * but it must never read as "no open alerts" either. Running with live data needs a
+ * gh the step can authenticate (local keyring login, or an exported
+ * GH_TOKEN/GITHUB_TOKEN whose permission covers the alerts API).
  *
  * The linked-issue check (ORPHANED) is the one exception that needs GitHub: an
  * acceptance whose issue is closed or does not exist blocks, because a closed issue
@@ -121,29 +131,110 @@ function repoSlug() {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
+/** Split a string at the characters that carry meaning inside a regex, for dynamic patterns. */
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Cut the concatenated JSON documents that `gh api --paginate` prints (one full
+ * array per page, back to back) into parsed values. Line- or whole-buffer
+ * `JSON.parse` both break on that form, and this must not depend on how a page
+ * happens to be framed — minified, pretty-printed, one page or many. Scans for
+ * balanced top-level `{}`/`[]` values, honouring strings and escapes; anything
+ * else throws and the caller degrades loudly, never silently.
+ */
+function parseJsonDocuments(text) {
+  const docs = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (start === -1) {
+      if (ch === "{" || ch === "[") {
+        start = i;
+        depth = 1;
+      }
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") depth++;
+    else if (ch === "}" || ch === "]") {
+      depth--;
+      if (depth === 0) {
+        docs.push(JSON.parse(text.slice(start, i + 1)));
+        start = -1;
+      }
+    }
+  }
+  if (start !== -1) throw new Error("truncated JSON");
+  return docs;
+}
+
+let lockfileText; // undefined = not read yet, null = unreadable
+function readLockfile() {
+  if (lockfileText === undefined) {
+    try {
+      lockfileText = readFileSync(join(repoRoot, "web", "pnpm-lock.yaml"), "utf8");
+    } catch {
+      lockfileText = null;
+    }
+  }
+  return lockfileText;
+}
+
+/** Is this package name part of the locked dependency tree? true | false | null (lockfile unreadable). */
+function lockfileHasPackage(pkg) {
+  const text = readLockfile();
+  if (text === null) return null;
+  return new RegExp(`(?:^|\\n)[ \\t]*'?/?${escapeRegExp(pkg)}@`).test(text);
+}
+
+/** Explain a failed alerts call by the class of failure, not just the first stderr line. */
+function alertFailureReason(run) {
+  const reason = run.reason ?? "no output";
+  if (run.status === 401 || run.status === 403) {
+    return `${reason}; the token lacks permission — the alerts API needs security-events: read`;
+  }
+  if (/GH_TOKEN|auth/i.test(reason)) {
+    return `${reason}; gh needs a local login or an exported GH_TOKEN/GITHUB_TOKEN`;
+  }
+  if (run.status !== undefined) return `${reason} (HTTP ${run.status})`;
+  return reason;
+}
+
 /** Open Dependabot alerts for the npm ecosystem. Returns { ok, alerts } or { ok: false, reason }. */
 function fetchOpenNpmAlerts(slug) {
+  // Plain `--paginate`, NOT `--slurp`: the flag does not exist in every gh 2.x
+  // build (gh 2.46.0 fails the call with "unknown flag: --slurp"), and as a
+  // hard-to-read CLI error it silently disarmed this entire cross-check.
   const run = ghRun([
     "api",
     `repos/${slug}/dependabot/alerts?state=open&per_page=100`,
     "--paginate",
-    "--slurp",
   ]);
-  if (!run.ok) return run;
+  if (!run.ok) return { ok: false, reason: alertFailureReason(run) };
+  if ((run.stdout ?? "").trim() === "") {
+    // A verified-empty list still prints `[]` — a successful call with NO body is
+    // a broken response, and must not be readable as "zero open alerts".
+    return { ok: false, reason: "dependabot alerts call returned no output at all" };
+  }
   let alerts = [];
   try {
-    // `--paginate --slurp` prints one JSON array per page; accept both a single
-    // array and the page-per-line form.
-    const text = run.stdout.trim();
-    if (text !== "") {
-      try {
-        const parsed = JSON.parse(text);
-        alerts = Array.isArray(parsed) ? parsed : [parsed];
-      } catch {
-        for (const line of text.split("\n")) {
-          if (line.trim() !== "") alerts.push(...JSON.parse(line));
-        }
-      }
+    // One JSON array per page, back to back; a single document is the one-page
+    // special case. An empty list parses to `[]` — that is "verified, none open",
+    // deliberately not lumped in with the cannot-check path.
+    for (const doc of parseJsonDocuments(run.stdout ?? "")) {
+      if (Array.isArray(doc)) alerts.push(...doc);
+      else if (doc !== null && typeof doc === "object") alerts.push(doc);
     }
   } catch {
     return { ok: false, reason: "dependabot alerts response was not parsable JSON" };
@@ -214,6 +305,7 @@ process.stdout.write(`\nweb audit — ${advisories.length} advisory finding(s), 
 // --- source-lag cross-check: print what EACH source knows, then the difference ---
 const slug = repoSlug();
 const pnpmIds = new Set(advisories.map((a) => a.github_advisory_id).filter(Boolean));
+const pnpmNames = new Set(advisories.map((a) => a.module_name).filter(Boolean));
 const pnpmIdList = advisories.length === 0
   ? "none"
   : [...pnpmIds].join(", ") + (pnpmIds.size === 0 ? " (no GHSA ids)" : ` (${pnpmIds.size})`);
@@ -226,8 +318,15 @@ const ghOnly = [];
 const ghCheck = slug === null ? { ok: false, reason: "no github.com remote resolved" } : fetchOpenNpmAlerts(slug);
 if (!ghCheck.ok) {
   process.stdout.write(
-    `    GitHub dependabot open:  COULD NOT CHECK (${ghCheck.reason})\n` +
+    `    GitHub dependabot open:  COULD NOT CHECK — UNVERIFIED (${ghCheck.reason})\n` +
     `                             the exit code is decided by the old rules alone.\n`,
+  );
+  // Loud degradation, in the WARNING block too: "could not check" must never be
+  // readable as "no open alerts". Fail-closed stays on the pnpm side; the
+  // Dependabot state is explicitly unverified here, not silently accepted.
+  warnings.push(
+    `Dependabot cross-check did not run (${ghCheck.reason}) — GitHub's open alerts are ` +
+    `UNVERIFIED this run. Do not read the gate result as "no open alerts".`,
   );
 } else {
   ghAlertsKnown = true;
@@ -245,11 +344,32 @@ if (!ghCheck.ok) {
       `${ghOnly.map((a) => a.ghsa).join(", ")}\n\n`,
     );
     for (const alert of ghOnly) {
-      warnings.push(
-        `GitHub alert #${alert.number} ${alert.ghsa} — ${alert.pkg} (${alert.severity}, ${alert.range}) ` +
-        `is NOT yet visible to \`pnpm audit\`. Source lag, not absence: the gate stays green until ` +
-        `pnpm's source catches up, then this becomes NEW and blocking. Fix it while it is still cheap.`,
-      );
+      // A GHSA can be GitHub-only because pnpm's SOURCE lags, because the alert
+      // is about a package this lockfile does not contain at all (stale alert,
+      // a different manifest, or an alert GitHub has not re-evaluated), or
+      // because the lockfile itself cannot be read to decide. Only the first is
+      // provably "not absence, just lag" — say which one it is, never blanket-
+      // reassure. All three stay non-blocking but UNVERIFIED in the WARNING block.
+      const inLockfile = pnpmNames.has(alert.pkg) || lockfileHasPackage(alert.pkg);
+      const head = `GitHub alert #${alert.number} ${alert.ghsa} — ${alert.pkg} (${alert.severity}, ${alert.range})`;
+      if (inLockfile === true) {
+        warnings.push(
+          `${head} is NOT yet visible to \`pnpm audit\`. Source lag, not absence: the gate ` +
+          `stays green until pnpm's source catches up, then this becomes NEW and blocking. ` +
+          `Fix it while it is still cheap.`,
+        );
+      } else if (inLockfile === false) {
+        warnings.push(
+          `${head} is NOT in web/pnpm-lock.yaml. The cross-check cannot rule it out — a stale ` +
+          `alert, a different manifest, or a tree mismatch. UNVERIFIED, not accepted: close it ` +
+          `in the Security tab with a reason or explain it in an issue.`,
+        );
+      } else {
+        warnings.push(
+          `${head} could not be matched against web/pnpm-lock.yaml (unreadable from this run). ` +
+          `UNVERIFIED, not accepted — check the Security tab manually.`,
+        );
+      }
     }
   }
 }
@@ -366,7 +486,7 @@ if (blocking.length > 0) {
 }
 
 const gapNote = !ghAlertsKnown
-  ? "GitHub cross-check did not run — pnpm's view alone decided nothing today."
+  ? "the GitHub cross-check did not run, so Dependabot's open alerts are UNVERIFIED (see WARNING)."
   : ghOnly.length === 0
     ? "GitHub currently reports nothing beyond pnpm's view."
     : `GitHub reports ${ghOnly.length} alert(s) beyond pnpm's view — see WARNING above.`;
