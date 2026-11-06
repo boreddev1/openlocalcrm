@@ -125,13 +125,13 @@ nicht der Issue-Status.
 | Paket | Lizenz | Status | Warum (Kurzfassung) | Issue | Recorded | Review bis |
 | --- | --- | --- | --- | --- | --- | --- |
 | `github.com/riverqueue/river` | MPL-2.0 | accepted | Kernabhängigkeit crm-worker, Postgres-nativ; Datei-Level-Copyleft ohne Linking-Zwang; permissive Alternative **nicht** ermittelt | [#126](https://github.com/boreddev1/openlocalcrm/issues/126) | 2026-11-06 | 2027-06-30 |
-| `…/river/riverdriver`, `…/riverdriver/riverpgxv5`, `…/rivershared`, `…/rivertype` | MPL-2.0 | accepted | Untermodule desselben Repos; eigene LICENSE-Datei existiert upstream nicht (Alter Link: HTTP 404), es gilt die Wurzel-Lizenz | [#126](https://github.com/boreddev1/openlocalcrm/issues/126) | 2026-11-06 | 2027-06-30 |
+| `…/river/riverdriver`, `…/riverdriver/riverpgxv5`, `…/rivershared`, `…/rivertype` | MPL-2.0 | accepted | Untermodule desselben Repos; eigene LICENSE-Datei existiert upstream nicht (alter Link: HTTP 404), es gilt die Wurzel-Lizenz | [#126](https://github.com/boreddev1/openlocalcrm/issues/126) | 2026-11-06 | 2027-06-30 |
 | `lightningcss` | MPL-2.0 | accepted | Build-time-Addon von vite 8; kein Code im Bundle, nur erzeugte CSS-Variablen im Output (geprüft gegen `web/dist`) | [#126](https://github.com/boreddev1/openlocalcrm/issues/126) | 2026-11-06 | 2027-11-06 |
 | `react-leaflet`, `@react-leaflet/core` | Hippocratic-2.1 | **pending** | Keine permissive Lizenz (MIT + Nutzungsbeschränkung). Durch die Verschärfung sichtbar geworden, **nicht** freigegeben. Ersatz wäre leaflet direkt. Entscheidung offen | [#126](https://github.com/boreddev1/openlocalcrm/issues/126) | 2026-11-06 | 2026-12-04 |
 
 ### 2.6 Was ein grüner Check **nicht** bedeutet
 
-- **Transitive Abhängigkeiten werden nicht lizenziell geprüft.** Die CSV ist eine
+- **Lizenzen transitiver Abhängigkeiten werden nicht geprüft.** Die CSV ist eine
   gepflegte Liste: Pflicht sind alle direkten go.mod-Anforderungen und alle
   npm-Laufzeitabhängigkeiten. Weitere 17 Go-Module im Graph (überwiegend
   Test-Abhängigkeiten) und der npm-Transitivbaum stehen nicht darin — dort gilt
