@@ -41,28 +41,44 @@
  *     UNVERIFIED" on the per-source line AND as a WARNING — and exits on the old
  *     rules. The exit code stays decided by the pnpm source (part of the lockfile
  *     decision); the unverified state must never read as "no open alerts".
- *   STRICT runs (ci.yml sets WEB_AUDIT_REQUIRE_CROSSCHECK for push-to-main and
- *     same-repo PRs — the runs whose workflow token can authenticate): an
- *     unverified cross-check is BLOCKING. The failure names exactly what was not
- *     verified and what to do. Transient failures (HTTP 408/429/5xx, network-class
- *     errors) are retried first: at most 3 attempts, fixed 2s/4s backoff, never an
- *     unbounded wait; 401/403 and missing-tool failures are configuration errors
- *     and fail fast without retrying. `WEB_AUDIT_OFFLINE=1` contradicts strict
- *     mode and is itself a hard error.
+ *   STRICT runs — the promise activates exactly when it CAN be kept: ci.yml sets
+ *     WEB_AUDIT_REQUIRE_CROSSCHECK for push-to-main and same-repo PRs; on CI the
+ *     script enforces it as soon as an alerts-capable credential (repo secret
+ *     WEB_AUDIT_ALERTS_TOKEN) is present, locally an explicit opt-in is honored
+ *     at once. Then an unverified cross-check is BLOCKING: the failure names
+ *     exactly what was not verified and what to do. Transient failures (HTTP
+ *     408/429/5xx, network-class errors) are retried first: at most 3 attempts,
+ *     fixed 2s/4s backoff, never an unbounded wait; 401/403 and missing-tool
+ *     failures are configuration errors and fail fast without retrying.
+ *     `WEB_AUDIT_OFFLINE=1` contradicts strict mode and is itself a hard error.
+ *     On CI before the secret exists, demanding verification the platform cannot
+ *     deliver would be a permanent false red — so the gate stays on the loud
+ *     degraded path and the WARNING prints the exact unblock instead.
+ *   Which credential can reach the alerts API at all was measured on this
+ *     repo's runners (PR #119, 2026-11-06): the workflow GITHUB_TOKEN CANNOT,
+ *     even with `SecurityEvents: write` granted (visible in the runner log) —
+ *     HTTP 403 "Resource not accessible by integration". The app that mints
+ *     GITHUB_TOKEN has no Dependabot-alerts permission; security-events maps
+ *     only to code/secret scanning. The smallest credential that works is a
+ *     fine-grained PAT with `vulnerability_alerts: read` (its owner needs write
+ *     access to the repo) or a GitHub App with the Dependabot-alerts permission,
+ *     provided to the step as WEB_AUDIT_ALERTS_TOKEN. Without such a token the
+ *     gate degrades loudly — never a silent pass, never a permanent false red.
  *
- * Running with live data needs a gh the step can authenticate: local keyring login,
- * or an exported GH_TOKEN/GITHUB_TOKEN whose permission covers the alerts API
- * (ci.yml passes `secrets.GITHUB_TOKEN` as GH_TOKEN and grants the job
- * security-events: write + issues: read — measured minimums for a workflow token;
- * the runner never exports the token on its own).
+ * Running with live data needs a gh the step can authenticate: local keyring
+ * login, WEB_AUDIT_ALERTS_TOKEN (used for the alerts call), or an exported
+ * GH_TOKEN/GITHUB_TOKEN whose permission covers the endpoint.
  *
  * The linked-issue check (ORPHANED) is the one exception that needs GitHub: an
  * acceptance whose issue is closed or does not exist blocks, because a closed issue
- * is not a paper trail (AGENTS.md: acceptances are "issue-linked"). When GitHub
- * cannot be reached the state is unverifiable — printed as a warning, never a
- * failure: an unreachable issue API says nothing about the acceptance, and this
- * check deliberately stays out of the strict blocking path so one transient blip
- * on one issue lookup cannot red-face an otherwise-verified run.
+ * is not a paper trail (AGENTS.md: acceptances are "issue-linked"). Unlike the
+ * alerts API, the issues API DOES work with the workflow token — ci.yml passes
+ * GITHUB_TOKEN as GH_TOKEN and grants issues: read, so this check verifies on CI
+ * now (it never could before, for the same missing-token reason as #107). When
+ * GitHub cannot be reached anyway the state is unverifiable — printed as a warning,
+ * never a failure: an unreachable issue API says nothing about the acceptance, and
+ * this check deliberately stays out of the strict blocking path so one transient
+ * blip on one issue lookup cannot red-face an otherwise-verified run.
  *
  * Set WEB_AUDIT_OFFLINE=1 to skip every network call (offline tests, air-gapped
  * dev). Strict runs reject this combination outright — offline is not a way to
@@ -78,12 +94,27 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const exceptionsPath = join(repoRoot, "web", "audit-exceptions.json");
 const offlineMode = process.env.WEB_AUDIT_OFFLINE === "1";
-// Strict mode (issue #107): set by ci.yml on runs whose workflow token can
-// authenticate (push-to-main, same-repo PRs). Locally it is unset, so local
-// behaviour is unchanged. GitHub expressions render booleans as "true"/"false".
-const requireCrossCheck = ["1", "true"].includes(
-  (process.env.WEB_AUDIT_REQUIRE_CROSSCHECK ?? "").toLowerCase(),
-);
+// Alerts-capable credential. The workflow GITHUB_TOKEN verifiably CANNOT read the
+// Dependabot alerts API (measured HTTP 403 even with security-events: write granted
+// — PR #119 CI, 2026-11-06; see the header). What works: a fine-grained PAT with
+// `vulnerability_alerts: read` (owner needs repo write) or a GitHub App with the
+// Dependabot-alerts permission, provided as repo secret WEB_AUDIT_ALERTS_TOKEN.
+// Locally it is unset and the gh keyring login is used (which works: a classic
+// `repo`-scoped token).
+const alertsToken = (process.env.WEB_AUDIT_ALERTS_TOKEN ?? "").trim();
+const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
+// Strict mode (issue #107): ci.yml sets WEB_AUDIT_REQUIRE_CROSSCHECK on the runs
+// that SHOULD verify (push-to-main, same-repo PRs). On CI it activates as soon as
+// an alerts-capable token exists — requiring verification the platform cannot
+// deliver would be a permanent false red, which gets muted and is worse overall.
+// Until then the gate stays on the loud degraded path, and the reason line names
+// the exact unblock (the secret + PAT permission). Locally, an explicit opt-in is
+// honored immediately: whoever sets the flag means it, and a check that cannot run
+// there must not report success (the keyring login satisfies it).
+// GitHub expressions render booleans as "true"/"false".
+const strictCrossCheck =
+  ["1", "true"].includes((process.env.WEB_AUDIT_REQUIRE_CROSSCHECK ?? "").toLowerCase()) &&
+  (alertsToken !== "" || !isCI);
 
 const warnings = [];
 
@@ -96,7 +127,7 @@ function fail(lines) {
 
 // An escape hatch is not a degradation policy: if this run must verify the
 // Dependabot state, it must not also declare itself offline.
-if (offlineMode && requireCrossCheck) {
+if (offlineMode && strictCrossCheck) {
   fail([
     "WEB_AUDIT_OFFLINE=1 contradicts WEB_AUDIT_REQUIRE_CROSSCHECK on this run.",
     "  Strict mode demands a verified Dependabot cross-check; offline mode skips",
@@ -132,18 +163,30 @@ function readAudit() {
 }
 
 // ---------------------------------------------------------------------------
-// GitHub side. Every function here is safe to call: failure means a printed
-// note, never an exit code change.
+// GitHub side. Every function here is safe to call: failure itself means a
+// printed note — the main section then decides whether an unverified cross-check
+// blocks (strict runs, issue #107) or stays a loud warning (everywhere else).
 // ---------------------------------------------------------------------------
 
-/** Run a `gh` CLI call. Returns { ok, stdout } or { ok: false, status, reason }. */
-function ghRun(args) {
+/**
+ * Run a `gh` CLI call. `token` (optional) overrides GH_TOKEN for this call only —
+ * used for the alerts API, which needs WEB_AUDIT_ALERTS_TOKEN because the workflow
+ * GITHUB_TOKEN verifiably cannot read it. Returns { ok, stdout } or
+ * { ok: false, status, reason }.
+ */
+function ghRun(args, token) {
   if (offlineMode) return { ok: false, reason: "skipped — WEB_AUDIT_OFFLINE=1" };
   const run = spawnSync("gh", args, {
     encoding: "utf8",
     timeout: 30_000,
     maxBuffer: 16 * 1024 * 1024,
-    env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_PAGER: "cat", NO_COLOR: "1" },
+    env: {
+      ...process.env,
+      ...(token ? { GH_TOKEN: token } : {}),
+      GH_PROMPT_DISABLED: "1",
+      GH_PAGER: "cat",
+      NO_COLOR: "1",
+    },
   });
   if (run.error !== undefined) {
     const reason =
@@ -186,10 +229,10 @@ function isTransientGhFailure(run) {
 }
 
 /** `ghRun` with the bounded retry above; prints every retry so the log tells the story. */
-function ghRunRetried(args, label) {
+function ghRunRetried(args, label, token) {
   let run;
   for (let attempt = 1; attempt <= ALERT_ATTEMPTS; attempt++) {
-    run = ghRun(args);
+    run = ghRun(args, token);
     if (run.ok) {
       if (attempt > 1) {
         process.stdout.write(`    ${label}: recovered on attempt ${attempt}/${ALERT_ATTEMPTS}\n`);
@@ -289,14 +332,21 @@ function lockfileHasPackage(pkg) {
 function alertFailureReason(run) {
   const reason = run.reason ?? "no output";
   if (run.status === 401 || run.status === 403) {
-    // Measured on this repo's runner (PR #119, 2026-11-06): `security-events: read`
-    // answers HTTP 403 "Resource not accessible by integration" — for a workflow
-    // token the alerts API's minimum WORKING grant is `security-events: write`
-    // (the endpoint has never exposed a read-only mode to GITHUB_TOKEN).
-    return `${reason}; the token lacks permission — on a workflow token the alerts API needs security-events: write (read is verifiably insufficient; see ci.yml comment)`;
+    // Measured on this repo's runners (PR #119, 2026-11-06): the workflow
+    // GITHUB_TOKEN answers HTTP 403 "Resource not accessible by integration"
+    // even when the runner log shows `SecurityEvents: write` granted — the app
+    // that mints the token simply has no Dependabot-alerts permission; the
+    // security-events scope maps only to code/secret scanning. Only a dedicated
+    // credential (WEB_AUDIT_ALERTS_TOKEN: fine-grained PAT with
+    // `vulnerability_alerts: read`, owner with repo write, or a GitHub App with
+    // the Dependabot-alerts permission) can satisfy this endpoint.
+    if (alertsToken === "") {
+      return `${reason}; no alerts-capable credential — GITHUB_TOKEN cannot read this endpoint (measured 403 with SecurityEvents: write). Set the repo secret WEB_AUDIT_ALERTS_TOKEN (fine-grained PAT, "Dependabot alerts: read")`;
+    }
+    return `${reason}; WEB_AUDIT_ALERTS_TOKEN was rejected — it needs "Dependabot alerts: read" (fine-grained PAT whose owner has repo write, or GitHub App) and must not have expired`;
   }
   if (/GH_TOKEN|auth/i.test(reason)) {
-    return `${reason}; gh needs a local login or an exported GH_TOKEN/GITHUB_TOKEN`;
+    return `${reason}; gh needs a local login, WEB_AUDIT_ALERTS_TOKEN, or an exported GH_TOKEN/GITHUB_TOKEN`;
   }
   if (run.status !== undefined) {
     // gh's own stderr usually already ends in "(HTTP nnn)" — don't print it twice.
@@ -310,6 +360,10 @@ function fetchOpenNpmAlerts(slug) {
   // Plain `--paginate`, NOT `--slurp`: the flag does not exist in every gh 2.x
   // build (gh 2.46.0 fails the call with "unknown flag: --slurp"), and as a
   // hard-to-read CLI error it silently disarmed this entire cross-check.
+  // alertsToken (when set) overrides GH_TOKEN for this call; otherwise gh's
+  // normal resolution applies — on CI that is the GITHUB_TOKEN passed by the
+  // step, which the alerts API rejects (see alertFailureReason), and locally it
+  // is the keyring login, which works.
   const run = ghRunRetried(
     [
       "api",
@@ -317,6 +371,7 @@ function fetchOpenNpmAlerts(slug) {
       "--paginate",
     ],
     "dependabot alerts",
+    alertsToken,
   );
   if (!run.ok) return { ok: false, reason: alertFailureReason(run) };
   if ((run.stdout ?? "").trim() === "") {
@@ -417,7 +472,7 @@ const ghCheck = slug === null ? { ok: false, reason: "no github.com remote resol
 if (!ghCheck.ok) {
   process.stdout.write(
     `    GitHub dependabot open:  COULD NOT CHECK — UNVERIFIED (${ghCheck.reason})\n` +
-    (requireCrossCheck
+    (strictCrossCheck
       ? `                             strict mode (issue #107): this alone FAILS the gate below.\n`
       : `                             the exit code is decided by the old rules alone.\n`),
   );
@@ -425,10 +480,17 @@ if (!ghCheck.ok) {
   // readable as "no open alerts". Outside strict runs fail-closed stays on the
   // pnpm side; the Dependabot state is explicitly unverified here, not silently
   // accepted. On strict runs the unverified state itself blocks (see below).
-  if (requireCrossCheck) strictCrossCheckFailure = ghCheck.reason;
+  if (strictCrossCheck) strictCrossCheckFailure = ghCheck.reason;
   warnings.push(
     `Dependabot cross-check did not run (${ghCheck.reason}) — GitHub's open alerts are ` +
-    `UNVERIFIED this run. Do not read the gate result as "no open alerts".`,
+    `UNVERIFIED this run. Do not read the gate result as "no open alerts".` +
+    (!strictCrossCheck && isCI && slug !== null
+      ? ` To make this gate verify on CI: create a repo secret WEB_AUDIT_ALERTS_TOKEN` +
+        ` (fine-grained PAT, "Dependabot alerts: read", owner with write access — the` +
+        ` workflow GITHUB_TOKEN cannot read this endpoint, measured HTTP 403 even with` +
+        ` security-events: write granted, issue #107). ci.yml already wires it; strict` +
+        ` mode then activates automatically.`
+      : ``),
   );
 } else {
   ghAlertsKnown = true;
@@ -494,7 +556,8 @@ const usedKeys = new Set();
 if (strictCrossCheckFailure !== null) {
   blocking.push(
     `UNVERIFIED  the Dependabot cross-check did not run and this run is STRICT\n` +
-      `            (ci.yml sets WEB_AUDIT_REQUIRE_CROSSCHECK for push-to-main and same-repo PRs).\n` +
+      `            (WEB_AUDIT_REQUIRE_CROSSCHECK + an alerts-capable token are both present:\n` +
+      `            verification was possible, so it is demanded — issue #107).\n` +
       `            NOT VERIFIED: GitHub's open Dependabot alerts for ${slug ?? "the repository"}.\n` +
       `            This does NOT mean the Security tab is clean — it means this gate could not look.\n` +
       `            reason: ${strictCrossCheckFailure}\n` +
@@ -502,9 +565,10 @@ if (strictCrossCheckFailure !== null) {
       `            backoff — see the retry lines in the log above; auth/config faults fail fast\n` +
       `            What to do:\n` +
       `            - API outage: re-run this job once https://www.githubstatus.com is green.\n` +
-      `            - HTTP 401/403 or auth errors: the token setup is broken. ci.yml must keep the\n` +
-      `              job-level security-events + issues permissions AND the GH_TOKEN step env.\n` +
-      `            - Never silence this by deleting those from ci.yml, by setting\n` +
+      `            - HTTP 401/403 or auth errors: WEB_AUDIT_ALERTS_TOKEN is broken or expired —\n` +
+      `              it needs "Dependabot alerts: read" (fine-grained PAT with repo-write owner,\n` +
+      `              or GitHub App). The GITHUB_TOKEN alone can never satisfy this endpoint.\n` +
+      `            - Never silence this by deleting the token wiring from ci.yml, by setting\n` +
       `              WEB_AUDIT_OFFLINE=1, or by relaxing the script — that is the bug class of\n` +
       `              issue #107. See docs/WEB_AUDIT_POLICY.md.`,
   );

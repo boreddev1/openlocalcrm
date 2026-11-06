@@ -57,17 +57,17 @@ jobs:
   frontend-and-e2e:
     name: Web Frontend Build & Playwright E2E
     runs-on: ubuntu-latest
-    # The audit cross-check needs the Dependabot alerts API and the ORPHANED
-    # linked-issue check needs issues reads. Measured on this repo (PR #119 CI,
-    # 2026-11-06): `security-events: read` is REJECTED by the alerts API with
-    # HTTP 403 "Resource not accessible by integration" for a workflow token;
-    # `write` is the minimum grant that verifiably works. Least privilege means
-    # the smallest WORKING scope on this one job — never `write-all`, never on
-    # the backend job, and never in the other workflow. Everything else keeps
-    # the workflow-level `contents: read` (issue #107).
+    # `issues: read` makes the audit's ORPHANED linked-issue check authenticate
+    # on CI (same missing-token bug class as issue #107 — it never worked on
+    # runners before). NO security-events grant: measured on this repo (PR #119,
+    # 2026-11-06), the Dependabot alerts API answers the workflow GITHUB_TOKEN
+    # with HTTP 403 "Resource not accessible by integration" even when the runner
+    # log shows `SecurityEvents: write` granted — the Actions app behind
+    # GITHUB_TOKEN has no Dependabot-alerts permission, so granting it here would
+    # be misleading surface, not capability. The alerts cross-check therefore
+    # uses the dedicated WEB_AUDIT_ALERTS_TOKEN secret (see step env).
     permissions:
       contents: read
-      security-events: write
       issues: read
     steps:
       - name: Checkout Code
@@ -107,17 +107,29 @@ jobs:
 
       - name: Run Security Audit
         env:
-          # gh resolves credentials in the order GH_TOKEN > GITHUB_TOKEN > keyring.
           # The runner does NOT export the workflow token into step envs, so the
-          # cross-check could never authenticate on CI (issue #107). Passing it as
-          # GH_TOKEN changes nothing for local runs, which fall back to the keyring.
+          # ORPHANED linked-issue check could never authenticate on CI (issue
+          # #107). GH_TOKEN = GITHUB_TOKEN fixes it (works with the job-level
+          # issues: read). Local runs are unaffected: no env, gh keyring login.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Dedicated credential for the Dependabot alerts API. The workflow
+          # GITHUB_TOKEN cannot read that endpoint at all — measured HTTP 403
+          # "Resource not accessible by integration" even with SecurityEvents:
+          # write granted (PR #119, 2026-11-06). This secret is currently
+          # ABSENT (creating repo secrets is a human action); while it is, the
+          # cross-check degrades loudly with the exact unblock steps, and once a
+          # maintainer adds it — fine-grained PAT, "Dependabot alerts: read",
+          # owner with repo write — the strict flag below starts enforcing with
+          # zero further workflow edits.
+          WEB_AUDIT_ALERTS_TOKEN: ${{ secrets.WEB_AUDIT_ALERTS_TOKEN }}
           # Strict mode: a cross-check that cannot verify GitHub's open Dependabot
-          # alerts fails the step instead of only warning. Enabled exactly where the
-          # workflow token can authenticate: push-to-main and same-repo PRs. Fork PRs
-          # and Dependabot-authored PRs run on a non-elevatable read-only token, so
-          # they keep the loud-degrade warning path rather than a permanent red.
-          # Transient API failures get bounded retries first (see the script).
+          # alerts fails the step instead of only warning — enforced where
+          # verification is actually possible (see the script's header). The flag
+          # is set for push-to-main and same-repo PRs; fork PRs and
+          # Dependabot-authored PRs run on non-elevatable tokens and the script
+          # additionally refuses to enforce on CI before a capable credential
+          # exists, so no permanent false red. Transient API failures get bounded
+          # retries first (3 attempts, fixed 2s/4s backoff — see the script).
           WEB_AUDIT_REQUIRE_CROSSCHECK: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
         run: cd web && node ../scripts/check-web-audit.mjs
 
