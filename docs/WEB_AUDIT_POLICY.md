@@ -102,13 +102,15 @@ The fix has two halves, and the policy now distinguishes **unverified** from
 
 The CI wiring that makes strict mode possible lives in `ci.yml`: the
 `frontend-and-e2e` job declares `permissions: {contents: read, security-events:
-read, issues: read}` (least privilege — the alerts API needs `security-events`, the
-ORPHANED issue check needs `issues: read`), and the audit step passes
-`GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`. If GitHub ever tightens the alerts API
-further and `read` is not sufficient, the minimum replacement is the narrowest
-working scope on this job — never `write-all`, never dropping the env/permissions
-to silence a red run. Deleting or relaxing any of that is itself the #107 bug
-class, not a fix.
+write, issues: read}`, and the audit step passes `GH_TOKEN: ${{ secrets.GITHUB_TOKEN
+}}`. `security-events: write` looks stronger than a read-only check deserves, and it
+is — measured on this repo's own runner (PR #119, 2026-11-06), `security-events:
+read` answers the alerts API with **HTTP 403 "Resource not accessible by
+integration"**: for a workflow token the endpoint exposes no read-only mode, so
+`write` is the minimum *working* grant. Least privilege here means the smallest
+scope that verifiably works, confined to this one job — never `write-all`, never on
+the backend job, never in other workflows. Dropping any of these grants to silence
+a red run is itself the #107 bug class, not a fix.
 
 The `ORPHANED` linked-issue lookup deliberately stays outside the strict path: one
 transient failure on an individual issue lookup must not red-face an otherwise

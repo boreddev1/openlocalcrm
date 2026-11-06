@@ -53,7 +53,8 @@
  * Running with live data needs a gh the step can authenticate: local keyring login,
  * or an exported GH_TOKEN/GITHUB_TOKEN whose permission covers the alerts API
  * (ci.yml passes `secrets.GITHUB_TOKEN` as GH_TOKEN and grants the job
- * security-events + issues reads — the runner never exports the token on its own).
+ * security-events: write + issues: read — measured minimums for a workflow token;
+ * the runner never exports the token on its own).
  *
  * The linked-issue check (ORPHANED) is the one exception that needs GitHub: an
  * acceptance whose issue is closed or does not exist blocks, because a closed issue
@@ -288,7 +289,11 @@ function lockfileHasPackage(pkg) {
 function alertFailureReason(run) {
   const reason = run.reason ?? "no output";
   if (run.status === 401 || run.status === 403) {
-    return `${reason}; the token lacks permission — the alerts API needs security-events: read`;
+    // Measured on this repo's runner (PR #119, 2026-11-06): `security-events: read`
+    // answers HTTP 403 "Resource not accessible by integration" — for a workflow
+    // token the alerts API's minimum WORKING grant is `security-events: write`
+    // (the endpoint has never exposed a read-only mode to GITHUB_TOKEN).
+    return `${reason}; the token lacks permission — on a workflow token the alerts API needs security-events: write (read is verifiably insufficient; see ci.yml comment)`;
   }
   if (/GH_TOKEN|auth/i.test(reason)) {
     return `${reason}; gh needs a local login or an exported GH_TOKEN/GITHUB_TOKEN`;
