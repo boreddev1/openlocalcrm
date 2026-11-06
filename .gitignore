@@ -1,6 +1,8 @@
 # Binaries and build artifacts
 /bin/
 bin/
+# Root build artifact (stray `go build` output), anchored so the internal/server/ package is not matched.
+/server
 /tmp/
 *.exe
 *.exe~
