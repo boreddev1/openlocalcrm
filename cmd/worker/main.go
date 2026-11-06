@@ -14,6 +14,7 @@ import (
 	"github.com/openlocalcrm/openlocalcrm/internal/core/audit"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/automation"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/email"
+	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/queue"
 	"github.com/riverqueue/river"
@@ -39,6 +40,16 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// Same fail-closed rule as the server (issue #128): background jobs decrypt
+	// stored mail account passwords with this master key, so a key file that
+	// exists but cannot be read or parsed must stop the worker at boot with a
+	// clear FATAL instead of letting every email job fail later on. On a fresh
+	// install this is also where the shared key (STORAGE_PATH volume) is minted
+	// atomically, together with the server, without split-brain keys.
+	if _, keyErr := crypto.GetOrCreateMasterKey(); keyErr != nil {
+		log.Fatalf("[FATAL] unusable master secret key: %v", keyErr)
+	}
 
 	log.Println("Connecting openlocalcrm crm-worker to PostgreSQL...")
 	dbPool, err := db.ConnectWithRetry(ctx, dbURL, 15, 1*time.Second)

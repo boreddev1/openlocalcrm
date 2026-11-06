@@ -14,6 +14,13 @@ import (
 	"sync"
 )
 
+// ErrKeyUnusable classifies the fail-closed master key errors (issue #128):
+// a key file is present (or its state could not be verified) but cannot be
+// used, so the process refuses to mint a replacement. Callers can detect the
+// class with errors.Is without echoing the detailed cause - which names
+// filesystem paths and recovery steps - to end users.
+var ErrKeyUnusable = errors.New("master key unusable")
+
 var (
 	keyCache []byte
 	keyMu    sync.RWMutex
@@ -297,9 +304,30 @@ func firstConfiguredEnv(names ...string) string {
 
 // GetOrCreateMasterKey loads the master 256-bit AES key from the location
 // resolved by ResolveKeyPath, or generates a new one with 0600 permissions at
-// KeyResolution.CreatePath if absent. A key resolved from a legacy location is
-// only ever read: if it cannot be read or parsed, this returns an error rather
-// than writing into (or repairing) that deprecated place.
+// KeyResolution.CreatePath if no key file exists there yet.
+//
+// Fail-closed rule (issue #128): "no key yet" and "key present but unusable"
+// are different states. A file that exists but cannot be read, or that cannot
+// be parsed as a key - empty, truncated, wrong byte length, garbage - is a
+// hard error that names the path and the cause; it is never repaired by
+// silently minting a replacement. Regenerating over a present key would keep
+// the process looking healthy while making every secret already encrypted
+// with the old key (stored mail account passwords, TOTP seeds) permanently
+// undecryptable - the same data-loss class that cmd/server handles by
+// refusing to start without a usable JWT key and PR #84 fixed for the CSRF
+// secret ("persist instead of regenerating").
+//
+// An existing file is never truncated or overwritten, not even an invalid
+// one: minting writes a 0600 temp file in the target directory and publishes
+// it with an atomic rename, re-checking that no file appeared before the
+// rename. After publishing, the bytes on disk - not the bytes this process
+// generated - become the cached key, so a server and worker starting
+// concurrently for the first time converge on one key instead of each
+// keeping a different one in memory.
+//
+// A key resolved from a legacy location is only ever read: if it cannot be
+// read or parsed, this returns an error rather than writing into (or
+// repairing) that deprecated place (#127).
 func GetOrCreateMasterKey() ([]byte, error) {
 	keyMu.RLock()
 	if len(keyCache) == 32 {
@@ -332,54 +360,166 @@ func GetOrCreateMasterKey() ([]byte, error) {
 		// and writing it would put a key back into the working directory.
 		data, readErr := os.ReadFile(res.Path)
 		if readErr != nil {
-			return nil, fmt.Errorf("cannot read the legacy master key at %s: %w - refusing to create a "+
-				"replacement there; copy the file to %s or set SECRETS_KEY_PATH", res.Path, readErr, res.CreatePath)
+			return nil, fmt.Errorf("%w: cannot read the legacy master key at %s: %v - refusing to create a "+
+				"replacement there; copy the file to %s or set SECRETS_KEY_PATH",
+				ErrKeyUnusable, res.Path, readErr, res.CreatePath)
 		}
 		key, ok := parseStoredKey(data)
 		if !ok {
-			return nil, fmt.Errorf("legacy master key at %s is neither a raw 32-byte key nor a "+
-				"base64-encoded one - refusing to overwrite it; copy a valid key to %s or set SECRETS_KEY_PATH",
-				res.Path, res.CreatePath)
+			return nil, fmt.Errorf("%w: legacy master key at %s is neither a raw 32-byte key nor a "+
+				"base64-encoded one (%s) - refusing to overwrite it; copy a valid key to %s or set SECRETS_KEY_PATH",
+				ErrKeyUnusable, res.Path, describeKeyBytes(data), res.CreatePath)
 		}
-		keyCache = make([]byte, 32)
-		copy(keyCache, key)
-		return append([]byte(nil), key...), nil
+		return cacheMasterKeyLocked(key), nil
 	}
 
-	if data, err := os.ReadFile(res.Path); err == nil {
-		if key, ok := parseStoredKey(data); ok {
-			keyCache = make([]byte, 32)
-			copy(keyCache, key)
-			return append([]byte(nil), key...), nil
+	data, readErr := os.ReadFile(res.Path)
+	if readErr == nil {
+		key, ok := parseStoredKey(data)
+		if !ok {
+			return nil, unusableMasterKeyError(res.Path, data, res.IgnoredLegacyPath)
 		}
-		// Existing but unparseable key: pre-#122 behavior keeps regenerating
-		// over it for non-legacy locations (tracked separately as a fail-open
-		// concern); a legacy location is refused above instead.
+		return cacheMasterKeyLocked(key), nil
+	}
+	if !errors.Is(readErr, os.ErrNotExist) {
+		// The state of the file could not be verified at all (permissions,
+		// a path component that is not a directory, ...): it may exist and it
+		// may already protect stored data, so this is "present but unusable",
+		// not "absent".
+		return nil, unreadableMasterKeyError(res.Path, readErr)
 	}
 
-	// Generate new 32-byte key
+	// Genuinely no key file yet: mint one and publish it at the writable
+	// location.
+	if res.CreatePath == "" {
+		return nil, errors.New("cannot create a master key: no writable key location is configured " +
+			"(set SECRETS_KEY_PATH, or STORAGE_PATH so it can be derived from the storage directory)")
+	}
 	newKey := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, newKey); err != nil {
 		return nil, fmt.Errorf("failed to generate random secret key: %w", err)
 	}
-
-	createPath := res.CreatePath
-	if createPath == "" {
-		return nil, errors.New("cannot create a master key: no writable key location is configured " +
-			"(set SECRETS_KEY_PATH, or STORAGE_PATH so it can be derived from the storage directory)")
+	if _, err := publishNewKeyFile(res.CreatePath, newKey); err != nil {
+		return nil, err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(createPath), 0700); err != nil {
-		return nil, fmt.Errorf("failed to create directory for secret key: %w", err)
+	// Adopt what is on disk rather than what this process generated: if a
+	// concurrent first start (server and worker boot together) published its
+	// key between the existence check and the rename, both converge on the
+	// file, and a key nobody ever encrypted with is the one that gets dropped.
+	data, readErr = os.ReadFile(res.CreatePath)
+	if readErr != nil {
+		return nil, unreadableMasterKeyError(res.CreatePath, readErr)
 	}
-
-	if err := os.WriteFile(createPath, newKey, 0600); err != nil {
-		return nil, fmt.Errorf("failed to write secret key to %s: %w", createPath, err)
+	key, ok := parseStoredKey(data)
+	if !ok {
+		return nil, unusableMasterKeyError(res.CreatePath, data, "")
 	}
+	return cacheMasterKeyLocked(key), nil
+}
 
+// cacheMasterKeyLocked stores key in the process cache and returns a copy.
+// Call only with keyMu held.
+func cacheMasterKeyLocked(key []byte) []byte {
 	keyCache = make([]byte, 32)
-	copy(keyCache, newKey)
-	return newKey, nil
+	copy(keyCache, key)
+	return append([]byte(nil), key...)
+}
+
+// publishNewKeyFile writes a freshly minted key at path and reports whether
+// this process's file is the one on disk. It refuses to touch an existing
+// file - valid, invalid, whatever: if a key file is present before the
+// rename, or appears between the check and the rename, nothing is written
+// over it and the bool result is false so the caller adopts the file instead.
+// The write itself goes to a 0600 temp file in the same directory plus an
+// atomic rename, so a crash mid-write can never leave a truncated key where a
+// healthy one used to be.
+func publishNewKeyFile(path string, key []byte) (bool, error) {
+	if regularFileExists(path) {
+		return false, nil
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil { //nolint:gosec // G301: 0700, and the path is operator configuration (issue #122)
+		return false, fmt.Errorf("failed to create directory for secret key: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".new-*")
+	if err != nil {
+		return false, fmt.Errorf("failed to create temporary key file in %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}
+	if _, err := tmp.Write(key); err != nil {
+		cleanup()
+		return false, fmt.Errorf("failed to write temporary key file %s: %w", tmpName, err)
+	}
+	if err := tmp.Chmod(0600); err != nil { //nolint:gosec // G302: owner-only, the master key must never be group/world readable
+		cleanup()
+		return false, fmt.Errorf("failed to set 0600 on temporary key file %s: %w", tmpName, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return false, fmt.Errorf("failed to flush temporary key file %s: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return false, fmt.Errorf("failed to close temporary key file %s: %w", tmpName, err)
+	}
+	// Last look before publishing: an existing key file, even an invalid one,
+	// is never replaced by a rename.
+	if regularFileExists(path) {
+		_ = os.Remove(tmpName)
+		return false, nil
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return false, fmt.Errorf("failed to write secret key to %s: %w", path, err)
+	}
+	return true, nil
+}
+
+// unreadableMasterKeyError is the fail-closed error for a key location whose
+// file could not be read. The cause is kept as part of the chain (errors.Is
+// on both the underlying error and ErrKeyUnusable).
+func unreadableMasterKeyError(path string, cause error) error {
+	return fmt.Errorf("%w: cannot read the master key file at %s: %v; refusing to generate a replacement "+
+		"because a key may already protect stored data (mail account passwords, TOTP seeds) at this path, and a "+
+		"fresh key would silently orphan it. Make sure %s exists and is readable by the service user (check the "+
+		"mode of the file and of its parent directories) or restore it from backup; to use another file, set "+
+		"SECRETS_KEY_PATH", ErrKeyUnusable, path, cause, path)
+}
+
+// unusableMasterKeyError is the fail-closed error for a key file that is
+// present but does not parse. Empty files, truncated files and wrong byte
+// lengths are all "present but unusable" (issue #128), never "absent".
+func unusableMasterKeyError(path string, data []byte, ignoredLegacy string) error {
+	msg := fmt.Sprintf("the master key file at %s already exists but does not contain a usable key (%s). "+
+		"Refusing to overwrite or regenerate it - every secret already encrypted with the previous key (stored "+
+		"mail account passwords, TOTP seeds) would become permanently undecryptable while the server still looks "+
+		"healthy. Recovery: restore the original content at %s, or point SECRETS_KEY_PATH at the correct key "+
+		"file. Only if that key is definitively lost: delete %s and restart to mint a fresh key, then re-enter "+
+		"every stored secret.", path, describeKeyBytes(data), path, path)
+	if ignoredLegacy != "" {
+		msg += fmt.Sprintf(" A pre-#122 legacy key file also exists at %s; if it holds the original key, copy it "+
+			"to %s.", ignoredLegacy, path)
+	}
+	return fmt.Errorf("%w: %s", ErrKeyUnusable, msg)
+}
+
+// describeKeyBytes tells the operator what an unusable key file actually
+// contains, so "empty", "truncated" and "wrong length" are distinguishable in
+// the error without dumping key material into the log.
+func describeKeyBytes(data []byte) string {
+	switch {
+	case len(data) == 0:
+		return "empty file, 0 bytes"
+	case len(data) < 32:
+		return fmt.Sprintf("%d bytes, shorter than 32 - the file looks truncated", len(data))
+	default:
+		return fmt.Sprintf("%d bytes, expected 32 raw key bytes or their base64 encoding", len(data))
+	}
 }
 
 // parseStoredKey accepts the two documented on-disk shapes of the master key:

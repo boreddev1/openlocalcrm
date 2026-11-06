@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -12,9 +14,24 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/openlocalcrm/openlocalcrm/internal/core/email"
+	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 	"github.com/openlocalcrm/openlocalcrm/internal/mailclient"
 )
+
+// clientSafeServiceError turns a service error into a message that may be sent
+// to an API caller. A master key failure (issue #128) is an operator incident:
+// its detailed cause names the key file path and the recovery steps, belongs in
+// the server log, and must never reach a response body (path disclosure into an
+// otherwise normal request). Every other error keeps its existing echo, so
+// connection/sync diagnostics stay useful.
+func clientSafeServiceError(err error) string {
+	if errors.Is(err, crypto.ErrKeyUnusable) {
+		log.Printf("[Email] [ERROR] stored secrets are unreachable, the server master key is unusable: %v", err) //nolint:gosec // G706: path is operator configuration, logged for the operator, never returned to a caller
+		return "server master key is unusable - stored secrets cannot be processed (details in the server log)"
+	}
+	return err.Error()
+}
 
 type EmailHandler struct {
 	service  *email.Service
@@ -200,7 +217,7 @@ func (h *EmailHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		OwnerUserID:  ownerID,
 	})
 	if err != nil {
-		http.Error(w, `{"error":"failed to create email account: `+err.Error()+`"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"failed to create email account: `+clientSafeServiceError(err)+`"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -303,7 +320,7 @@ func (h *EmailHandler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"email account not found"}`, http.StatusNotFound)
 			return
 		}
-		http.Error(w, `{"error":"failed to update email account: `+err.Error()+`"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"failed to update email account: `+clientSafeServiceError(err)+`"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -393,7 +410,7 @@ func (h *EmailHandler) TestAccountConnection(w http.ResponseWriter, r *http.Requ
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "connection_failed", "message": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "connection_failed", "message": clientSafeServiceError(err)})
 		return
 	}
 
@@ -442,7 +459,7 @@ func (h *EmailHandler) SyncAccount(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "sync_failed", "message": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "sync_failed", "message": clientSafeServiceError(err)})
 		return
 	}
 
@@ -515,7 +532,7 @@ func (h *EmailHandler) SendEmail(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "send_failed", "message": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "send_failed", "message": clientSafeServiceError(err)})
 		return
 	}
 

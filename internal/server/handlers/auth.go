@@ -3,6 +3,8 @@ package handlers
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/openlocalcrm/openlocalcrm/internal/auth"
+	"github.com/openlocalcrm/openlocalcrm/internal/crypto"
 	"github.com/openlocalcrm/openlocalcrm/internal/db"
 )
 
@@ -305,6 +308,16 @@ func (h *AuthHandler) VerifyTOTP(w http.ResponseWriter, r *http.Request) {
 
 	err := h.service.VerifyTOTP(r.Context(), claims.UserID, req.Secret, req.Code)
 	if err != nil {
+		if errors.Is(err, crypto.ErrKeyUnusable) {
+			// The code the user entered may be perfectly correct; the server
+			// just cannot store the secret behind it (issue #128 fail-closed).
+			// Answering "invalid code" would send the user in circles, so this
+			// is reported honestly as a server-side problem. The detailed
+			// cause names filesystem paths and belongs in the log only.
+			log.Printf("[Auth] [ERROR] cannot store the TOTP secret, the server master key is unusable: %v", err) //nolint:gosec // G706: operator-configured path, logged for the operator, never returned to a caller
+			writeJSONError(w, http.StatusInternalServerError, "totp_setup_failed", "Zwei-Faktor-Authentifizierung konnte nicht initialisiert werden (Server-Konfiguration prüfen)")
+			return
+		}
 		writeJSONError(w, http.StatusBadRequest, "totp_verification_failed", "Ungültiger Bestätigungscode")
 		return
 	}
