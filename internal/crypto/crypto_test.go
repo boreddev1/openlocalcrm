@@ -2,14 +2,22 @@ package crypto
 
 import (
 	"bytes"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// clearKeyEnv unset every variable GetKeyPath consults, so a test sees the
-// resolution chain itself and not the ambient CI/developer environment.
+// clearKeyEnv unset every variable GetKeyPath consults and sandbox the parts of
+// the resolution chain that look at the real filesystem, so a test sees the
+// chain itself and not the ambient CI/developer machine.
+//
+// The legacy-rescue step probes two locations: the working directory (which the
+// caller controls with t.Chdir) and the documented container path. Redirecting
+// the latter into a directory that never exists keeps a stray
+// /app/data/secrets.key - which a container built from the pre-#122 image can
+// really have - from changing the outcome of an unrelated assertion.
 func clearKeyEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{"SECRETS_KEY_PATH", "SECRET_KEY_PATH", "STORAGE_PATH", "STORAGE_LOCAL_DIR", "XDG_CONFIG_HOME", "APPDATA", "HOME"} {
@@ -17,6 +25,85 @@ func clearKeyEnv(t *testing.T) {
 	}
 	SetMasterKeyForTest(nil)
 	t.Cleanup(func() { SetMasterKeyForTest(nil) })
+
+	realContainerPath := legacyKeyContainerPath
+	legacyKeyContainerPath = filepath.Join(t.TempDir(), "sandbox-app", "data", defaultKeyFileName)
+	// Cleanup functions run LIFO, so this restores the production value after
+	// the test body has finished overwriting it again (see
+	// TestLegacyKeyCandidates).
+	t.Cleanup(func() { legacyKeyContainerPath = realContainerPath })
+
+	resetKeyNoticeForTest()
+	t.Cleanup(resetKeyNoticeForTest)
+
+	// Precondition for the assertions below: neither probe location of the
+	// legacy-rescue step may hold a key, otherwise the rescue legitimately
+	// points at it and every "expected a freshly minted key" assertion becomes
+	// meaningless. A leftover in the package directory is the pre-#122 artifact
+	// from issue #122 - delete it and re-run.
+	if cwd, err := os.Getwd(); err == nil {
+		if stray := filepath.Join(cwd, legacyKeyRelPath); regularFileExists(stray) {
+			t.Fatalf("a pre-#122 master key exists at %s; delete it (issue #122) before running these tests", stray)
+		}
+	}
+	if regularFileExists(legacyKeyContainerPath) {
+		t.Fatalf("the sandboxed container key location %s exists; clearKeyEnv did not sandbox it", legacyKeyContainerPath)
+	}
+}
+
+// useRealContainerCandidate points the container probe back at
+// /app/data/secrets.key for the tests that are about the candidate list
+// itself. It never asserts and never creates anything, so it stays correct on
+// hosts where /app does not exist (the normal case: the file is only ever there
+// in a container built from the pre-#122 image).
+func useRealContainerCandidate(t *testing.T) {
+	t.Helper()
+	sandboxed := legacyKeyContainerPath
+	legacyKeyContainerPath = "/app/data/secrets.key"
+	t.Cleanup(func() { legacyKeyContainerPath = sandboxed })
+}
+
+// writeKeyFile puts a deterministic 32-byte master key at path and returns it.
+func writeKeyFile(t *testing.T, path string, seed byte) []byte {
+	t.Helper()
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = seed + byte(i)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatalf("mkdir for %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, key, 0600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	return key
+}
+
+// readRaw reads a file without failing on absence, for "must not have been
+// created / must not have been touched" assertions.
+func readRaw(t *testing.T, path string) ([]byte, error) {
+	t.Helper()
+	return os.ReadFile(path)
+}
+
+// mustRead reads a file or fails the test.
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return data
+}
+
+// legacyPathIn returns the pre-#122 cwd-relative location under dir.
+func legacyPathIn(dir string) string {
+	return filepath.Join(dir, legacyKeyRelPath)
+}
+
+// derivedPathIn returns the current default location for a storage root.
+func derivedPathIn(storage string) string {
+	return filepath.Join(storage, "keys", defaultKeyFileName)
 }
 
 func TestCrypto_EncryptDecryptRoundtrip(t *testing.T) {
@@ -272,5 +359,531 @@ func TestGetOrCreateMasterKey_ReportsUnresolvablePath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "SECRETS_KEY_PATH") {
 		t.Errorf("expected the error to name SECRETS_KEY_PATH, got: %v", err)
+	}
+}
+
+// --- legacy reuse (rescue of pre-#122 installs, read-only) -------------------
+
+// (a) A legacy key exists and nothing else does: reuse it, warn loudly, and do
+// not mint a second key. This is the case that would otherwise silently turn
+// every stored TOTP seed and IMAP password into undecryptable bytes.
+func TestResolveKeyPath_LegacyRescue_OnlyLegacyKeyExists(t *testing.T) {
+	clearKeyEnv(t)
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	legacyKey := writeKeyFile(t, legacyPathIn(cwd), 11)
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("APPDATA", home)
+	t.Setenv("HOME", home)
+
+	res, err := resolveKeyPath(cwd)
+	if err != nil {
+		t.Fatalf("resolveKeyPath: %v", err)
+	}
+	if res.Source != KeyPathLegacy {
+		t.Errorf("expected source %q, got %q", KeyPathLegacy, res.Source)
+	}
+	if res.Path != legacyPathIn(cwd) {
+		t.Errorf("expected to resolve to the existing legacy key %q, got %q", legacyPathIn(cwd), res.Path)
+	}
+	if res.CreatePath != filepath.Join(home, "openlocalcrm", defaultKeyFileName) {
+		t.Errorf("a new key must still be minted at the current default, got CreatePath %q", res.CreatePath)
+	}
+	if res.IgnoredLegacyPath != "" {
+		t.Errorf("the chosen key is the legacy one, nothing should be ignored: %q", res.IgnoredLegacyPath)
+	}
+	if notice := res.Notice(); notice == "" || !strings.Contains(notice, legacyPathIn(cwd)) {
+		t.Errorf("expected a warning naming the legacy path, got %q", notice)
+	}
+
+	key, err := GetOrCreateMasterKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateMasterKey: %v", err)
+	}
+	if !bytes.Equal(key, legacyKey) {
+		t.Fatal("the legacy key was not reused - secrets encrypted with it would be undecryptable")
+	}
+
+	// No second key anywhere.
+	if _, statErr := readRaw(t, res.CreatePath); !os.IsNotExist(statErr) {
+		t.Errorf("a second master key was created at %q (stat err = %v)", res.CreatePath, statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "openlocalcrm")); statErr == nil {
+		t.Errorf("the user config key directory was created even though the legacy key was used")
+	}
+	// The legacy file itself was not rewritten.
+	if after := mustRead(t, legacyPathIn(cwd)); !bytes.Equal(after, legacyKey) {
+		t.Error("the legacy key file changed on disk")
+	}
+
+	// Secrets keep round-tripping across a simulated restart, which is the
+	// whole point of the rescue.
+	sealed, err := EncryptSecret("vertrieb@openlocalcrm.local")
+	if err != nil {
+		t.Fatalf("EncryptSecret: %v", err)
+	}
+	SetMasterKeyForTest(nil)
+	opened, err := DecryptSecret(sealed)
+	if err != nil {
+		t.Fatalf("DecryptSecret after restart: %v", err)
+	}
+	if opened != "vertrieb@openlocalcrm.local" {
+		t.Errorf("roundtrip mismatch: %q", opened)
+	}
+}
+
+// The same rescue with a storage root configured (the container shape: legacy
+// key in the image layer, STORAGE_PATH volume still empty).
+func TestResolveKeyPath_LegacyRescue_WithStoragePath(t *testing.T) {
+	clearKeyEnv(t)
+
+	cwd := t.TempDir()
+	storage := t.TempDir()
+	legacyKey := writeKeyFile(t, legacyPathIn(cwd), 13)
+	t.Setenv("STORAGE_PATH", storage)
+
+	res, err := resolveKeyPath(cwd)
+	if err != nil {
+		t.Fatalf("resolveKeyPath: %v", err)
+	}
+	if res.Source != KeyPathLegacy || res.Path != legacyPathIn(cwd) {
+		t.Fatalf("expected the legacy rescue, got %+v", res)
+	}
+	if res.CreatePath != derivedPathIn(storage) {
+		t.Errorf("expected CreatePath %q, got %q", derivedPathIn(storage), res.CreatePath)
+	}
+	if notice := res.Notice(); !strings.Contains(notice, derivedPathIn(storage)) || !strings.Contains(notice, "SECRETS_KEY_PATH") {
+		t.Errorf("the warning must name the copy-to location and the pin, got %q", notice)
+	}
+
+	t.Chdir(cwd)
+	key, err := GetOrCreateMasterKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateMasterKey: %v", err)
+	}
+	if !bytes.Equal(key, legacyKey) {
+		t.Fatal("expected the legacy key to be reused")
+	}
+	if _, err := readRaw(t, derivedPathIn(storage)); !os.IsNotExist(err) {
+		t.Errorf("a second key was minted in the storage volume (stat err = %v)", err)
+	}
+}
+
+// (b) An explicitly configured path wins outright over a legacy file - the
+// operator's configuration is never second-guessed by the rescue.
+func TestResolveKeyPath_ExplicitPathBeatsExistingLegacyKey(t *testing.T) {
+	clearKeyEnv(t)
+
+	cwd := t.TempDir()
+	legacyKey := writeKeyFile(t, legacyPathIn(cwd), 17)
+	storage := t.TempDir()
+
+	for _, env := range [][2]string{{"SECRETS_KEY_PATH", ""}, {"SECRET_KEY_PATH", ""}} {
+		t.Run(env[0], func(t *testing.T) {
+			pinned := filepath.Join(t.TempDir(), "secrets.key")
+			t.Setenv("STORAGE_PATH", storage)
+			t.Setenv("SECRETS_KEY_PATH", "")
+			t.Setenv("SECRET_KEY_PATH", "")
+			t.Setenv(env[0], pinned)
+
+			res, err := resolveKeyPath(cwd)
+			if err != nil {
+				t.Fatalf("resolveKeyPath: %v", err)
+			}
+			if res.Source != KeyPathExplicit || res.Path != pinned {
+				t.Fatalf("expected the explicit path %q to win, got %+v", pinned, res)
+			}
+			if res.IgnoredLegacyPath != "" {
+				t.Errorf("explicit configuration must not probe legacy locations: %+v", res)
+			}
+			if res.Notice() != "" {
+				t.Errorf("no warning is warranted when the operator pinned the path, got %q", res.Notice())
+			}
+
+			t.Chdir(cwd)
+			key, err := GetOrCreateMasterKey()
+			if err != nil {
+				t.Fatalf("GetOrCreateMasterKey: %v", err)
+			}
+			if bytes.Equal(key, legacyKey) {
+				t.Fatal("the legacy key was used instead of the pinned path")
+			}
+			if got := mustRead(t, pinned); !bytes.Equal(got, key) {
+				t.Errorf("the pinned key file does not hold the key in use")
+			}
+			if after := mustRead(t, legacyPathIn(cwd)); !bytes.Equal(after, legacyKey) {
+				t.Error("the untouched legacy file was modified")
+			}
+			if _, err := readRaw(t, derivedPathIn(storage)); !os.IsNotExist(err) {
+				t.Errorf("a key was minted in the storage volume as well (stat err = %v)", err)
+			}
+			SetMasterKeyForTest(nil)
+		})
+	}
+}
+
+// (c) Both a legacy key and a key at the current default location exist. The
+// documented, tested tie-break: the current default location wins, the legacy
+// file is reported and left alone.
+func TestResolveKeyPath_StorageDerivedKeyWinsOverLegacyKey(t *testing.T) {
+	clearKeyEnv(t)
+
+	cwd := t.TempDir()
+	storage := t.TempDir()
+	legacyKey := writeKeyFile(t, legacyPathIn(cwd), 19)
+	derivedKey := writeKeyFile(t, derivedPathIn(storage), 23)
+	t.Setenv("STORAGE_PATH", storage)
+
+	res, err := resolveKeyPath(cwd)
+	if err != nil {
+		t.Fatalf("resolveKeyPath: %v", err)
+	}
+	if res.Source != KeyPathStorage || res.Path != derivedPathIn(storage) {
+		t.Fatalf("expected the storage-derived key to win, got %+v", res)
+	}
+	if res.IgnoredLegacyPath != legacyPathIn(cwd) {
+		t.Errorf("expected the legacy file to be reported as ignored, got %q", res.IgnoredLegacyPath)
+	}
+	notice := res.Notice()
+	if !strings.Contains(notice, derivedPathIn(storage)) || !strings.Contains(notice, legacyPathIn(cwd)) {
+		t.Errorf("the tie-break warning must name both files, got %q", notice)
+	}
+	if !strings.Contains(notice, "SECRETS_KEY_PATH") {
+		t.Errorf("the tie-break warning must name the pin, got %q", notice)
+	}
+
+	t.Chdir(cwd)
+	key, err := GetOrCreateMasterKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateMasterKey: %v", err)
+	}
+	if !bytes.Equal(key, derivedKey) {
+		t.Fatal("secrets written since the fix would be undecryptable if the older legacy key won here")
+	}
+	if after := mustRead(t, legacyPathIn(cwd)); !bytes.Equal(after, legacyKey) {
+		t.Error("the ignored legacy key was modified")
+	}
+}
+
+// The same tie-break for the user-config-dir form of the default location, so
+// the rule is about "the current default holds a key", not about storage.
+func TestResolveKeyPath_UserConfigKeyWinsOverLegacyKey(t *testing.T) {
+	clearKeyEnv(t)
+
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("APPDATA", home)
+	t.Setenv("HOME", home)
+
+	writeKeyFile(t, legacyPathIn(cwd), 29)
+	configKey := filepath.Join(home, "openlocalcrm", defaultKeyFileName)
+	derivedKey := writeKeyFile(t, configKey, 31)
+
+	res, err := resolveKeyPath(cwd)
+	if err != nil {
+		t.Fatalf("resolveKeyPath: %v", err)
+	}
+	if res.Source != KeyPathUserConfig || res.Path != configKey {
+		t.Fatalf("expected the user-config key to win, got %+v", res)
+	}
+	if res.IgnoredLegacyPath != legacyPathIn(cwd) {
+		t.Errorf("expected the legacy file to be reported, got %q", res.IgnoredLegacyPath)
+	}
+
+	t.Chdir(cwd)
+	key, err := GetOrCreateMasterKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateMasterKey: %v", err)
+	}
+	if !bytes.Equal(key, derivedKey) {
+		t.Fatal("expected the user-config key to be loaded")
+	}
+}
+
+// (d) With no legacy file anywhere the chain behaves exactly as before the
+// rescue step was added: derive, mint, or fail - never a working-directory
+// default.
+func TestResolveKeyPath_NoLegacyKeyAnywhereUnchanged(t *testing.T) {
+	clearKeyEnv(t)
+
+	emptyCwd := t.TempDir()
+	storage := t.TempDir()
+	home := t.TempDir()
+
+	t.Run("storage", func(t *testing.T) {
+		t.Setenv("STORAGE_PATH", storage)
+		res, err := resolveKeyPath(emptyCwd)
+		if err != nil {
+			t.Fatalf("resolveKeyPath: %v", err)
+		}
+		want := derivedPathIn(storage)
+		if res.Path != want || res.CreatePath != want || res.Source != KeyPathStorage || res.IgnoredLegacyPath != "" {
+			t.Fatalf("unexpected resolution %+v (want %q)", res, want)
+		}
+		if res.Notice() != "" {
+			t.Errorf("nothing to warn about, got %q", res.Notice())
+		}
+	})
+
+	t.Run("user config dir", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", home)
+		t.Setenv("APPDATA", home)
+		t.Setenv("HOME", home)
+		res, err := resolveKeyPath(emptyCwd)
+		if err != nil {
+			t.Fatalf("resolveKeyPath: %v", err)
+		}
+		want := filepath.Join(home, "openlocalcrm", defaultKeyFileName)
+		if res.Path != want || res.CreatePath != want || res.Source != KeyPathUserConfig {
+			t.Fatalf("unexpected resolution %+v (want %q)", res, want)
+		}
+	})
+
+	t.Run("unresolvable", func(t *testing.T) {
+		res, err := resolveKeyPath(emptyCwd)
+		if err == nil {
+			t.Fatalf("expected the old error, got %+v", res)
+		}
+		if !strings.Contains(err.Error(), "SECRETS_KEY_PATH") {
+			t.Errorf("error should name the variable to set, got: %v", err)
+		}
+		if res.Path != "" || res.CreatePath != "" {
+			t.Errorf("expected an empty resolution on error, got %+v", res)
+		}
+	})
+}
+
+// (e) The #122 guarantee, restated with the rescue step in place: minting never
+// writes into the working directory - not even a "data" directory.
+func TestGetOrCreateMasterKey_MintDoesNotCreateLegacyLocation(t *testing.T) {
+	clearKeyEnv(t)
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("APPDATA", home)
+	t.Setenv("HOME", home)
+
+	key, err := GetOrCreateMasterKey()
+	if err != nil {
+		t.Fatalf("GetOrCreateMasterKey: %v", err)
+	}
+	if len(key) != 32 {
+		t.Fatalf("expected a 32-byte key, got %d bytes", len(key))
+	}
+	if entries, err := os.ReadDir(cwd); err != nil {
+		t.Fatalf("readdir %s: %v", cwd, err)
+	} else if len(entries) != 0 {
+		t.Errorf("the working directory was written into: %v", entries)
+	}
+	if regularFileExists(legacyPathIn(cwd)) {
+		t.Errorf("a key was created at the legacy location %s (issue #122)", legacyPathIn(cwd))
+	}
+	if !bytes.Equal(mustRead(t, filepath.Join(home, "openlocalcrm", defaultKeyFileName)), key) {
+		t.Error("the minted key is not the one at the resolved location")
+	}
+}
+
+// A legacy file that exists but cannot be used is a hard error: the rescue must
+// never turn into a write into the working directory.
+func TestGetOrCreateMasterKey_NeverRepairsLegacyLocation(t *testing.T) {
+	tests := []struct {
+		name string
+		// prepare makes the legacy file unusable and returns the content that
+		// must still be on disk afterwards, or nil when the file cannot be
+		// read at all (permission denied).
+		prepare  func(t *testing.T, path string) []byte
+		contains string
+	}{
+		{
+			name: "corrupt content",
+			prepare: func(t *testing.T, path string) []byte {
+				content := []byte("not a master key")
+				if err := os.WriteFile(path, content, 0600); err != nil {
+					t.Fatalf("write: %v", err)
+				}
+				return content
+			},
+			contains: "refusing to overwrite",
+		},
+		{
+			name: "unreadable",
+			prepare: func(t *testing.T, path string) []byte {
+				if os.Geteuid() == 0 {
+					t.Skip("running as root: file permissions are not enforced")
+				}
+				if err := os.Chmod(path, 0000); err != nil {
+					t.Fatalf("chmod: %v", err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(path, 0600) })
+				return nil
+			},
+			contains: "cannot read the legacy master key",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clearKeyEnv(t)
+
+			cwd := t.TempDir()
+			storage := t.TempDir()
+			if err := os.MkdirAll(filepath.Dir(legacyPathIn(cwd)), 0700); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			// A file that is neither 32 raw bytes nor base64 of 32 bytes.
+			if err := os.WriteFile(legacyPathIn(cwd), []byte("placeholder"), 0600); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			wantContent := tc.prepare(t, legacyPathIn(cwd))
+			t.Setenv("STORAGE_PATH", storage)
+			t.Chdir(cwd)
+
+			_, err := GetOrCreateMasterKey()
+			if err == nil {
+				t.Fatal("expected an error instead of repairing the legacy key")
+			}
+			if !strings.Contains(err.Error(), tc.contains) {
+				t.Errorf("expected the error to contain %q, got: %v", tc.contains, err)
+			}
+			if !strings.Contains(err.Error(), legacyPathIn(cwd)) {
+				t.Errorf("the error must name the file it refuses to touch, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), "SECRETS_KEY_PATH") {
+				t.Errorf("the error should name the pin, got: %v", err)
+			}
+			// Nothing was created, in the working directory or anywhere else.
+			if regularFileExists(derivedPathIn(storage)) {
+				t.Errorf("a replacement key was minted at %s while the legacy file is broken", derivedPathIn(storage))
+			}
+			if wantContent != nil {
+				if after := mustRead(t, legacyPathIn(cwd)); !bytes.Equal(after, wantContent) {
+					t.Errorf("the legacy file was rewritten: got %q, want %q", after, wantContent)
+				}
+			}
+		})
+	}
+}
+
+// The warning is emitted once per process, on the first resolution that needs
+// it, and is loud enough to find in the log.
+func TestLogKeyNoticeOncePerProcess(t *testing.T) {
+	clearKeyEnv(t)
+
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(oldOut) })
+
+	res := KeyResolution{
+		Path:       legacyPathIn("/srv/crm"),
+		Source:     KeyPathLegacy,
+		CreatePath: "/data/storage/keys/secrets.key",
+	}
+	notice := res.Notice()
+	logKeyNotice(notice)
+	logKeyNotice(notice)
+
+	out := buf.String()
+	if lines := strings.Count(strings.TrimSpace(out), "\n") + 1; lines != 1 {
+		t.Errorf("expected the warning to be logged once, got %d lines:\n%s", lines, out)
+	}
+	if !strings.Contains(out, "[Crypto] [WARN]") {
+		t.Errorf("expected the [Crypto] [WARN] prefix, got %q", out)
+	}
+	if !strings.Contains(out, legacyPathIn("/srv/crm")) || !strings.Contains(out, "/data/storage/keys/secrets.key") {
+		t.Errorf("the warning must name the legacy and the recommended location, got %q", out)
+	}
+
+	// GetOrCreateMasterKey routes the real resolution through it once.
+	resetKeyNoticeForTest()
+	buf.Reset()
+	cwd := t.TempDir()
+	writeKeyFile(t, legacyPathIn(cwd), 41)
+	t.Chdir(cwd)
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("APPDATA", home)
+	t.Setenv("HOME", home)
+	if _, err := GetOrCreateMasterKey(); err != nil {
+		t.Fatalf("GetOrCreateMasterKey: %v", err)
+	}
+	if _, err := GetOrCreateMasterKey(); err != nil {
+		t.Fatalf("GetOrCreateMasterKey (second call): %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "reusing the existing legacy master key") {
+		t.Errorf("expected the legacy-reuse warning from GetOrCreateMasterKey, got %q", got)
+	}
+	if strings.Count(got, "[Crypto] [WARN]") != 1 {
+		t.Errorf("expected exactly one warning, got %q", got)
+	}
+}
+
+// The legacy candidate set is explicit: the cwd-relative old default first,
+// then the documented container path, deduplicated.
+func TestLegacyKeyCandidates(t *testing.T) {
+	clearKeyEnv(t)
+
+	// The list itself is pure, so it can be checked against the production
+	// container path without touching the filesystem.
+	t.Run("list", func(t *testing.T) {
+		useRealContainerCandidate(t)
+
+		if got := legacyKeyCandidates("/srv/crm"); len(got) != 2 || got[0] != "/srv/crm/data/secrets.key" || got[1] != "/app/data/secrets.key" {
+			t.Errorf("unexpected candidate list: %v", got)
+		}
+		// The container case: cwd is /app, so the two entries are the same file.
+		if got := legacyKeyCandidates("/app"); len(got) != 1 || got[0] != "/app/data/secrets.key" {
+			t.Errorf("expected the duplicate to collapse, got %v", got)
+		}
+		if got := legacyKeyCandidates(""); len(got) != 1 || got[0] != "/app/data/secrets.key" {
+			t.Errorf("an unreadable cwd must still leave the container candidate, got %v", got)
+		}
+	})
+
+	// Probing stays on the sandboxed container path (which never exists), so
+	// this is deterministic even inside a container built from a pre-#122 image.
+	t.Run("the derived location is never reported as legacy", func(t *testing.T) {
+		cwd := t.TempDir()
+		derived := filepath.Join(cwd, "data", "keys", defaultKeyFileName)
+		if got := firstExistingLegacyKeyPath(cwd, derived); got != "" {
+			t.Errorf("expected no legacy candidate for %q, got %q", cwd, got)
+		}
+		writeKeyFile(t, legacyPathIn(cwd), 43)
+		if got := firstExistingLegacyKeyPath(cwd, legacyPathIn(cwd)); got != "" {
+			t.Errorf("the derived location must be skipped, got %q", got)
+		}
+		if got := firstExistingLegacyKeyPath(cwd, derived); got != legacyPathIn(cwd) {
+			t.Errorf("expected the existing legacy file, got %q", got)
+		}
+	})
+}
+
+// A directory is not a key file: resolution must not stop at a stray data/
+// directory in the working tree.
+func TestResolveKeyPath_IgnoresNonRegularLegacyEntries(t *testing.T) {
+	clearKeyEnv(t)
+
+	cwd := t.TempDir()
+	if err := os.MkdirAll(legacyPathIn(cwd), 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	storage := t.TempDir()
+	t.Setenv("STORAGE_PATH", storage)
+
+	res, err := resolveKeyPath(cwd)
+	if err != nil {
+		t.Fatalf("resolveKeyPath: %v", err)
+	}
+	if res.Source != KeyPathStorage || res.Path != derivedPathIn(storage) {
+		t.Fatalf("a directory is not an existing key: %+v", res)
+	}
+	if res.IgnoredLegacyPath != "" {
+		t.Errorf("expected nothing ignored, got %q", res.IgnoredLegacyPath)
 	}
 }

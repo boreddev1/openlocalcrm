@@ -33,12 +33,26 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// Was the legacy artifact already there before this run? If so the failure
+	// below is not caused by any test in this binary — it is leftover debris
+	// from a pre-#122 build, and the message has to say which.
+	legacyPath := filepath.Join("data", "secrets.key")
+	_, legacyBefore := os.Stat(legacyPath)
+
 	code := m.Run()
 
 	// Guard the invariant itself: the legacy relative default must never appear
-	// in the source tree again.
-	if _, statErr := os.Stat(filepath.Join("data", "secrets.key")); statErr == nil {
-		fmt.Fprintln(os.Stderr, "auth: a test wrote data/secrets.key into the package directory (issue #122)")
+	// in the source tree again. Note that SECRETS_KEY_PATH is pinned above, so
+	// the legacy-rescue step in crypto.GetKeyPath never points at this file
+	// here — an existing leftover is inert for these tests, and must still be
+	// removed (crypto now reads such a file wherever it finds one, so a stale
+	// key in a working tree is a stale key an operator could silently reuse).
+	if _, legacyAfter := os.Stat(legacyPath); legacyAfter == nil {
+		if legacyBefore == nil {
+			fmt.Fprintf(os.Stderr, "auth: a test wrote %s into the package directory (issue #122)\n", legacyPath)
+		} else {
+			fmt.Fprintf(os.Stderr, "auth: pre-#122 leftover %s is still in the package directory — delete it (issue #122)\n", legacyPath)
+		}
 		code = 1
 	}
 

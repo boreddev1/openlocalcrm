@@ -34,12 +34,20 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// Same distinction as the auth TestMain: a file that was already there is
+	// pre-#122 debris, not something this run created — but it still has to go.
+	_, envBefore := os.Stat(".env")
+
 	code := m.Run()
 
 	// Guard the invariant itself: no .env may ever appear in the package tree.
 	if _, statErr := os.Stat(".env"); statErr == nil {
 		cwd, _ := os.Getwd()
-		fmt.Fprintf(os.Stderr, "server: a test wrote .env into the package directory %s (issue #122)\n", filepath.Clean(cwd))
+		if envBefore == nil {
+			fmt.Fprintf(os.Stderr, "server: a test wrote .env into the package directory %s (issue #122)\n", filepath.Clean(cwd))
+		} else {
+			fmt.Fprintf(os.Stderr, "server: pre-#122 leftover .env is still in the package directory %s — delete it (issue #122)\n", filepath.Clean(cwd))
+		}
 		code = 1
 	}
 
