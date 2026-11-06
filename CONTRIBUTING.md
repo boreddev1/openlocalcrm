@@ -44,9 +44,28 @@ make lint
 # Lizenz-Compliance-Scan:
 make check-licenses
 
+# Playwright E2E (baut bin/crm-server, startet Demo-Backend + Vite-Dev-Server):
+make test-e2e
+
 # Vollständige Suite (Hooks, Formatierung, Linting, Tests):
 make check
 ```
+
+### E2E-Port, wenn 8080 belegt ist
+
+`make test-e2e` startet das Demo-Backend auf Port **8080** — dem dokumentierten Standard,
+der auch in CI gilt. Auf Rechnern, wo 8080 schon vergeben ist (z. B. ein IDE-Server),
+lässt sich der Port verschieben:
+
+```bash
+E2E_BACKEND_PORT=8090 make test-e2e
+```
+
+Die Variable wirkt an **zwei** Stellen gleichzeitig, weil beide zusammengehören:
+`playwright.config.ts` (Port des Demo-Backends) und `web/vite.config.ts` (Ziel des
+`/api`- und `/events`-Proxys). Nur den einen zu ändern, lässt die SPA gegen einen Port
+proxyen, an dem nichts lauscht — jede API-Spec schlägt dann fehl, ohne dass die App
+defekt ist. Ohne die Variable bleibt es bei 8080.
 
 ---
 
