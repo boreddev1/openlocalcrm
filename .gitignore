@@ -51,6 +51,16 @@ user-errors/
 *.swp
 *.png
 
+# Agent session state (Claude Code & co.): local settings, task locks and the
+# isolated checkouts under .claude/worktrees/ — those are full working copies
+# (hundreds of MB) and never source. Nothing under .claude/ is tracked, and
+# nothing is allowlisted on purpose: even a "shared" settings.json can carry
+# secrets through its env / apiKeyHelper entries.
+.claude/
+# A trailing-slash pattern only matches directories, so a root-level .claude
+# that is a symlink or a file stays visible to git. Anchor it at the root as well.
+/.claude
+
 # Superpowers and Planning Artifacts
 .superpowers/
 docs/superpowers/
