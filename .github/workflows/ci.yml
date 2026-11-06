@@ -105,6 +105,15 @@ jobs:
       - name: Install Web Dependencies
         run: cd web && pnpm install --frozen-lockfile
 
+      # The web-audit gate is a security control that had no test at all until
+      # #124: scripts/diff-coverage.go filters its diff to *.go, so the 50/50
+      # coverage gate structurally cannot see a change to a .mjs file (issue #110).
+      # That blindness is how an invalid gh flag turned the Dependabot cross-check
+      # into a silent no-op (#104). Run the harness here so a regression in the
+      # gate itself fails the build instead of quietly narrowing what it checks.
+      - name: Run Script-Gate Tests (web audit harness)
+        run: node --test scripts/*.test.mjs
+
       - name: Run Security Audit
         env:
           # The runner does NOT export the workflow token into step envs, so the
