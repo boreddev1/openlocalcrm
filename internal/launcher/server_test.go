@@ -193,6 +193,12 @@ func TestServerResetAdminPasswordEndpoint(t *testing.T) {
 func TestServerControlResetEndpoint(t *testing.T) {
 	tmpDir := t.TempDir()
 	engine := NewEngine(tmpDir)
+
+	// Same guard as TestResetAll: the endpoint drives ResetAll, which must be
+	// observed through the exec seam instead of force-killing the developer's
+	// real docker stack.
+	rec, stub := newExecStub(t, nil)
+	engine.execFn = stub
 	handler := NewServer(tmpDir, engine)
 
 	// Create a dummy .env
@@ -216,6 +222,14 @@ func TestServerControlResetEndpoint(t *testing.T) {
 	if _, err := os.Stat(envFile); !os.IsNotExist(err) {
 		t.Errorf("expected .env to be deleted after reset")
 	}
+
+	// Verify the endpoint actually drove the full factory-reset command set.
+	down := rec.mustFind(t, "docker", "compose", "down", "-v", "--remove-orphans")
+	if down.cmd.Dir != tmpDir {
+		t.Errorf("expected compose down to run in BaseDir %q, got %q", tmpDir, down.cmd.Dir)
+	}
+	rec.mustFind(t, "docker", "rm", "-f", "crm-db")
+	rec.mustFind(t, "docker", "volume", "rm", "-f", "crm_pg_data")
 }
 
 func TestServer_UpdateCheckRoute(t *testing.T) {
