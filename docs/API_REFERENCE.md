@@ -22,6 +22,136 @@ Die API unterstützt zwei Authentifizierungsmodi:
 
 ## 📋 Endpunkt-Übersicht
 
+### Routen-Inventur (maschinell erzeugt)
+
+Vollständige Liste aller Endpunkte, die `internal/server/router.go` registriert —
+die Gruppe `/api/v1/…` und der SSE-Stream `/events/stream`. Der eingebettete SPA-
+Mount (`r.Mount("/", web.DistHandler())`) ist bewusst ausgenommen: er bedient
+Frontend-Dateien statt API-Endpunkte und hat keine abgrenzbare Pfadliste. Die
+Tabelle ist **generiert, nicht gepflegt**: Sie wird aus dem laufenden Router
+gelesen und darf nicht von Hand editiert werden.
+
+```bash
+UPDATE_ROUTE_INVENTORY=1 go test ./internal/server/ -run TestAPIReferenceInventoryUpdate -count=1
+```
+
+`internal/server/api_reference_test.go` vergleicht die Tabelle bei jedem
+`go test`-Lauf bidirektional mit dem Router: ein Endpunkt, der im Router
+existiert und hier fehlt, lässt die Tests genauso durchfallen wie ein
+dokumentierter Endpunkt, den der Router nicht mehr registriert. Fehlt die
+Tabelle oder ist sie leer, schlägt die Prüfung fehl (fail-closed); es existiert
+kein Pfad, der die Prüfung überspringt oder nur protokolliert.
+
+Pfadparameter stehen in Chi-Schreibweise (`{id}`), genau so, wie der Router sie
+registriert. Die Tabelle nennt bewusst **keine** Auth-Spalte: eine
+HTTP-Methode-Pfad-Kombination ist alles, was sich maschinell aus dem Router
+ablesen lässt. Ob ein Endpunkt ein `X-CSRF-Token` verlangt, hängt nicht an der
+Route, sondern daran, wie sich der Aufrufer authentifiziert (die CSRF-Middleware
+befreit eine per Bearer-Token geprüfte Anfrage), und lässt sich aus Chi-Routes
+nicht auslesen — die Regeln stehen deshalb in den Abschnitten unten.
+
+<!-- route-inventory:start -->
+| Methode | Pfad |
+| --- | --- |
+| POST | /api/v1/ai/chat |
+| GET | /api/v1/ai/kb |
+| POST | /api/v1/ai/kb |
+| GET | /api/v1/ai/kb/search |
+| DELETE | /api/v1/ai/kb/{id} |
+| GET | /api/v1/ai/observability |
+| POST | /api/v1/ai/parse-bill |
+| POST | /api/v1/ai/research/company |
+| GET | /api/v1/ai/research/jobs |
+| POST | /api/v1/ai/research/jobs |
+| POST | /api/v1/ai/synthesize-notes |
+| POST | /api/v1/ai/triage |
+| GET | /api/v1/appointments |
+| POST | /api/v1/appointments |
+| DELETE | /api/v1/appointments/{id} |
+| PUT | /api/v1/appointments/{id} |
+| GET | /api/v1/appointments/{id}/ics |
+| GET | /api/v1/auth/accept-invite |
+| POST | /api/v1/auth/accept-invite |
+| POST | /api/v1/auth/change-password |
+| POST | /api/v1/auth/login |
+| POST | /api/v1/auth/logout |
+| POST | /api/v1/auth/logout-all |
+| POST | /api/v1/auth/refresh |
+| POST | /api/v1/auth/totp/disable |
+| POST | /api/v1/auth/totp/setup |
+| POST | /api/v1/auth/totp/verify |
+| GET | /api/v1/automations |
+| POST | /api/v1/automations |
+| GET | /api/v1/automations/runs |
+| POST | /api/v1/automations/runs/{id}/approve |
+| POST | /api/v1/automations/{id}/test-run |
+| POST | /api/v1/backup/drill |
+| GET | /api/v1/backup/export |
+| POST | /api/v1/backup/restore |
+| POST | /api/v1/calculator/solar |
+| GET | /api/v1/companies |
+| POST | /api/v1/companies |
+| DELETE | /api/v1/companies/{id} |
+| GET | /api/v1/companies/{id} |
+| PUT | /api/v1/companies/{id} |
+| POST | /api/v1/connectors/lead-intake |
+| GET | /api/v1/contacts |
+| POST | /api/v1/contacts |
+| DELETE | /api/v1/contacts/{id} |
+| GET | /api/v1/contacts/{id} |
+| PUT | /api/v1/contacts/{id} |
+| GET | /api/v1/deals |
+| POST | /api/v1/deals |
+| DELETE | /api/v1/deals/{id} |
+| GET | /api/v1/deals/{id} |
+| PUT | /api/v1/deals/{id} |
+| POST | /api/v1/deals/{id}/revoke |
+| POST | /api/v1/deals/{id}/solar-calculation |
+| GET | /api/v1/email-templates |
+| POST | /api/v1/email-templates |
+| POST | /api/v1/email-templates/generate |
+| DELETE | /api/v1/email-templates/{key} |
+| PUT | /api/v1/email-templates/{key} |
+| GET | /api/v1/emails/accounts |
+| POST | /api/v1/emails/accounts |
+| DELETE | /api/v1/emails/accounts/{id} |
+| PATCH | /api/v1/emails/accounts/{id} |
+| POST | /api/v1/emails/accounts/{id}/sync |
+| POST | /api/v1/emails/accounts/{id}/test |
+| POST | /api/v1/emails/demo-ingest |
+| GET | /api/v1/emails/messages |
+| POST | /api/v1/emails/send |
+| GET | /api/v1/emails/threads/{threadID} |
+| PATCH | /api/v1/emails/{id}/tags |
+| GET | /api/v1/export/contacts.csv |
+| GET | /api/v1/health |
+| POST | /api/v1/import/contacts |
+| GET | /api/v1/me |
+| GET | /api/v1/notes |
+| POST | /api/v1/notes |
+| DELETE | /api/v1/notes/{id} |
+| GET | /api/v1/notes/{id} |
+| PUT | /api/v1/notes/{id} |
+| POST | /api/v1/notifications/read-all |
+| GET | /api/v1/notifications/unread |
+| POST | /api/v1/notifications/{id}/read |
+| POST | /api/v1/ownership/bulk-assign |
+| GET | /api/v1/reports/sales |
+| GET | /api/v1/settings/export |
+| POST | /api/v1/settings/import |
+| POST | /api/v1/telephony/calls |
+| GET | /api/v1/todos |
+| POST | /api/v1/todos |
+| DELETE | /api/v1/todos/{id} |
+| GET | /api/v1/todos/{id} |
+| PUT | /api/v1/todos/{id} |
+| GET | /api/v1/users |
+| POST | /api/v1/users/invite |
+| PUT | /api/v1/users/{id}/role |
+| PUT | /api/v1/users/{id}/status |
+| GET | /events/stream |
+<!-- route-inventory:end -->
+
 ### 1. Healthcheck & Systemstatus
 
 ```bash
@@ -177,12 +307,12 @@ curl -X POST http://localhost:8080/api/v1/auth/logout \
 
 ---
 
-### 3. Datensatz-Eigentümerschaft & Neuzuweisung (`/api/v1/admin/ownership`)
+### 3. Datensatz-Eigentümerschaft & Neuzuweisung (`/api/v1/ownership`)
 
 Administrativer Endpunkt zur Massen-Neuzuweisung von CRM-Datensätzen (Kontakte, Firmen, Deals, Termine, Aufgaben, Notizen) von einem Vorbesitzer auf einen neuen Eigentümer.
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/admin/ownership/bulk-assign \
+curl -X POST http://localhost:8080/api/v1/ownership/bulk-assign \
   -H "Authorization: Bearer <admin_token>" \
   -H "X-CSRF-Token: <csrf_token>" \
   -H "Content-Type: application/json" \
