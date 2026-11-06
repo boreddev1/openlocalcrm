@@ -3,6 +3,18 @@ import path from 'path';
 
 const authFile = path.resolve(__dirname, 'playwright/.auth/user.json');
 
+// Port of the demo backend started below. 8080 is the documented default and stays
+// authoritative in CI, but it is not universally free on a developer machine (an
+// IDE server or another service may already own it), so it can be moved:
+//
+//   E2E_BACKEND_PORT=8090 make test-e2e
+//
+// This must stay in sync with the proxy target in web/vite.config.ts, which reads
+// the same variable: the SPA only reaches the API through that proxy, so moving
+// one port without the other makes every API spec fail against a dead listener.
+const backendPort = process.env.E2E_BACKEND_PORT ?? '8080';
+const backendBaseUrl = `http://localhost:${backendPort}`;
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 30 * 1000,
@@ -20,8 +32,8 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'DEMO_MODE=true PORT=8080 ./bin/crm-server',
-      url: 'http://localhost:8080/api/v1/health',
+      command: `DEMO_MODE=true PORT=${backendPort} ./bin/crm-server`,
+      url: `${backendBaseUrl}/api/v1/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 120 * 1000,
     },
