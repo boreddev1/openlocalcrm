@@ -136,7 +136,9 @@ func NewRouter(cfg Config) http.Handler {
 	})
 
 	// Public API health endpoint with status and demo_mode (F-40: no internal AI config leaks)
-	r.Get("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
+	// Auth class: see RouteAuthClasses in route_auth.go — the inventory guard
+	// (api_reference_test.go) fails the build if a mount and its class diverge.
+	r.Get(apiV1MountPrefix+routeHealthFragment, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":    "healthy",
@@ -149,7 +151,7 @@ func NewRouter(cfg Config) http.Handler {
 	// Server-Sent Events stream: Protected with token authentication
 	// Server-Sent Events stream: Protected with token authentication (Cookie or Authorization: Bearer only)
 	if cfg.SSEHub != nil {
-		r.Get("/events/stream", func(w http.ResponseWriter, r *http.Request) {
+		r.Get(sseStreamRoutePath, func(w http.ResponseWriter, r *http.Request) {
 			token := ""
 			authHeader := r.Header.Get("Authorization")
 			if strings.HasPrefix(authHeader, "Bearer ") {
@@ -333,13 +335,15 @@ func NewRouter(cfg Config) http.Handler {
 		}()
 	}
 
-	// API v1 group
-	r.Route("/api/v1", func(api chi.Router) {
+	// API v1 group. The path fragments below and the protected group mount are
+	// the prefixes declared in RouteAuthClasses (route_auth.go); keep the two
+	// in sync — the inventory guard and the unauthenticated behavior probe do.
+	r.Route(apiV1MountPrefix, func(api chi.Router) {
 		// Public Auth routes
 		if authH != nil {
-			api.With(auth.RateLimitMiddleware(loginLimiter)).Post("/auth/login", authH.Login)
-			api.With(CSRFDoubleSubmitMiddleware, auth.RateLimitMiddleware(authLimiter)).Post("/auth/refresh", authH.Refresh)
-			api.With(CSRFDoubleSubmitMiddleware).Post("/auth/logout", authH.Logout)
+			api.With(auth.RateLimitMiddleware(loginLimiter)).Post(routeLoginFragment, authH.Login)
+			api.With(CSRFDoubleSubmitMiddleware, auth.RateLimitMiddleware(authLimiter)).Post(routeRefreshFragment, authH.Refresh)
+			api.With(CSRFDoubleSubmitMiddleware).Post(routeLogoutFragment, authH.Logout)
 		}
 
 		// Public invite acceptance, registered next to login and before the
@@ -348,16 +352,18 @@ func NewRouter(cfg Config) http.Handler {
 		// make. The login rate limiter still applies, because both endpoints take
 		// a guessable secret and are unauthenticated.
 		if inviteH != nil {
-			api.With(auth.RateLimitMiddleware(loginLimiter)).Get("/auth/accept-invite", inviteH.Validate)
-			api.With(auth.RateLimitMiddleware(loginLimiter)).Post("/auth/accept-invite", inviteH.Accept)
+			api.With(auth.RateLimitMiddleware(loginLimiter)).Get(routeInviteFragment, inviteH.Validate)
+			api.With(auth.RateLimitMiddleware(loginLimiter)).Post(routeInviteFragment, inviteH.Accept)
 		}
 
 		// Public Webhook intake (secured via Connector Bearer Token, outside CSRF group)
 		if connectorH != nil {
-			api.With(auth.RateLimitMiddleware(connectorLimiter)).Post("/connectors/lead-intake", connectorH.LeadIntake)
+			api.With(auth.RateLimitMiddleware(connectorLimiter)).Post(routeLeadIntakeFragment, connectorH.LeadIntake)
 		}
 
 		// Protected routes (Always enforced JWT authentication, then CSRF protection)
+		// This mount is what the "/api/v1" row in RouteAuthClasses declares as
+		// AuthJWTCSRF; the probe in route_auth_class_test.go re-checks it live.
 		api.Group(func(protected chi.Router) {
 			protected.Use(auth.AuthMiddleware(cfg.PubKey, cfg.DB))
 			protected.Use(CSRFProtectionMiddleware)
