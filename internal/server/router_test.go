@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -223,6 +225,27 @@ func TestSettingsEndpoints(t *testing.T) {
 
 	if importRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK on settings import, got %d: %s", importRec.Code, importRec.Body.String())
+	}
+
+	// Issue #122: the router builds its settings handler without an explicit base
+	// directory, which used to mean "the working directory" — i.e. this package's
+	// source tree while testing. The regenerated .env (with a fresh database
+	// password, connector token and admin password) must land in $CONFIG_DIR,
+	// pinned to a temp directory by TestMain, and never next to the sources.
+	configDir := os.Getenv("CONFIG_DIR")
+	if configDir == "" {
+		t.Fatal("CONFIG_DIR is unset: TestMain did not pin the test config directory")
+	}
+	written := filepath.Join(configDir, ".env")
+	envData, err := os.ReadFile(written)
+	if err != nil {
+		t.Fatalf("expected the import to write %s: %v", written, err)
+	}
+	if !bytes.Contains(envData, []byte("INITIAL_ADMIN_EMAIL=imported-admin@openlocalcrm.local")) {
+		t.Errorf("expected the imported admin email in %s, got:\n%s", written, envData)
+	}
+	if _, statErr := os.Stat(".env"); statErr == nil {
+		t.Error("settings import wrote .env into the package directory (issue #122)")
 	}
 }
 

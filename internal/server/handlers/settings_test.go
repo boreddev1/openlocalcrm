@@ -259,3 +259,71 @@ CONNECTOR_API_TOKEN=super-secret-connector-token-789
 		require.Equal(t, 2, count)
 	})
 }
+
+// Issue #122: the settings handler used to fall back to the process working
+// directory, which inside `go test` is the package directory. An import then
+// wrote a regenerated .env — fresh DB password, connector token, admin
+// password — straight into the source tree. The directory must come from
+// $CONFIG_DIR (or an explicit argument), and nothing may land in the tree.
+func TestSettingsHandler_BaseDirFromConfigDir(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("CONFIG_DIR", configDir)
+
+	adminCtx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		Email: "admin@system.de",
+		Role:  "ADMIN",
+	})
+
+	// No explicit baseDir: the handler has to pick up CONFIG_DIR.
+	h := handlers.NewSettingsHandler()
+
+	body, _ := json.Marshal(launcher.ExportedSettings{
+		Admin:  launcher.AdminSettings{Email: "configdir-admin@solar.de"},
+		System: launcher.SystemSettings{Port: 7777},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/import", bytes.NewReader(body)).WithContext(adminCtx)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.ImportSettings(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	written, err := os.ReadFile(filepath.Join(configDir, ".env"))
+	require.NoError(t, err, "expected the import to write $CONFIG_DIR/.env")
+	require.Contains(t, string(written), "INITIAL_ADMIN_EMAIL=configdir-admin@solar.de")
+	require.Contains(t, string(written), "PORT=7777")
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	_, statErr := os.Stat(filepath.Join(cwd, ".env"))
+	require.Truef(t, os.IsNotExist(statErr),
+		"import wrote .env into the package directory %s (issue #122)", cwd)
+}
+
+// An explicit base directory still beats $CONFIG_DIR, which is how the launcher
+// and every existing call site keep working.
+func TestSettingsHandler_ExplicitBaseDirBeatsConfigDir(t *testing.T) {
+	configDir := t.TempDir()
+	explicitDir := t.TempDir()
+	t.Setenv("CONFIG_DIR", configDir)
+
+	adminCtx := context.WithValue(context.Background(), auth.UserContextKey, &auth.AccessClaims{
+		Email: "admin@system.de",
+		Role:  "ADMIN",
+	})
+
+	body, _ := json.Marshal(launcher.ExportedSettings{
+		Admin: launcher.AdminSettings{Email: "explicit@solar.de"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/import", bytes.NewReader(body)).WithContext(adminCtx)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handlers.NewSettingsHandler(explicitDir).ImportSettings(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	_, err := os.Stat(filepath.Join(explicitDir, ".env"))
+	require.NoError(t, err, "explicit baseDir must win")
+	_, err = os.Stat(filepath.Join(configDir, ".env"))
+	require.True(t, os.IsNotExist(err), "CONFIG_DIR must not be written when a baseDir is passed")
+}
