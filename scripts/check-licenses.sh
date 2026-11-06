@@ -373,11 +373,14 @@ async function main() {
     }
     if (!used.has(k)) {
       const row = byName.get(norm(e.package));
-      const hint = row
-        ? classify(row.license).tier === "permissive"
+      const cls = row ? classify(row.license).tier : null;
+      const hint = !row
+        ? `the dependency is not in ${CSV_PATH} at all — it was removed, renamed, or the entry is a typo.`
+        : cls === "permissive"
           ? `the CSV lists it as ${row.license} (${CSV_PATH}:${row.no}), which is permissive — no acceptance is required, so this entry is noise, not a decision. Delete it.`
-          : `the CSV lists it as ${row.license} (${CSV_PATH}:${row.no}) — the licence changed or the entry is mistyped, so this acceptance does not cover what is in use now.`
-        : `the dependency is not in ${CSV_PATH} at all — it was removed, renamed, or the entry is a typo.`;
+          : cls === "banned"
+            ? `the CSV lists it as ${row.license} (${CSV_PATH}:${row.no}) — that licence is hard-banned, so no acceptance can ever cover it. Drop the dependency and this entry.`
+            : `the CSV lists it as ${row.license} (${CSV_PATH}:${row.no}) — the licence changed or the entry is mistyped, so this acceptance does not cover what is in use now.`;
       blocking.push(
         `DEAD        acceptance for ${label} matches nothing.\n` +
         `              ${hint}\n` +
