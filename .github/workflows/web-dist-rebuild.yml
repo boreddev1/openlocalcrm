@@ -1,0 +1,193 @@
+name: Web Dist Rebuild Companion
+
+# Issue #116. `web/dist` is committed and embedded into the Go binary via
+# //go:embed (repo invariant #5), so every change to a *shipped* web dependency
+# must be accompanied by a rebuilt bundle. Dependabot cannot provide that: GitHub
+# refuses writes to Dependabot branches (`maintainerCanModify=false`), so its PRs
+# fail the ci.yml step "Freshness Gate — committed web/dist must match a fresh
+# build" — and because that step sits before the Playwright steps, the bundle
+# state is never browser-validated either (measured 2026-11-06: 5 failed runs,
+# 10 skipped steps). The human fix so far was PR #114: one commit with the
+# rebuilt `web/dist`. This workflow is that pattern as machinery.
+#
+# WHAT IT DOES
+#   nightly: build `main` exactly like ci.yml does and compare the result with the
+#   committed bundle. Identical  -> green, nothing is written anywhere.
+#   Different -> one long-lived companion PR on branch `automation/web-dist-rebuild`
+#   containing ONLY the rebuilt `web/dist`, opened (or updated) — never re-opened
+#   per tick. See scripts/web-dist-companion.sh for the no-spam rules.
+#
+# WHAT IT DELIBERATELY DOES NOT DO
+#   * It does not touch `ci.yml` or its freshness step, and it does not rebuild
+#     inside someone else's PR (that is the part GitHub blocks).
+#   * No third-party "create pull request" action and no npm dependency: branch
+#     and PR are made with `git` + `gh` and the built-in token.
+#   * No PAT, no secrets, no `write-all`. Scopes are per job, see below.
+#
+# LEAST PRIVILEGE, AND WHY THERE ARE TWO JOBS
+#   The token GitHub mints is scoped per *job*, not per step. Detection runs daily
+#   and almost always finds nothing, so detection runs with `contents: read` +
+#   `pull-requests: read` and never holds a write-capable token. The write job
+#   exists only when there is something to write. Splitting further (detect in one
+#   job, publish in another, handing the built bundle over) would need an
+#   artifact, i.e. `actions: write` — a wider scope, not a narrower one, so the
+#   publish job rebuilds instead.
+#
+# THE CHECKS ON THE PR IT OPENS (read this before judging the design)
+#   GitHub suppresses workflow-triggered events: "events triggered by the
+#   GITHUB_TOKEN will not create a new workflow run" — with a documented exception
+#   for automation-opened PRs: "when a workflow using GITHUB_TOKEN creates or
+#   updates a pull request, the resulting `pull_request` event creates workflow
+#   runs in an **approval-required** state" ("still allowing CI workflows to run on
+#   pull requests created by automation"). So ci.yml DOES come to this PR, but it
+#   waits for one "Approve and run" click from someone with write access. That is
+#   why the companion PR body says so out loud instead of pretending it is green.
+#   A `workflow_dispatch` trick is not available: ci.yml has no such trigger, and
+#   runs started that way do not satisfy required status checks anyway.
+
+on:
+  schedule:
+    # 02:30 UTC daily. Dependabot opens its weekly bumps around 01:00-05:00 UTC,
+    # so a stale bundle on main is caught before the next human starts work.
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Nur prüfen und Bericht schreiben — kein Branch-Push, kein PR'
+        type: boolean
+        default: false
+
+concurrency:
+  group: web-dist-rebuild-companion
+  cancel-in-progress: false
+
+jobs:
+  detect-drift:
+    name: Compare committed web/dist with a fresh build of main
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      drift: ${{ steps.freshness.outputs.drift }}
+      has_open_pr: ${{ steps.companion.outputs.has_open_pr }}
+    steps:
+      # Full history on purpose: the drift window starts at the last commit that
+      # touched web/dist, and the version table diffs web/pnpm-lock.yaml against
+      # it. The repo is ~42 MB, so this is cheap. Always main — a dispatched run
+      # must describe main, not the branch the file happened to live on.
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.4.1
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install Web Dependencies
+        run: cd web && pnpm install --frozen-lockfile
+
+      - name: Build Web Production Bundle
+        run: cd web && pnpm build
+
+      # Same comparison ci.yml's freshness gate makes (git status --porcelain
+      # --untracked-files=all -- web/dist), so the two can never disagree.
+      - name: Compare freshly built web/dist with committed web/dist
+        id: freshness
+        shell: bash
+        run: ./scripts/web-dist-companion.sh check
+
+      - name: Report companion PR state
+        id: companion
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/web-dist-companion.sh probe
+
+      # Dry runs still show what WOULD be filed, so the mechanism stays reviewable
+      # without producing an artifact.
+      - name: Preview the companion PR body (dry run only)
+        if: github.event.inputs.dry_run == 'true' && steps.freshness.outputs.drift == 'true'
+        shell: bash
+        run: ./scripts/web-dist-companion.sh body >> "$GITHUB_STEP_SUMMARY"
+
+  open-companion-pr:
+    name: Open or update the one companion PR
+    needs: [ detect-drift ]
+    # Runs when there is drift to deliver, or when drift is gone but a companion
+    # PR is still open and has become pointless (it gets closed by the script).
+    if: >-
+      github.event.inputs.dry_run != 'true' &&
+      (needs.detect-drift.outputs.drift == 'true' ||
+       needs.detect-drift.outputs.has_open_pr == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write      # push/reset refs/heads/automation/web-dist-rebuild
+      pull-requests: write # open, update, or close the single companion PR
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.4.1
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install Web Dependencies
+        run: cd web && pnpm install --frozen-lockfile
+
+      - name: Build Web Production Bundle
+        run: cd web && pnpm build
+
+      # Rebuilds instead of trusting the detect job's tree: the bundle this step
+      # produces is the bundle that gets committed. The script re-checks drift
+      # itself and no-ops if main moved and the drift is gone.
+      - name: Deliver the rebuilt web/dist as one companion PR
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/web-dist-companion.sh publish
