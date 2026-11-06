@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main ]
 
+# Least privilege (issue #107): declare what the workflow actually uses instead of
+# inheriting the repo default. Any scope NOT listed here becomes `none`; jobs may
+# add narrow scopes they need (see frontend-and-e2e). Do not blanket `write-all`.
+permissions:
+  contents: read
+
 jobs:
   backend-test:
     name: Go Backend Tests & License Check
@@ -51,6 +57,13 @@ jobs:
   frontend-and-e2e:
     name: Web Frontend Build & Playwright E2E
     runs-on: ubuntu-latest
+    # The audit cross-check needs the Dependabot alerts API (security-events) and
+    # the ORPHANED linked-issue check needs issues reads. Everything else keeps the
+    # workflow-level `contents: read` (issue #107).
+    permissions:
+      contents: read
+      security-events: read
+      issues: read
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -88,6 +101,19 @@ jobs:
         run: cd web && pnpm install --frozen-lockfile
 
       - name: Run Security Audit
+        env:
+          # gh resolves credentials in the order GH_TOKEN > GITHUB_TOKEN > keyring.
+          # The runner does NOT export the workflow token into step envs, so the
+          # cross-check could never authenticate on CI (issue #107). Passing it as
+          # GH_TOKEN changes nothing for local runs, which fall back to the keyring.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Strict mode: a cross-check that cannot verify GitHub's open Dependabot
+          # alerts fails the step instead of only warning. Enabled exactly where the
+          # workflow token can authenticate: push-to-main and same-repo PRs. Fork PRs
+          # and Dependabot-authored PRs run on a non-elevatable read-only token, so
+          # they keep the loud-degrade warning path rather than a permanent red.
+          # Transient API failures get bounded retries first (see the script).
+          WEB_AUDIT_REQUIRE_CROSSCHECK: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
         run: cd web && node ../scripts/check-web-audit.mjs
 
       - name: Verify Code Formatting (Prettier)

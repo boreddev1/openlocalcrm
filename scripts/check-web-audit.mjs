@@ -18,10 +18,12 @@
  * swallowed: the acceptance is visible in the build log, dated, attributed, and
  * linked to an issue. An unusable audit result is an error, never a pass.
  *
- * Source-lag cross-check (non-blocking): `pnpm audit` only knows what npm's advisory
- * source has already synced. Measured on 2026-10-20: GitHub carried the vite/
- * launch-editor advisory for ~33 minutes before `pnpm audit` reported it. So every
- * run also queries the GitHub Dependabot alerts API (`dependabot/alerts?state=open`,
+ * Source-lag cross-check (its findings are non-blocking; on strict runs its FAILURE
+ * to run is blocking — see the degradation policy below): `pnpm audit` only knows
+ * what npm's advisory source has already synced. Measured on 2026-10-20: GitHub
+ * carried the vite/launch-editor advisory for ~33 minutes before `pnpm audit`
+ * reported it. So every run also queries the GitHub Dependabot alerts API
+ * (`dependabot/alerts?state=open`,
  * via `gh api --paginate` — plain `--paginate`, never `--slurp`: gh builds older than
  * the flag's release reject it with "unknown flag: --slurp" and did silently degrade
  * this cross-check to a no-op until 2026-11-06; the pages it does print are parsed as
@@ -30,22 +32,40 @@
  * WARNING — classified against `web/pnpm-lock.yaml`: a GitHub-only alert that IS in
  * the tree is the pnpm source lagging behind, one whose package is NOT in the
  * lockfile is an alert about something this gate cannot see (stale alert, another
- * manifest, or a lockfile mismatch) and says so. Blocking behaviour is unchanged:
- * only the pnpm source (part of the lockfile decision) can fail the gate. A network
- * hiccup, a missing `gh`, or a token without `security-events: read` degrades loudly
- * — "COULD NOT CHECK — UNVERIFIED" on the per-source line AND as a WARNING — and
- * exits per the old rules: a check that cannot reach GitHub must never turn CI red,
- * but it must never read as "no open alerts" either. Running with live data needs a
- * gh the step can authenticate (local keyring login, or an exported
- * GH_TOKEN/GITHUB_TOKEN whose permission covers the alerts API).
+ * manifest, or a lockfile mismatch) and says so. Degradation policy (issue #107 —
+ * a security gate must not silently pass because it could not verify, but a gate
+ * that goes red on every API blip gets muted within a week and is worse overall):
+ *
+ *   LOCAL / restricted-token runs (fork PR, dependabot PR): a network hiccup, a
+ *     missing `gh`, or an unusable token degrades loudly — "COULD NOT CHECK —
+ *     UNVERIFIED" on the per-source line AND as a WARNING — and exits on the old
+ *     rules. The exit code stays decided by the pnpm source (part of the lockfile
+ *     decision); the unverified state must never read as "no open alerts".
+ *   STRICT runs (ci.yml sets WEB_AUDIT_REQUIRE_CROSSCHECK for push-to-main and
+ *     same-repo PRs — the runs whose workflow token can authenticate): an
+ *     unverified cross-check is BLOCKING. The failure names exactly what was not
+ *     verified and what to do. Transient failures (HTTP 408/429/5xx, network-class
+ *     errors) are retried first: at most 3 attempts, fixed 2s/4s backoff, never an
+ *     unbounded wait; 401/403 and missing-tool failures are configuration errors
+ *     and fail fast without retrying. `WEB_AUDIT_OFFLINE=1` contradicts strict
+ *     mode and is itself a hard error.
+ *
+ * Running with live data needs a gh the step can authenticate: local keyring login,
+ * or an exported GH_TOKEN/GITHUB_TOKEN whose permission covers the alerts API
+ * (ci.yml passes `secrets.GITHUB_TOKEN` as GH_TOKEN and grants the job
+ * security-events + issues reads — the runner never exports the token on its own).
  *
  * The linked-issue check (ORPHANED) is the one exception that needs GitHub: an
  * acceptance whose issue is closed or does not exist blocks, because a closed issue
  * is not a paper trail (AGENTS.md: acceptances are "issue-linked"). When GitHub
  * cannot be reached the state is unverifiable — printed as a warning, never a
- * failure, for the same reason as above.
+ * failure: an unreachable issue API says nothing about the acceptance, and this
+ * check deliberately stays out of the strict blocking path so one transient blip
+ * on one issue lookup cannot red-face an otherwise-verified run.
  *
- * Set WEB_AUDIT_OFFLINE=1 to skip every network call (offline tests, air-gapped dev).
+ * Set WEB_AUDIT_OFFLINE=1 to skip every network call (offline tests, air-gapped
+ * dev). Strict runs reject this combination outright — offline is not a way to
+ * pass a run that must verify.
  *
  * Run from the `web/` directory:  cd web && node ../scripts/check-web-audit.mjs
  */
@@ -57,6 +77,12 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const exceptionsPath = join(repoRoot, "web", "audit-exceptions.json");
 const offlineMode = process.env.WEB_AUDIT_OFFLINE === "1";
+// Strict mode (issue #107): set by ci.yml on runs whose workflow token can
+// authenticate (push-to-main, same-repo PRs). Locally it is unset, so local
+// behaviour is unchanged. GitHub expressions render booleans as "true"/"false".
+const requireCrossCheck = ["1", "true"].includes(
+  (process.env.WEB_AUDIT_REQUIRE_CROSSCHECK ?? "").toLowerCase(),
+);
 
 const warnings = [];
 
@@ -65,6 +91,17 @@ function fail(lines) {
   for (const line of lines) process.stdout.write(`  ${line}\n`);
   process.stdout.write("\nweb audit: FAILED\n");
   process.exit(1);
+}
+
+// An escape hatch is not a degradation policy: if this run must verify the
+// Dependabot state, it must not also declare itself offline.
+if (offlineMode && requireCrossCheck) {
+  fail([
+    "WEB_AUDIT_OFFLINE=1 contradicts WEB_AUDIT_REQUIRE_CROSSCHECK on this run.",
+    "  Strict mode demands a verified Dependabot cross-check; offline mode skips",
+    "  every network call. On CI WEB_AUDIT_OFFLINE must never be set.",
+    "  See docs/WEB_AUDIT_POLICY.md — do not resolve this by relaxing the gate.",
+  ]);
 }
 
 /** Key that binds an exception to exactly one advisory, never to a whole package. */
@@ -110,7 +147,7 @@ function ghRun(args) {
   if (run.error !== undefined) {
     const reason =
       run.error.code === "ENOENT" ? "gh CLI not installed" : run.error.message ?? String(run.error);
-    return { ok: false, reason };
+    return { ok: false, reason, code: run.error.code };
   }
   if (run.status !== 0 || run.signal !== null) {
     const status = /HTTP (\d{3})/.exec(run.stderr ?? "");
@@ -118,6 +155,55 @@ function ghRun(args) {
     return { ok: false, status: status ? Number(status[1]) : undefined, reason: firstLine.slice(0, 180) };
   }
   return { ok: true, stdout: run.stdout };
+}
+
+// ---------------------------------------------------------------------------
+// Bounded retry for the alerts cross-check. Transient failures only (HTTP
+// 408/429/5xx, network-class spawn/CLI errors): at most ALERT_ATTEMPTS tries
+// with fixed 2s/4s backoff, so the worst-case added wall time is bounded and
+// predictable — this repo budgets short runtimes, and an unbounded retry loop
+// is how a "temporarily red" gate becomes a hung one. 401/403, a missing gh,
+// and a missing remote are configuration errors: retrying them changes nothing.
+// ---------------------------------------------------------------------------
+const ALERT_ATTEMPTS = 3;
+const ALERT_BACKOFF_MS = [2000, 4000];
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Would retrying this gh failure plausibly help? Only for transport-class faults. */
+function isTransientGhFailure(run) {
+  if (run.status === 408 || run.status === 429) return true;
+  if (typeof run.status === "number" && run.status >= 500) return true;
+  if (typeof run.status !== "number") {
+    return /ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENETUNREACH|ENOTFOUND|timeout/i.test(
+      `${run.code ?? ""} ${run.reason ?? ""}`,
+    );
+  }
+  return /dial tcp|could not resolve|connection reset|broken pipe|TLS|EOF/i.test(run.reason ?? "");
+}
+
+/** `ghRun` with the bounded retry above; prints every retry so the log tells the story. */
+function ghRunRetried(args, label) {
+  let run;
+  for (let attempt = 1; attempt <= ALERT_ATTEMPTS; attempt++) {
+    run = ghRun(args);
+    if (run.ok) {
+      if (attempt > 1) {
+        process.stdout.write(`    ${label}: recovered on attempt ${attempt}/${ALERT_ATTEMPTS}\n`);
+      }
+      return run;
+    }
+    if (!isTransientGhFailure(run) || attempt === ALERT_ATTEMPTS) return run;
+    const backoff = ALERT_BACKOFF_MS[attempt - 1];
+    process.stdout.write(
+      `    ${label}: transient failure (${String(run.reason).slice(0, 90)}) — retrying in ` +
+        `${backoff / 1000}s (attempt ${attempt + 1}/${ALERT_ATTEMPTS})\n`,
+    );
+    sleepSync(backoff);
+  }
+  return run;
 }
 
 /** owner/repo from the local git remote. No network. */
@@ -207,7 +293,10 @@ function alertFailureReason(run) {
   if (/GH_TOKEN|auth/i.test(reason)) {
     return `${reason}; gh needs a local login or an exported GH_TOKEN/GITHUB_TOKEN`;
   }
-  if (run.status !== undefined) return `${reason} (HTTP ${run.status})`;
+  if (run.status !== undefined) {
+    // gh's own stderr usually already ends in "(HTTP nnn)" — don't print it twice.
+    return reason.includes(`HTTP ${run.status}`) ? reason : `${reason} (HTTP ${run.status})`;
+  }
   return reason;
 }
 
@@ -216,11 +305,14 @@ function fetchOpenNpmAlerts(slug) {
   // Plain `--paginate`, NOT `--slurp`: the flag does not exist in every gh 2.x
   // build (gh 2.46.0 fails the call with "unknown flag: --slurp"), and as a
   // hard-to-read CLI error it silently disarmed this entire cross-check.
-  const run = ghRun([
-    "api",
-    `repos/${slug}/dependabot/alerts?state=open&per_page=100`,
-    "--paginate",
-  ]);
+  const run = ghRunRetried(
+    [
+      "api",
+      `repos/${slug}/dependabot/alerts?state=open&per_page=100`,
+      "--paginate",
+    ],
+    "dependabot alerts",
+  );
   if (!run.ok) return { ok: false, reason: alertFailureReason(run) };
   if ((run.stdout ?? "").trim() === "") {
     // A verified-empty list still prints `[]` — a successful call with NO body is
@@ -314,16 +406,21 @@ process.stdout.write(`  sources queried ${new Date().toISOString()}:\n`);
 process.stdout.write(`    pnpm audit:              ${pnpmIdList}\n`);
 
 let ghAlertsKnown = false;
+let strictCrossCheckFailure = null;
 const ghOnly = [];
 const ghCheck = slug === null ? { ok: false, reason: "no github.com remote resolved" } : fetchOpenNpmAlerts(slug);
 if (!ghCheck.ok) {
   process.stdout.write(
     `    GitHub dependabot open:  COULD NOT CHECK — UNVERIFIED (${ghCheck.reason})\n` +
-    `                             the exit code is decided by the old rules alone.\n`,
+    (requireCrossCheck
+      ? `                             strict mode (issue #107): this alone FAILS the gate below.\n`
+      : `                             the exit code is decided by the old rules alone.\n`),
   );
   // Loud degradation, in the WARNING block too: "could not check" must never be
-  // readable as "no open alerts". Fail-closed stays on the pnpm side; the
-  // Dependabot state is explicitly unverified here, not silently accepted.
+  // readable as "no open alerts". Outside strict runs fail-closed stays on the
+  // pnpm side; the Dependabot state is explicitly unverified here, not silently
+  // accepted. On strict runs the unverified state itself blocks (see below).
+  if (requireCrossCheck) strictCrossCheckFailure = ghCheck.reason;
   warnings.push(
     `Dependabot cross-check did not run (${ghCheck.reason}) — GitHub's open alerts are ` +
     `UNVERIFIED this run. Do not read the gate result as "no open alerts".`,
@@ -385,6 +482,28 @@ if (exceptions.length === 0 && advisories.length > 0) {
 const blocking = [];
 const known = [];
 const usedKeys = new Set();
+
+// Strict mode (issue #107): on the runs where the workflow token MUST be able to
+// authenticate, a cross-check that did not verify is itself a finding — a gate
+// that green-lights because it could not look is exactly the bug that was filed.
+if (strictCrossCheckFailure !== null) {
+  blocking.push(
+    `UNVERIFIED  the Dependabot cross-check did not run and this run is STRICT\n` +
+      `            (ci.yml sets WEB_AUDIT_REQUIRE_CROSSCHECK for push-to-main and same-repo PRs).\n` +
+      `            NOT VERIFIED: GitHub's open Dependabot alerts for ${slug ?? "the repository"}.\n` +
+      `            This does NOT mean the Security tab is clean — it means this gate could not look.\n` +
+      `            reason: ${strictCrossCheckFailure}\n` +
+      `            retries: transient faults get up to ${ALERT_ATTEMPTS} attempts with fixed 2s/4s\n` +
+      `            backoff — see the retry lines in the log above; auth/config faults fail fast\n` +
+      `            What to do:\n` +
+      `            - API outage: re-run this job once https://www.githubstatus.com is green.\n` +
+      `            - HTTP 401/403 or auth errors: the token setup is broken. ci.yml must keep the\n` +
+      `              job-level security-events + issues permissions AND the GH_TOKEN step env.\n` +
+      `            - Never silence this by deleting those from ci.yml, by setting\n` +
+      `              WEB_AUDIT_OFFLINE=1, or by relaxing the script — that is the bug class of\n` +
+      `              issue #107. See docs/WEB_AUDIT_POLICY.md.`,
+  );
+}
 
 for (const advisory of advisories) {
   const name = advisory.module_name ?? "unknown";

@@ -64,25 +64,60 @@ printed, so "GitHub-only" never means one uniform reassurance:
 - An **empty** alert list (`none (0)`) is verified-and-empty, distinct from "could not
   check" — the two must never be conflated.
 
-- **Blocking behaviour is unchanged: only the pnpm source (part of the lockfile
-  decision) and the exception file itself can fail the gate.** If the cross-check
-  cannot run, the gate prints `COULD NOT CHECK — UNVERIFIED (<reason>)`, adds a
-  `WARNING` entry saying the Dependabot state is unverified this run, and exits per
-  the old rules — a network hiccup never turns CI red, but it must never be readable
-  as "no open alerts" either. Failure reasons are classified: missing `gh`, missing
-  authentication (`gh` login or an exported `GH_TOKEN`/`GITHUB_TOKEN`), and HTTP 401/403
-  with a note that the alerts API needs `security-events: read`.
+## The degradation policy — strict where the token can work, loud elsewhere
 
-**Known gap on CI:** for the cross-check to query live data the step needs a `gh`
-that can authenticate. Locally that is the keyring login; on a runner nothing is
-exported today — `ci.yml` grants the audit step no token and the workflow no
-`security-events: read` permission — so on CI the cross-check currently takes the
-loud degraded path above. Closing that gap is a workflow change (export
-`GITHUB_TOKEN`, grant `security-events: read`), not a weakening of the gate.
+Before issue #107 was fixed, the cross-check **could never authenticate on CI**:
+`ci.yml` granted the workflow no `permissions:` and the audit step no token (the
+runner does not export `GITHUB_TOKEN` into step environments on its own). Every CI
+run therefore took the degraded path — which the old policy said must never go red.
+The gate "passed" while its GitHub half was structurally dead. That is the bug class:
+unverified silently equalled verified.
 
-Set `WEB_AUDIT_OFFLINE=1` to skip all network calls (offline tests, air-gapped work);
-the gate then prints the skipped cross-check as `COULD NOT CHECK — UNVERIFIED` and a
-`WARNING` and still evaluates the old rules.
+The fix has two halves, and the policy now distinguishes **unverified** from
+**verified-clean** by run type:
+
+- **Strict runs** — `push` to `main` and same-repo `pull_request`s, i.e. the runs
+  whose workflow token can be granted the alerts API. `ci.yml` sets
+  `WEB_AUDIT_REQUIRE_CROSSCHECK` for exactly these. A cross-check that cannot verify
+  GitHub's open Dependabot alerts **fails the step**, naming what was not verified
+  and what to do. The failure message points at the two legitimate causes: a GitHub
+  API outage (re-run once <https://www.githubstatus.com> is green) or a broken
+  token/permission setup in `ci.yml`.
+- **Non-strict runs** — local dev, fork PRs, and Dependabot-authored PRs, where the
+  token is read-only and non-elevatable by design. There, an unverified cross-check
+  keeps the old loud behaviour: `COULD NOT CHECK — UNVERIFIED (<reason>)` plus a
+  `WARNING`, exit decided by the pnpm source and the exception file alone. A gate
+  that goes red on every transient blip — or permanently red on every fork PR —
+  gets muted within a week and is worse overall; that is why strict mode is scoped
+  to the runs where it can actually hold the promise.
+- **Bounded retries absorb blips.** Transient failures (HTTP 408/429/5xx,
+  network-class errors) are retried up to 3 attempts with fixed 2s/4s backoff —
+  at most ~6s of added waiting, fully logged, never an unbounded loop (runtime
+  budget culture, AGENTS.md). 401/403 and missing-`gh` are configuration errors and
+  fail fast without retrying.
+- **`WEB_AUDIT_OFFLINE=1` + strict is a hard error.** Offline mode is for local
+  offline tests and air-gapped work; a run that is required to verify may not
+  declare itself offline. Outside strict mode it still just skips the network calls
+  and prints the loud unverified warning.
+
+The CI wiring that makes strict mode possible lives in `ci.yml`: the
+`frontend-and-e2e` job declares `permissions: {contents: read, security-events:
+read, issues: read}` (least privilege — the alerts API needs `security-events`, the
+ORPHANED issue check needs `issues: read`), and the audit step passes
+`GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`. If GitHub ever tightens the alerts API
+further and `read` is not sufficient, the minimum replacement is the narrowest
+working scope on this job — never `write-all`, never dropping the env/permissions
+to silence a red run. Deleting or relaxing any of that is itself the #107 bug
+class, not a fix.
+
+The `ORPHANED` linked-issue lookup deliberately stays outside the strict path: one
+transient failure on an individual issue lookup must not red-face an otherwise
+fully-verified run; it warns, and the cross-check result above it is what strict
+mode protects.
+
+Set `WEB_AUDIT_OFFLINE=1` (non-strict runs only, see above) to skip all network
+calls; the gate then prints the skipped cross-check as `COULD NOT CHECK —
+UNVERIFIED` and a `WARNING` and still evaluates the old rules.
 
 ## What an acceptance must contain
 
@@ -117,6 +152,10 @@ remove the acceptance — do not keep both.
 ## Forbidden
 
 - `--audit-level`, `--ignore`, or dropping the CI step — these hide findings instead of tracking them.
+- Removing `GH_TOKEN`, `WEB_AUDIT_REQUIRE_CROSSCHECK`, or the `security-events` /
+  `issues` permissions from the audit job in `ci.yml` to silence a strict failure —
+  that recreates the exact #107 bug: a gate that cannot look while reporting no problem.
+- Setting `WEB_AUDIT_OFFLINE=1` in CI — strict runs reject the combination outright.
 - Acceptances without `issue`, `reason`, `acceptedBy`, `acceptedOn`, `reviewBy`.
 - Extending `reviewBy` without a new `reason`. Re-accepting is allowed; drifting is not.
 - Closing the linked issue while the acceptance is still live (the gate fails `ORPHANED`).
