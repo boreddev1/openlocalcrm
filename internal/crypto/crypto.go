@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -16,22 +17,289 @@ import (
 var (
 	keyCache []byte
 	keyMu    sync.RWMutex
+
+	// keyNoticeMu guards the once-per-process latch for the key-location
+	// warning. It is deliberately separate from keyMu: logKeyNotice is called
+	// while GetOrCreateMasterKey holds keyMu.
+	keyNoticeMu     sync.Mutex
+	keyNoticeLogged bool
 )
 
-// GetKeyPath returns the resolved file path for the master secret key.
-func GetKeyPath() string {
-	path := os.Getenv("SECRETS_KEY_PATH")
-	if path == "" {
-		path = os.Getenv("SECRET_KEY_PATH")
-	}
-	if path == "" {
-		path = "data/secrets.key"
-	}
-	return path
+// defaultKeyFileName is the file name used when the key location is derived
+// from another directory instead of being configured outright.
+const defaultKeyFileName = "secrets.key"
+
+// legacyKeyRelPath is the pre-#122 default location, relative to the process
+// working directory - the old code literally did `path = "data/secrets.key"`.
+var legacyKeyRelPath = filepath.Join("data", defaultKeyFileName)
+
+// legacyKeyContainerPath is that same file for the documented container
+// installs: Dockerfile.server:35 and Dockerfile.worker:13 both set
+// WORKDIR /app, so their cwd-relative default was /app/data/secrets.key - an
+// image-layer path with no volume behind it (R-05,
+// docs/review/2026-09-30/03-security-auth.md). It is listed separately so the
+// read-only rescue still finds the key if someone runs the image with a
+// different working directory. A var (not a const) only so the unit tests can
+// sandbox it - see clearKeyEnv in crypto_test.go.
+var legacyKeyContainerPath = "/app/data/secrets.key"
+
+// KeyPathSource names which step of the resolution chain produced a path.
+type KeyPathSource string
+
+const (
+	// KeyPathExplicit: SECRETS_KEY_PATH / SECRET_KEY_PATH, honored verbatim.
+	KeyPathExplicit KeyPathSource = "explicit"
+	// KeyPathStorage: derived from STORAGE_PATH / STORAGE_LOCAL_DIR.
+	KeyPathStorage KeyPathSource = "storage"
+	// KeyPathUserConfig: derived from os.UserConfigDir().
+	KeyPathUserConfig KeyPathSource = "userconfig"
+	// KeyPathLegacy: an existing pre-#122 key reused read-only. A legacy
+	// location is never created, repaired or overwritten.
+	KeyPathLegacy KeyPathSource = "legacy"
+)
+
+// KeyResolution is the full answer of ResolveKeyPath: which file to read, why
+// that one, where a brand-new key may be written, and whether an unused legacy
+// key is sitting around that the operator should know about.
+type KeyResolution struct {
+	// Path is the file the master key is read from.
+	Path string
+	// Source is the resolution step that produced Path.
+	Source KeyPathSource
+	// CreatePath is where GetOrCreateMasterKey is allowed to write a new key.
+	// It differs from Path only for a legacy rescue (where it stays the normal
+	// derived location, which is precisely why nothing is written there), and
+	// is empty when no location can be derived at all. It is never a legacy
+	// location.
+	CreatePath string
+	// IgnoredLegacyPath is a legacy key file that exists but was not chosen,
+	// because a key already lives at the current default location.
+	IgnoredLegacyPath string
 }
 
-// GetOrCreateMasterKey loads the master 256-bit AES key from SECRETS_KEY_PATH,
-// or generates a new one with 0600 permissions if absent.
+// Notice returns the operator-facing warning for this resolution, or "" when
+// there is nothing to report. Pure, so tests can assert the text without
+// capturing log output.
+func (r KeyResolution) Notice() string {
+	switch r.Source {
+	case KeyPathLegacy:
+		if r.CreatePath == "" {
+			return fmt.Sprintf("reusing the existing legacy master key at %s; that location is "+
+				"deprecated and read-only (the server never creates or repairs a key there) and no "+
+				"replacement location could be derived - set SECRETS_KEY_PATH", r.Path)
+		}
+		return fmt.Sprintf("reusing the existing legacy master key at %s; that location is deprecated "+
+			"and read-only (the server never creates or repairs a key there). To silence this warning, "+
+			"copy the file to %s or pin SECRETS_KEY_PATH to the key that should be authoritative",
+			r.Path, r.CreatePath)
+	case KeyPathStorage, KeyPathUserConfig:
+		if r.IgnoredLegacyPath != "" {
+			return fmt.Sprintf("using master key %s while an unused legacy key exists at %s; if stored "+
+				"secrets stop decrypting after an upgrade, that legacy file is the one to copy to %s or "+
+				"pin with SECRETS_KEY_PATH", r.Path, r.IgnoredLegacyPath, r.Path)
+		}
+	}
+	return ""
+}
+
+// GetKeyPath returns the resolved file path for the master secret key. It is
+// the path-only form of ResolveKeyPath; see that function for the order and
+// the tie-break rules.
+func GetKeyPath() (string, error) {
+	res, err := ResolveKeyPath()
+	if err != nil {
+		return "", err
+	}
+	return res.Path, nil
+}
+
+// ResolveKeyPath resolves the location of the master secret key.
+//
+// Resolution order - the first entry that yields a value wins:
+//
+//  1. SECRETS_KEY_PATH (canonical) - honored verbatim, the operator owns it.
+//  2. SECRET_KEY_PATH (legacy environment alias) - same.
+//  3. The current default location, but only if a key file already exists
+//     there: $STORAGE_PATH/keys/secrets.key, or $STORAGE_LOCAL_DIR/... (the
+//     same alias chain cmd/server uses for the storage root).
+//     docker-compose.yml, docker-compose.demo.yml and the launcher template
+//     all set STORAGE_PATH to a directory mounted from a persisted volume, so
+//     server and worker read one and the same key with no extra configuration.
+//     With no storage root configured:
+//     <user config dir>/openlocalcrm/secrets.key (os.UserConfigDir:
+//     $XDG_CONFIG_HOME, %AppData%, ~/Library/Application Support) - the
+//     locally-run and launcher-installed case.
+//  4. An EXISTING key file at a pre-#122 legacy location: <cwd>/data/secrets.key,
+//     then /app/data/secrets.key. This step is a rescue, not a default: it can
+//     only point at a file that is already on disk, it is never a write
+//     target, and choosing it logs a one-time warning (KeyResolution.Notice).
+//  5. Otherwise the location from step 3 is returned as the place where a new
+//     key will be minted. If nothing exists anywhere and no location can be
+//     derived, an error is returned instead of inventing a path: a wrong or
+//     unwritable key path must fail loudly, the same way cmd/server treats an
+//     unpersistable JWT signing key.
+//
+// Tie-break between step 3 and step 4 - documented, because two keys on disk
+// means exactly one of them can be authoritative: if BOTH a legacy file and a
+// file at the current default location exist, the current default location
+// wins and the legacy file is reported through IgnoredLegacyPath. Reasoning:
+// the default location is only populated either by the operator copying the
+// legacy key there (identical bytes - the choice is then a no-op) or by a
+// process that already resolved with this order and encrypted newer secrets
+// with it. Reaching back for the legacy file in that situation would silently
+// invalidate the newer data, which is the very failure class #122 removed. A
+// legacy file is therefore used only while the default location still has no
+// key - i.e. on the first start of an upgraded install, which is the case that
+// would otherwise lose every stored TOTP and email credential.
+//
+// A relative SECRETS_KEY_PATH / SECRET_KEY_PATH / STORAGE_PATH is honored as
+// configured - the operator owns that location and it may well be inside the
+// working directory. The "never write into the working directory" guarantee
+// covers only the places this package picks for itself (steps 3-5), which is
+// what made `go test` a key generator in the first place.
+//
+// There is deliberately no working-directory *default*. The old fallback was
+// "data/secrets.key" relative to the process cwd, so every
+// `go test ./internal/auth/...` generated a fresh 256-bit master key straight
+// into the package directory (issue #122). Only the `*.key` filename rule in
+// .gitignore hid it; any sibling file in that directory stays committable, so
+// a `git add -A` after a test run could ship a real key. Step 4 may read such
+// a file if an older build already wrote one; no code path in this package
+// creates a key at a legacy location.
+func ResolveKeyPath() (KeyResolution, error) {
+	// Best effort: an unreadable cwd only drops the cwd-relative legacy
+	// candidate, it must not break resolution for an install that never had
+	// one to begin with.
+	cwd, _ := os.Getwd()
+	return resolveKeyPath(cwd)
+}
+
+func resolveKeyPath(cwd string) (KeyResolution, error) {
+	if path := firstConfiguredEnv("SECRETS_KEY_PATH", "SECRET_KEY_PATH"); path != "" {
+		return KeyResolution{Path: path, Source: KeyPathExplicit, CreatePath: path}, nil
+	}
+
+	derived, derivedSource, derivedErr := derivedKeyPath()
+	derivedExists := derivedErr == nil && regularFileExists(derived)
+	legacy := firstExistingLegacyKeyPath(cwd, derived)
+
+	switch {
+	case derivedExists:
+		// The current default location holds a key: it is authoritative and
+		// any legacy file is only reported, never used.
+		return KeyResolution{Path: derived, Source: derivedSource, CreatePath: derived, IgnoredLegacyPath: legacy}, nil
+	case legacy != "":
+		// Read-only rescue of a pre-#122 install: keep decrypting with the key
+		// it already has; a brand-new key would still land on the default.
+		return KeyResolution{Path: legacy, Source: KeyPathLegacy, CreatePath: derived}, nil
+	case derivedErr != nil:
+		return KeyResolution{}, derivedErr
+	default:
+		return KeyResolution{Path: derived, Source: derivedSource, CreatePath: derived}, nil
+	}
+}
+
+// derivedKeyPath computes the current default location (steps 3 and 5) and
+// which rule produced it.
+func derivedKeyPath() (string, KeyPathSource, error) {
+	if storage := firstConfiguredEnv("STORAGE_PATH", "STORAGE_LOCAL_DIR"); storage != "" {
+		return filepath.Join(storage, "keys", defaultKeyFileName), KeyPathStorage, nil
+	}
+	if dir, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(dir, "openlocalcrm", defaultKeyFileName), KeyPathUserConfig, nil
+	}
+	return "", "", errors.New("cannot resolve a location for the master secret key: " +
+		"set SECRETS_KEY_PATH to an absolute path (e.g. /app/keys/secrets.key), " +
+		"or STORAGE_PATH so it can be derived from the storage directory")
+}
+
+// legacyKeyCandidates lists the pre-#122 locations in precedence order. Only
+// files that already exist are ever considered; nothing here is created.
+func legacyKeyCandidates(cwd string) []string {
+	candidates := make([]string, 0, 2)
+	add := func(path string) {
+		for _, have := range candidates {
+			if samePath(have, path) {
+				return
+			}
+		}
+		candidates = append(candidates, path)
+	}
+	if cwd != "" {
+		add(filepath.Join(cwd, legacyKeyRelPath))
+	}
+	add(legacyKeyContainerPath)
+	return candidates
+}
+
+// firstExistingLegacyKeyPath returns the first legacy key file that exists,
+// skipping anything that is the derived location itself.
+func firstExistingLegacyKeyPath(cwd, derived string) string {
+	for _, candidate := range legacyKeyCandidates(cwd) {
+		if samePath(candidate, derived) {
+			continue
+		}
+		if regularFileExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func samePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+// regularFileExists reports whether path names an existing regular file.
+func regularFileExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
+}
+
+// logKeyNotice prints an operator warning at most once per process - the
+// resolution itself is pure and may be queried repeatedly.
+func logKeyNotice(msg string) {
+	if msg == "" {
+		return
+	}
+	keyNoticeMu.Lock()
+	defer keyNoticeMu.Unlock()
+	if keyNoticeLogged {
+		return
+	}
+	keyNoticeLogged = true
+	//nolint:gosec // G706: the value is operator configuration (a path), not attacker-controlled text
+	log.Printf("[Crypto] [WARN] %s", msg)
+}
+
+// resetKeyNoticeForTest clears the once-per-process latch.
+func resetKeyNoticeForTest() {
+	keyNoticeMu.Lock()
+	defer keyNoticeMu.Unlock()
+	keyNoticeLogged = false
+}
+
+// firstConfiguredEnv returns the first non-empty value among names.
+func firstConfiguredEnv(names ...string) string {
+	for _, name := range names {
+		if v := os.Getenv(name); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// GetOrCreateMasterKey loads the master 256-bit AES key from the location
+// resolved by ResolveKeyPath, or generates a new one with 0600 permissions at
+// KeyResolution.CreatePath if absent. A key resolved from a legacy location is
+// only ever read: if it cannot be read or parsed, this returns an error rather
+// than writing into (or repairing) that deprecated place.
 func GetOrCreateMasterKey() ([]byte, error) {
 	keyMu.RLock()
 	if len(keyCache) == 32 {
@@ -51,19 +319,42 @@ func GetOrCreateMasterKey() ([]byte, error) {
 		return cp, nil
 	}
 
-	keyPath := GetKeyPath()
-	if data, err := os.ReadFile(keyPath); err == nil {
-		if len(data) == 32 {
-			keyCache = make([]byte, 32)
-			copy(keyCache, data)
-			return data, nil
+	res, err := ResolveKeyPath()
+	if err != nil {
+		return nil, err
+	}
+	logKeyNotice(res.Notice())
+
+	if res.Source == KeyPathLegacy {
+		// The location exists (that is why it was chosen) but is deprecated.
+		// Anything other than a usable key there is a hard error: minting a
+		// replacement would be the silent data loss this whole path avoids,
+		// and writing it would put a key back into the working directory.
+		data, readErr := os.ReadFile(res.Path)
+		if readErr != nil {
+			return nil, fmt.Errorf("cannot read the legacy master key at %s: %w - refusing to create a "+
+				"replacement there; copy the file to %s or set SECRETS_KEY_PATH", res.Path, readErr, res.CreatePath)
 		}
-		// If key is base64 encoded
-		if decoded, err := base64.StdEncoding.DecodeString(string(data)); err == nil && len(decoded) == 32 {
-			keyCache = make([]byte, 32)
-			copy(keyCache, decoded)
-			return decoded, nil
+		key, ok := parseStoredKey(data)
+		if !ok {
+			return nil, fmt.Errorf("legacy master key at %s is neither a raw 32-byte key nor a "+
+				"base64-encoded one - refusing to overwrite it; copy a valid key to %s or set SECRETS_KEY_PATH",
+				res.Path, res.CreatePath)
 		}
+		keyCache = make([]byte, 32)
+		copy(keyCache, key)
+		return append([]byte(nil), key...), nil
+	}
+
+	if data, err := os.ReadFile(res.Path); err == nil {
+		if key, ok := parseStoredKey(data); ok {
+			keyCache = make([]byte, 32)
+			copy(keyCache, key)
+			return append([]byte(nil), key...), nil
+		}
+		// Existing but unparseable key: pre-#122 behavior keeps regenerating
+		// over it for non-legacy locations (tracked separately as a fail-open
+		// concern); a legacy location is refused above instead.
 	}
 
 	// Generate new 32-byte key
@@ -72,17 +363,37 @@ func GetOrCreateMasterKey() ([]byte, error) {
 		return nil, fmt.Errorf("failed to generate random secret key: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(keyPath), 0700); err != nil {
+	createPath := res.CreatePath
+	if createPath == "" {
+		return nil, errors.New("cannot create a master key: no writable key location is configured " +
+			"(set SECRETS_KEY_PATH, or STORAGE_PATH so it can be derived from the storage directory)")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(createPath), 0700); err != nil {
 		return nil, fmt.Errorf("failed to create directory for secret key: %w", err)
 	}
 
-	if err := os.WriteFile(keyPath, newKey, 0600); err != nil {
-		return nil, fmt.Errorf("failed to write secret key to %s: %w", keyPath, err)
+	if err := os.WriteFile(createPath, newKey, 0600); err != nil {
+		return nil, fmt.Errorf("failed to write secret key to %s: %w", createPath, err)
 	}
 
 	keyCache = make([]byte, 32)
 	copy(keyCache, newKey)
 	return newKey, nil
+}
+
+// parseStoredKey accepts the two documented on-disk shapes of the master key:
+// 32 raw bytes, or those bytes base64-encoded.
+func parseStoredKey(data []byte) ([]byte, bool) {
+	if len(data) == 32 {
+		key := make([]byte, 32)
+		copy(key, data)
+		return key, true
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(string(data)); err == nil && len(decoded) == 32 {
+		return decoded, true
+	}
+	return nil, false
 }
 
 // SetMasterKeyForTest sets the cached key for testing purposes.

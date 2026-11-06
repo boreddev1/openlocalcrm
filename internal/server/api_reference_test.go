@@ -31,26 +31,40 @@ const inventoryHeading = "Routen-Inventur"
 const inventoryStartMarker = "<!-- route-inventory:start -->"
 const inventoryEndMarker = "<!-- route-inventory:end -->"
 
-// routeEntry is one (method, path) pair. There is deliberately no auth column.
+// routeEntry is one (method, path, auth class) triple.
 //
-// The salvaged branch documented an "Auth" column as "public" or "csrf" and
-// claimed chi records the middleware chain per mount so the walk could derive
-// it. That claim is false for chi v5.5.0: Mux.Routes() reports only the mount
-// pattern and the HTTP methods (Handlers map keys are GET/POST/... plus "*" for
-// a sub-mount), never the middlewares stacked on it. Rather than invent a
-// column the guard cannot verify, the inventory documents only what the walk
-// mechanically knows: which method on which path the router registers.
+// The Auth field's history is the history of issue #115. The salvaged branch
+// documented an "Auth" column as "public" or "csrf" and claimed chi records
+// the middleware chain per mount so the walk could derive it. That claim is
+// false for chi v5.5.0: Mux.Routes() reports only the mount pattern and the
+// HTTP methods, never the middlewares stacked on it. PR #113 therefore
+// shipped the inventory without an auth column at all.
 //
-// (Deriving it by probing — mint a token, fire one request per inventory row,
-// read 401 vs 403 — was evaluated and rejected: the router's rate limiters
-// answer 429 under that load and would be misread as a classification, the
-// connector webhook answers 401 from its own token check and would be filed as
-// JWT-protected, and the CSRF middleware exempts a verified Bearer request, so
-// "csrf required" is not a property of a route but of how the caller
-// authenticates.)
+// Now the class is declared data instead of derived magic: server.RouteAuthClasses
+// (internal/server/route_auth.go) maps path prefixes to classes, is authored
+// next to the mounts it describes (router.go mounts the same constants), and is
+// checked three ways:
+//
+//	a. every walked route resolves to exactly one table row (walkAndClassify
+//	   fails otherwise — a missing or empty table is a failure, never a skip);
+//	b. every table row covers at least one walked route (no stale rows);
+//	c. an unauthenticated request against the built router answers the way the
+//	   class promises (route_auth_class_test.go) — so deleting AuthMiddleware
+//	   from the protected group fails the probe even if the table is untouched.
+//
+// The probe replaces the blanket "fire a request per row and read the status"
+// idea rejected in #113, and it survives its traps only because it is narrow:
+// it never authenticates, so the CSRF Bearer exemption cannot flip an answer;
+// 401-class routes are rejected by the JWT middleware before any limiter is
+// consulted, and the few limiter-guarded routes it does hit get one request
+// per freshly built router, far below their budgets; the connector webhook and
+// the SSE stream answer 401 for their own reasons, which the probe can prove
+// only as "rejected unauthenticated", not as "JWT middleware mounted" — that
+// distinction rests on the table row, and docs/API_REFERENCE.md says so.
 type routeEntry struct {
 	Method string
 	Path   string
+	Auth   string
 }
 
 // key returns a stable sort/compare key.
@@ -155,6 +169,38 @@ func TestRouteInventoryMatchesRouter(t *testing.T) {
 	// one that leaves integrators calling a URL that only ever 404s.
 	for _, p := range phantom {
 		t.Errorf("inventory route not registered by router: %s", p.key())
+	}
+
+	// 6b. Auth class column. The registered rows carry their class from
+	// server.RouteAuthClasses (resolved in walkAndClassify, which fails closed
+	// when a route resolves to no row); the documented rows carry what the
+	// file says. Any difference is documentation drift on a security property
+	// — exactly what issue #115 was opened for.
+	for _, e := range documented {
+		if e.Auth == "" {
+			t.Errorf("inventory row %s has an empty auth class — the class is mandatory (fail-closed)", e.key())
+		}
+	}
+	for _, issue := range compareAuthClasses(registered, documented) {
+		t.Errorf("auth class drift: %s", issue)
+	}
+
+	// 6c. Stale table rows: a prefix in the auth-class table that covers no
+	// registered route means the mount it describes was removed or renamed,
+	// and the table is lying about a route that no longer exists.
+	if len(server.RouteAuthClasses) == 0 {
+		t.Fatal("server.RouteAuthClasses is empty — the auth ground truth is missing; that is a failure, not a skip (issue #115)")
+	}
+	coveredPrefixes := map[string]bool{}
+	for _, e := range registered {
+		if rc, ok := server.ResolveRouteAuthClass(e.Path); ok {
+			coveredPrefixes[rc.Prefix] = true
+		}
+	}
+	for _, row := range server.RouteAuthClasses {
+		if !coveredPrefixes[row.Prefix] {
+			t.Errorf("auth class row %q (%s) covers no registered route — the mount was removed or renamed; fix internal/server/route_auth.go", row.Prefix, row.Class)
+		}
 	}
 
 	// 7. Sweep the curl examples below the table for calls that do not exist.
@@ -284,6 +330,61 @@ func TestGuardFailsOnMissingInventory(t *testing.T) {
 		t.Error("guard did not fail when table has zero data rows — expected error, got nil")
 	} else {
 		t.Logf("correctly failed on zero-row table: %v", err)
+	}
+
+	// (d) The old two-column shape must not be tolerated: deleting the auth
+	// column cannot be allowed to turn the auth check into a silent no-op.
+	contentD := "## " + inventoryHeading + "\n\n" + inventoryStartMarker + "\n| Methode | Pfad |\n| --- | --- |\n| GET | /api/v1/health |\n" + inventoryEndMarker + "\n"
+	_, err = parseInventoryFromContent(contentD, "<synthetic>")
+	if err == nil {
+		t.Error("a two-column row without the auth class was accepted; the parser must fail closed on the pre-#115 shape")
+	} else {
+		t.Logf("correctly failed on old two-column shape: %v", err)
+	}
+
+	// (e) A row whose auth cell is empty: missing ground truth is a failure.
+	contentE := "## " + inventoryHeading + "\n\n" + inventoryStartMarker + "\n| Methode | Pfad | Authentifizierung |\n| --- | --- | --- |\n| GET | /api/v1/health |  |\n" + inventoryEndMarker + "\n"
+	_, err = parseInventoryFromContent(contentE, "<synthetic>")
+	if err == nil {
+		t.Error("a row with an empty auth class was accepted; fail-closed requires a parse error")
+	} else {
+		t.Logf("correctly failed on empty auth class cell: %v", err)
+	}
+}
+
+// TestGuardSensitivityAuthClassDrift proves the auth column is compared, not
+// just printed: a documented row whose class differs from the router table is
+// reported, an agreeing row is not, and a phantom route is left to
+// compareRoutes instead of double-reporting.
+func TestGuardSensitivityAuthClassDrift(t *testing.T) {
+	registered := []routeEntry{
+		{Method: "GET", Path: "/api/v1/health", Auth: "none"},
+		{Method: "POST", Path: "/api/v1/contacts", Auth: "jwt+csrf"},
+	}
+
+	if issues := compareAuthClasses(registered, registered); len(issues) != 0 {
+		t.Errorf("agreeing rows reported %d auth issues, want 0: %v", len(issues), issues)
+	}
+
+	wrong := []routeEntry{
+		{Method: "GET", Path: "/api/v1/health", Auth: "jwt+csrf"}, // understated protection: the dangerous direction
+		{Method: "POST", Path: "/api/v1/contacts", Auth: "jwt+csrf"},
+	}
+	issues := compareAuthClasses(registered, wrong)
+	if len(issues) != 1 || !strings.Contains(issues[0], "GET /api/v1/health") {
+		t.Fatalf("flipping the documented class of GET /api/v1/health was not detected: %v", issues)
+	}
+	t.Logf("correctly detected auth drift: %s", issues[0])
+
+	// A documented route the router does not register is compareRoutes'
+	// problem; the auth comparison must stay quiet about it.
+	phantomOnly := []routeEntry{
+		{Method: "GET", Path: "/api/v1/health", Auth: "none"},
+		{Method: "POST", Path: "/api/v1/contacts", Auth: "jwt+csrf"},
+		{Method: "POST", Path: "/api/v1/ghost", Auth: "banana"},
+	}
+	if issues := compareAuthClasses(registered, phantomOnly); len(issues) != 0 {
+		t.Errorf("phantom row produced %d auth issues, want 0: %v", len(issues), issues)
 	}
 }
 
@@ -437,7 +538,7 @@ func TestGuardFailsOnRealDocumentDrift(t *testing.T) {
 	// the parsed row count, which is what makes the row above disappear from the
 	// document rather than merely from a fixture.
 	target := documented[len(documented)/2]
-	line := "| " + target.Method + " | " + target.Path + " |"
+	line := "| " + target.Method + " | " + target.Path + " | " + target.Auth + " |"
 	stripped := strings.Replace(content, line+"\n", "", 1)
 	if stripped == content {
 		t.Fatalf("table line %q not found in %s — the generator and the parser disagree about the row format", line, docPath)
@@ -448,6 +549,38 @@ func TestGuardFailsOnRealDocumentDrift(t *testing.T) {
 	}
 	if len(after) != len(documented)-1 {
 		t.Errorf("removing one table line left %d rows, want %d", len(after), len(documented)-1)
+	}
+
+	// Auth-column drills at the text level, on the real file (issue #115):
+	// mislabelling a row's class, and deleting the column, must both be caught.
+	flipped := "none"
+	if target.Auth == "none" {
+		flipped = "jwt+csrf"
+	}
+	flippedLine := "| " + target.Method + " | " + target.Path + " | " + flipped + " |"
+	flippedContent := strings.Replace(content, line+"\n", flippedLine+"\n", 1)
+	if flippedContent == content {
+		t.Fatalf("table line %q not found for the auth-flip drill", line)
+	}
+	flippedDoc, err := parseInventoryFromContent(flippedContent, docPath)
+	if err != nil {
+		t.Fatalf("parse after flipping one auth class: %v", err)
+	}
+	if issues := compareAuthClasses(registered, flippedDoc); len(issues) != 1 || !strings.Contains(issues[0], target.key()) {
+		t.Errorf("flipping the documented auth class of %s (%s -> %s) was not detected: %v", target.key(), target.Auth, flipped, issues)
+	} else {
+		t.Logf("correctly detected auth flip: %s", issues[0])
+	}
+
+	twoColLine := "| " + target.Method + " | " + target.Path + " |"
+	twoColContent := strings.Replace(content, line+"\n", twoColLine+"\n", 1)
+	if twoColContent == content {
+		t.Fatalf("table line %q not found for the column-removal drill", line)
+	}
+	if _, err := parseInventoryFromContent(twoColContent, docPath); err == nil {
+		t.Error("removing the auth column from one row still parsed; the guard must refuse the two-column shape")
+	} else {
+		t.Logf("correctly refused a row without the auth column: %v", err)
 	}
 
 	// Drift direction (b): a documented route the router does not register.
@@ -561,7 +694,10 @@ func TestNormalizeChiPatternRejectsCatchAll(t *testing.T) {
 // TestAPIReferenceInventoryUpdate regenerates the Routen-Inventur table in
 // docs/API_REFERENCE.md from the walked router, so the generator's source of
 // truth stays the router rather than a hand-kept list: whoever adds an endpoint
-// re-runs this instead of transcribing a row.
+// re-runs this instead of transcribing a row. The Authentifizierung column
+// comes from the same walk — walkAndClassify resolves each route against
+// server.RouteAuthClasses and aborts (no silent blank cell) when a route has
+// no declared class.
 //
 // The salvaged branch instead called out to a `scripts/gen_route_inventory.mjs`
 // that was never landed; that indirection is dropped and the regeneration lives
@@ -617,31 +753,42 @@ func replaceInventorySection(content, table string) (string, error) {
 // state rather than something a human has to remember.
 func renderInventory(entries []routeEntry) string {
 	var b strings.Builder
-	b.WriteString("| Methode | Pfad |\n")
-	b.WriteString("| --- | --- |\n")
+	b.WriteString("| Methode | Pfad | Authentifizierung |\n")
+	b.WriteString("| --- | --- | --- |\n")
 	for _, e := range entries {
-		fmt.Fprintf(&b, "| %s | %s |\n", e.Method, e.Path)
+		fmt.Fprintf(&b, "| %s | %s | %s |\n", e.Method, e.Path, e.Auth)
 	}
 	return b.String()
 }
 
-// walkedRoutes builds the router exactly like the other server tests do (demo
-// querier, so every handler is registered) and returns its leaf routes.
-func walkedRoutes(t *testing.T) []routeEntry {
+// newDemoRouter builds the router exactly like the other server tests do (demo
+// querier, so every handler is registered). Every call returns a fresh router
+// with fresh rate limiters — the unauthenticated probe relies on that to keep
+// its answers readable.
+func newDemoRouter(t *testing.T) http.Handler {
 	t.Helper()
 
 	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("failed to generate key: %v", err)
 	}
-	r := server.NewRouter(server.Config{
+	return server.NewRouter(server.Config{
 		DB:       demo.NewInMemoryQuerier(),
 		SSEHub:   sse.NewHub(),
 		PubKey:   pubKey,
 		PrivKey:  privKey,
 		DemoMode: true,
 	})
-	mux, ok := r.(*chi.Mux)
+}
+
+// walkAndClassify walks the given router and attaches the declared auth class
+// from server.RouteAuthClasses to every route. Fail-closed in both directions:
+// an empty walk, an empty table, or a route that resolves to no row aborts the
+// test — there is no "unclassified" state the guard tolerates.
+func walkAndClassify(t *testing.T, handler http.Handler) []routeEntry {
+	t.Helper()
+
+	mux, ok := handler.(*chi.Mux)
 	if !ok {
 		t.Fatal("router is not a *chi.Mux — cannot walk routes")
 	}
@@ -649,7 +796,23 @@ func walkedRoutes(t *testing.T) []routeEntry {
 	if len(entries) == 0 {
 		t.Fatal("router enumeration yielded zero routes — cannot generate or verify an inventory")
 	}
+	if len(server.RouteAuthClasses) == 0 {
+		t.Fatal("server.RouteAuthClasses is empty — no auth ground truth to check against")
+	}
+	for i := range entries {
+		rc, ok := server.ResolveRouteAuthClass(entries[i].Path)
+		if !ok {
+			t.Fatalf("route %s resolves to no row in server.RouteAuthClasses — every registered route must declare its auth class next to its mount (issue #115)", entries[i].key())
+		}
+		entries[i].Auth = string(rc.Class)
+	}
 	return entries
+}
+
+// walkedRoutes returns the classified leaf routes of a freshly built router.
+func walkedRoutes(t *testing.T) []routeEntry {
+	t.Helper()
+	return walkAndClassify(t, newDemoRouter(t))
 }
 
 // apiRoutePrefixes are the prefixes the inventory covers. They are listed
@@ -724,11 +887,11 @@ func walkRoutes(mux *chi.Mux, prefix string) []routeEntry {
 // still runs against the real router pattern while the emitted path stays
 // readable.
 //
-// groupAuth carries the auth group down the tree: an `api.Group(...)` mount
-// that activates CSRFProtectionMiddleware marks its whole subtree, which is how
-// "needs a CSRF token" is recorded in the inventory.
-// groupAuth is not tracked: see the note on routeEntry for why the middleware
-// chain cannot be read off a chi mount.
+// The middleware chain is NOT read here — a chi mount never reports it (see
+// the note on routeEntry). The auth class is attached afterwards, from
+// server.RouteAuthClasses, in walkAndClassify. The leftover comment fragment
+// claiming a `groupAuth` value was carried down the walk was itself the drift
+// issue #115 is about; it is deleted rather than reworded.
 func walkRouteList(routes []chi.Route, parentPattern, docPattern, prefix string, entries *[]routeEntry) {
 	for _, route := range routes {
 		raw := parentPattern + route.Pattern
@@ -903,14 +1066,23 @@ func isTableSeparator(line string) bool {
 	return true
 }
 
+// parseTableRow parses one inventory row. Exactly three columns are required:
+// the auth class became mandatory with issue #115, and a row without one is a
+// parse failure, not a tolerated old shape — a guard that accepts "no auth
+// cell" could be neutered by simply deleting the column.
 func parseTableRow(line string) (routeEntry, error) {
 	cols := splitTableRow(line)
-	if len(cols) < 2 {
-		return routeEntry{}, fmt.Errorf("expected at least 2 columns, got %d", len(cols))
+	if len(cols) != 3 {
+		return routeEntry{}, fmt.Errorf("expected exactly 3 columns (method, path, auth class), got %d — regenerate the table with UPDATE_ROUTE_INVENTORY=1", len(cols))
+	}
+	auth := strings.TrimSpace(cols[2])
+	if auth == "" {
+		return routeEntry{}, fmt.Errorf("empty auth class cell in %q — the class is mandatory (fail-closed, issue #115)", line)
 	}
 	return routeEntry{
 		Method: strings.TrimSpace(cols[0]),
 		Path:   strings.TrimSpace(cols[1]),
+		Auth:   auth,
 	}, nil
 }
 
@@ -1204,4 +1376,28 @@ func compareRoutes(registered, documented []routeEntry) (missing, phantom []rout
 		return phantom[i].Method < phantom[j].Method
 	})
 	return missing, phantom
+}
+
+// compareAuthClasses reports rows both sides agree exist (same method+path)
+// but disagree about how a caller authenticates against them. Routes that are
+// missing on one side are deliberately skipped — compareRoutes owns that
+// verdict, and reporting an "auth class drift" for a phantom row would add
+// noise on top of the real error.
+func compareAuthClasses(registered, documented []routeEntry) []string {
+	reg := make(map[string]routeEntry, len(registered))
+	for _, e := range registered {
+		reg[e.key()] = e
+	}
+	var issues []string
+	for _, d := range documented {
+		r, ok := reg[d.key()]
+		if !ok {
+			continue
+		}
+		if d.Auth != r.Auth {
+			issues = append(issues, fmt.Sprintf("%s: document says %q, router auth-class table (internal/server/route_auth.go) says %q", d.key(), d.Auth, r.Auth))
+		}
+	}
+	sort.Strings(issues)
+	return issues
 }

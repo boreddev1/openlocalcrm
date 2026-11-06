@@ -57,8 +57,9 @@ restart: down up ## Restart Docker stack
 logs: ## View real-time container logs
 	docker compose logs -f
 
-test: ## Run Go tests
+test: ## Run Go tests plus the Node harness for script gates (web audit, #110)
 	go test -v ./...
+	node --test scripts/*.test.mjs
 
 coverage: ## Run Go test coverage analysis with 50% minimum threshold
 	./scripts/coverage.sh --min 50.0 --diff 50.0
