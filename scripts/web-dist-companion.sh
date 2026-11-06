@@ -15,9 +15,12 @@
 #
 #   It is called by .github/workflows/web-dist-rebuild.yml right after
 #   `cd web && pnpm install --frozen-lockfile && pnpm build`. The script never
-#   builds anything: it (a) compares the result with the committed tree using the
-#   *same* condition ci.yml uses, and (b) moves that result into exactly one
-#   long-lived companion PR.
+#   builds anything: it (a) compares the result with the committed tree using
+#   scripts/check-dist-freshness.sh — a hash comparison of the real web/dist
+#   tree against the git index, a strict superset of ci.yml's git-status
+#   condition, because git status never sees .gitignore-hidden bundle files
+#   like `*.png` (issue #130) even though //go:embed ships them — and (b) moves
+#   that result into exactly one long-lived companion PR.
 #
 # SUBCOMMANDS
 #   check    Compare built web/dist with committed web/dist. Exit 0 either way,
@@ -53,6 +56,7 @@ LOCK_FILE="${WEB_DIR}/pnpm-lock.yaml"
 PKG_JSON="${WEB_DIR}/package.json"
 COOLDOWN_DAYS="${COOLDOWN_DAYS:-7}"
 GH="${GH:-gh}"
+DIST_CHECK_SCRIPT="${DIST_CHECK_SCRIPT:-scripts/check-dist-freshness.sh}"
 PR_MARKER="openlocalcrm:web-dist-rebuild-companion"
 COMMIT_AUTHOR_NAME="${COMMIT_AUTHOR_NAME:-github-actions[bot]}"
 COMMIT_AUTHOR_EMAIL="${COMMIT_AUTHOR_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
@@ -101,9 +105,23 @@ summary() { # Markdown on the run page ("Job summary"). %b, because callers pass
 
 # --- detection -------------------------------------------------------------
 
-# The exact condition of ci.yml's freshness gate, so the two can never disagree.
-# --untracked-files=all so a NEW chunk file counts as drift, too.
-drift_lines() { git status --porcelain --untracked-files=all -- "$DIST_DIR"; }
+# Drift = web/dist on disk vs web/dist in the git index, by content hash
+# (scripts/check-dist-freshness.sh, issue #130). The old condition —
+# `git status --porcelain --untracked-files=all -- web/dist`, still what ci.yml
+# runs — cannot see files that an ignore rule hides: `*.png` (.gitignore:54)
+# sits in the shipped binary via //go:embed while git calls it "clean". The new
+# comparison is a strict superset of that condition: everything git status
+# reported is reported, plus the previously invisible files. The bundle is
+# already built when this runs (workflow / `make check-dist-freshness`), so the
+# checker is called in compare mode.
+drift_lines() {
+  local out rc
+  out="$("./${DIST_CHECK_SCRIPT}" compare)" && rc=0 || rc=$?
+  case "$rc" in
+    0 | 1) printf '%s' "$out" ;;
+    *) die "${DIST_CHECK_SCRIPT} could not compare the trees (exit ${rc}) — refusing to guess" ;;
+  esac
+}
 
 # Anything modified/created outside web/dist means the working tree is not just a
 # rebuild (a different pnpm touching the lockfile, a stray file).
@@ -309,7 +327,7 @@ Protokoll: $(run_link)
 
 \`\`\`sh
 cd web && pnpm install --frozen-lockfile && pnpm build   # pnpm 12.4.1, node 22
-git status --porcelain --untracked-files=all -- ${DIST_DIR}   # nicht leer => dieser PR
+./${DIST_CHECK_SCRIPT} compare   # nicht leer => dieser PR; erfasst auch von .gitignore versteckte Bundle-Dateien (Issue #130)
 \`\`\`
 
 Nach dem Merge ist das Frische-Gate auf \`$BASE_BRANCH\` wieder grün; der nächste
@@ -339,7 +357,7 @@ cmd_check() {
   fi
   out drift "true"
   out drift_count "$(printf '%s\n' "$drift" | grep -c .)"
-  log "::warning::committed ${DIST_DIR} is STALE — a fresh 'cd ${WEB_DIR} && pnpm build' produces different output (same condition as ci.yml's freshness gate)."
+  log "::warning::committed ${DIST_DIR} is STALE — a fresh 'cd ${WEB_DIR} && pnpm build' produces different output (superset of ci.yml's freshness-gate condition: also catches git-ignored bundle files, issue #130)."
   log "Differing files:"
   printf '%s\n' "$drift"
   summary "### ${DIST_DIR} ist STALE\nDer frische Build von \`$BASE_BRANCH\` unterscheidet sich vom committeten Bundle; das Frische-Gate in \`ci.yml\` fällt auf \`$BASE_BRANCH\` rot und überspringt dadurch die Playwright-Steps. Es wird genau EIN Begleit-PR mit dem neuen Bundle geöffnet bzw. aktualisiert.\n\n\`\`\`\n${drift}\n\`\`\`"
@@ -367,6 +385,18 @@ cmd_publish() {
   local drift
   drift="$(drift_lines)"
   DRIFT="$drift"
+
+  # Issue #130, publish-side: a bundle file that .gitignore hides can never
+  # enter the rebuild commit — `git add` refuses ignored paths — so committing
+  # only the rest would open a PR whose tree still differs from the next fresh
+  # build, and the schedule would re-detect the same drift forever. Stop here
+  # and leave the decision (fix the build, or deliberately change the ignore
+  # policy) to a human; ci.yml's git-status gate is meanwhile GREEN over this
+  # file, which is exactly why this automation has to catch it.
+  local hidden
+  hidden="$(printf '%s\n' "$drift" | grep -F 'gitignored via' || true)"
+  [ -z "$hidden" ] || die "the fresh build emits ${DIST_DIR} files that .gitignore hides — they are embedded by //go:embed but can never be committed, so no bundle PR is opened over them:
+$hidden"
 
   # No drift: the only useful write left is retiring a companion PR that became empty.
   if [ -z "$drift" ]; then
