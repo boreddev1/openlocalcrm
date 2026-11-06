@@ -28,8 +28,9 @@ Vollständige Liste aller Endpunkte, die `internal/server/router.go` registriert
 die Gruppe `/api/v1/…` und der SSE-Stream `/events/stream`. Der eingebettete SPA-
 Mount (`r.Mount("/", web.DistHandler())`) ist bewusst ausgenommen: er bedient
 Frontend-Dateien statt API-Endpunkte und hat keine abgrenzbare Pfadliste. Die
-Tabelle ist **generiert, nicht gepflegt**: Sie wird aus dem laufenden Router
-gelesen und darf nicht von Hand editiert werden.
+Tabelle ist **generiert, nicht gepflegt**: Sie wird aus dem
+Router-Registrierungsbaum und der Auth-Klassen-Tabelle `server.RouteAuthClasses`
+(`internal/server/route_auth.go`) gelesen und darf nicht von Hand editiert werden.
 
 ```bash
 UPDATE_ROUTE_INVENTORY=1 go test ./internal/server/ -run TestAPIReferenceInventoryUpdate -count=1
@@ -39,117 +40,166 @@ UPDATE_ROUTE_INVENTORY=1 go test ./internal/server/ -run TestAPIReferenceInvento
 `go test`-Lauf bidirektional mit dem Router: ein Endpunkt, der im Router
 existiert und hier fehlt, lässt die Tests genauso durchfallen wie ein
 dokumentierter Endpunkt, den der Router nicht mehr registriert. Fehlt die
-Tabelle oder ist sie leer, schlägt die Prüfung fehl (fail-closed); es existiert
-kein Pfad, der die Prüfung überspringt oder nur protokolliert.
+Tabelle, ist sie leer, fehlt die Spalte **Authentifizierung** oder ist eine
+ihrer Zellen leer, schlägt die Prüfung fehl (fail-closed); es existiert kein
+Pfad, der die Prüfung überspringt oder nur protokolliert.
 
 Pfadparameter stehen in Chi-Schreibweise (`{id}`), genau so, wie der Router sie
-registriert. Die Tabelle nennt bewusst **keine** Auth-Spalte: eine
-HTTP-Methode-Pfad-Kombination ist alles, was sich maschinell aus dem Router
-ablesen lässt. Ob ein Endpunkt ein `X-CSRF-Token` verlangt, hängt nicht an der
-Route, sondern daran, wie sich der Aufrufer authentifiziert (die CSRF-Middleware
-befreit eine per Bearer-Token geprüfte Anfrage), und lässt sich aus Chi-Routes
-nicht auslesen — die Regeln stehen deshalb in den Abschnitten unten.
+registriert.
+
+### Die Spalte `Authentifizierung` (Issue #115)
+
+Chi-Routes melden nur Mount-Muster und HTTP-Methoden, **niemals** die
+Middleware-Kette dahinter. Eine Auth-Klasse ließe sich also nicht aus dem
+Router-Registrierungsbaum *ablesen* — sie muss *deklariert* werden. Genau das
+leistet `server.RouteAuthClasses` in `internal/server/route_auth.go`: eine
+Zeile pro Pfad-Präfix, verankert an denselben Pfad-Konstanten, die
+`router.go` für die Mounts benutzt. Die Spalte ist generiert, nicht
+abgeschrieben; drei Prüfungen halten sie ehrlich:
+
+1. **Vollständigkeit:** Jede Route, die der Router registriert, muss in der
+   Tabelle genau eine Klasse finden. Eine neue Route ohne deklarierte Klasse
+   lässt `go test` durchfallen — niemals „unklassifiziert = okay". (Die
+   breiteste Zeile `/api/v1` deklariert dabei die strenge Session-Klasse; ein
+   vergessener Eintrag rutscht also nie versehentlich in „öffentlich".)
+2. **Keine Leichen:** Jede Tabellenzeile muss mindestens eine registrierte
+   Route abdecken; Mount entfernen, ohne die Zeile zu löschen, scheitert.
+3. **Verhalten:** `internal/server/route_auth_class_test.go` schickt pro
+   Route **einen** Request ohne jegliche Anmeldedaten gegen den aufgebauten
+   Router (in-process, kein Netzwerk) und verlangt die zur Klasse passende
+   Antwort: `401` bei `jwt+csrf` (zuerst greift `auth.AuthMiddleware`, vor
+   CSRF, RBAC und Rate-Limitern), `403` bei `csrf-only` (die CSRF-Middleware
+   sitzt vor allen anderen Schichten), bei `none` alles außer 401/403 — ein
+   ausgelöstes Rate-Limit (`429`) lässt die Prüfung ebenfalls durchfallen,
+   weil die Antwort dann keine Aussage über die Auth-Klasse trägt. Wer z. B.
+   `AuthMiddleware` aus der geschützten Gruppe entfernt, fällt bei diesem
+   Test durch — auch wenn die Tabelle unangetastet bliebe.
+
+Bedeutung der Klassen:
+
+| Klasse | Bedeutung |
+| --- | --- |
+| `none` | ohne Anmeldedaten erreichbar (Health, Login, Einladungsannahme). Rate-Limiting gilt trotzdem, denn Login und Invite akzeptieren erratbare Geheimnisse. |
+| `csrf-only` | kein Access-Token erforderlich; `CSRFDoubleSubmitMiddleware` verlangt Deckung von CSRF-Cookie und `X-CSRF-Token`-Header (sonst 403). Die eigentliche Authentifizierung läuft über das HttpOnly-Refresh-Cookie (`SameSite=Strict`), das ein Browser cross-site nie mitsendet. |
+| `jwt+csrf` | die geschützte Gruppe: Ed25519-Access-Token via `Authorization: Bearer` oder `access_token`-Cookie, inkl. `token_version`-Prüfung. Bei schreibenden Methoden verlangt die CSRF-Middleware zusätzlich Cookie/Header-Deckung — **mit einer Ausnahme**: eine Anfrage, die über ein geprüftes Bearer-Token authentifiziert wurde, ist befreit, weil sie keine Browser-Ambiente-Credentials trägt. Ob *ein bestimmter Aufrufer* also ein `X-CSRF-Token` braucht, hängt weiterhin davon ab, wie er sich authentifiziert. RBAC-Berechtigungen (`auth.RequirePermission`) setzen oberhalb dieser Klasse an, pro Mount. |
+| `connector-token` | das Lead-Intake-Webhook prüft sein statisches Bearer-Token (`CONNECTOR_API_TOKEN`) im Handler selbst. |
+| `jwt-inline` | der SSE-Stream prüft dasselbe Access-Token im Handler selbst (GET-only; EventSource kann keinen CSRF-Header senden, deshalb ist hier bewusst keine CSRF-Middleware montiert). |
+
+**Grenzen des Beweises** (damit das Grün nicht mehr verspricht, als es ist):
+
+* Der Probe beweist für `connector-token` und `jwt-inline` nur „abgelehnt ohne
+  Anmeldedaten (401)" — dieselbe Beobachtung wie bei `jwt+csrf`. Ob die
+  Ablehnung von `AuthMiddleware` oder vom Handler selbst kommt, entscheidet
+  die deklarierte Tabellenzeile (Autorschaft direkt am Mount, dort mit
+  Anker-Kommentaren), nicht der HTTP-Status.
+* Die Bearer-Ausnahme der CSRF-Regel ist Eigenschaft des Aufrufers, nicht der
+  Route; sie ist deshalb in der Klassenbeschreibung dokumentiert, nicht als
+  eigene Spalte.
+* RBAC-Berechtigungen pro Endpoint sind nicht Gegenstand der Spalte und auch
+  nicht maschinell abgeleitet; `internal/server/rbac_routes_test.go` prüft
+  sie verhaltensbasiert, die Beschreibungen in den Abschnitten unten bleiben
+  menschengepflegt.
 
 <!-- route-inventory:start -->
-| Methode | Pfad |
-| --- | --- |
-| POST | /api/v1/ai/chat |
-| GET | /api/v1/ai/kb |
-| POST | /api/v1/ai/kb |
-| GET | /api/v1/ai/kb/search |
-| DELETE | /api/v1/ai/kb/{id} |
-| GET | /api/v1/ai/observability |
-| POST | /api/v1/ai/parse-bill |
-| POST | /api/v1/ai/research/company |
-| GET | /api/v1/ai/research/jobs |
-| POST | /api/v1/ai/research/jobs |
-| POST | /api/v1/ai/synthesize-notes |
-| POST | /api/v1/ai/triage |
-| GET | /api/v1/appointments |
-| POST | /api/v1/appointments |
-| DELETE | /api/v1/appointments/{id} |
-| PUT | /api/v1/appointments/{id} |
-| GET | /api/v1/appointments/{id}/ics |
-| GET | /api/v1/auth/accept-invite |
-| POST | /api/v1/auth/accept-invite |
-| POST | /api/v1/auth/change-password |
-| POST | /api/v1/auth/login |
-| POST | /api/v1/auth/logout |
-| POST | /api/v1/auth/logout-all |
-| POST | /api/v1/auth/refresh |
-| POST | /api/v1/auth/totp/disable |
-| POST | /api/v1/auth/totp/setup |
-| POST | /api/v1/auth/totp/verify |
-| GET | /api/v1/automations |
-| POST | /api/v1/automations |
-| GET | /api/v1/automations/runs |
-| POST | /api/v1/automations/runs/{id}/approve |
-| POST | /api/v1/automations/{id}/test-run |
-| POST | /api/v1/backup/drill |
-| GET | /api/v1/backup/export |
-| POST | /api/v1/backup/restore |
-| POST | /api/v1/calculator/solar |
-| GET | /api/v1/companies |
-| POST | /api/v1/companies |
-| DELETE | /api/v1/companies/{id} |
-| GET | /api/v1/companies/{id} |
-| PUT | /api/v1/companies/{id} |
-| POST | /api/v1/connectors/lead-intake |
-| GET | /api/v1/contacts |
-| POST | /api/v1/contacts |
-| DELETE | /api/v1/contacts/{id} |
-| GET | /api/v1/contacts/{id} |
-| PUT | /api/v1/contacts/{id} |
-| GET | /api/v1/deals |
-| POST | /api/v1/deals |
-| DELETE | /api/v1/deals/{id} |
-| GET | /api/v1/deals/{id} |
-| PUT | /api/v1/deals/{id} |
-| POST | /api/v1/deals/{id}/revoke |
-| POST | /api/v1/deals/{id}/solar-calculation |
-| GET | /api/v1/email-templates |
-| POST | /api/v1/email-templates |
-| POST | /api/v1/email-templates/generate |
-| DELETE | /api/v1/email-templates/{key} |
-| PUT | /api/v1/email-templates/{key} |
-| GET | /api/v1/emails/accounts |
-| POST | /api/v1/emails/accounts |
-| DELETE | /api/v1/emails/accounts/{id} |
-| PATCH | /api/v1/emails/accounts/{id} |
-| POST | /api/v1/emails/accounts/{id}/sync |
-| POST | /api/v1/emails/accounts/{id}/test |
-| POST | /api/v1/emails/demo-ingest |
-| GET | /api/v1/emails/messages |
-| POST | /api/v1/emails/send |
-| GET | /api/v1/emails/threads/{threadID} |
-| PATCH | /api/v1/emails/{id}/tags |
-| GET | /api/v1/export/contacts.csv |
-| GET | /api/v1/health |
-| POST | /api/v1/import/contacts |
-| GET | /api/v1/me |
-| GET | /api/v1/notes |
-| POST | /api/v1/notes |
-| DELETE | /api/v1/notes/{id} |
-| GET | /api/v1/notes/{id} |
-| PUT | /api/v1/notes/{id} |
-| POST | /api/v1/notifications/read-all |
-| GET | /api/v1/notifications/unread |
-| POST | /api/v1/notifications/{id}/read |
-| POST | /api/v1/ownership/bulk-assign |
-| GET | /api/v1/reports/sales |
-| GET | /api/v1/settings/export |
-| POST | /api/v1/settings/import |
-| POST | /api/v1/telephony/calls |
-| GET | /api/v1/todos |
-| POST | /api/v1/todos |
-| DELETE | /api/v1/todos/{id} |
-| GET | /api/v1/todos/{id} |
-| PUT | /api/v1/todos/{id} |
-| GET | /api/v1/users |
-| POST | /api/v1/users/invite |
-| PUT | /api/v1/users/{id}/role |
-| PUT | /api/v1/users/{id}/status |
-| GET | /events/stream |
+| Methode | Pfad | Authentifizierung |
+| --- | --- | --- |
+| POST | /api/v1/ai/chat | jwt+csrf |
+| GET | /api/v1/ai/kb | jwt+csrf |
+| POST | /api/v1/ai/kb | jwt+csrf |
+| GET | /api/v1/ai/kb/search | jwt+csrf |
+| DELETE | /api/v1/ai/kb/{id} | jwt+csrf |
+| GET | /api/v1/ai/observability | jwt+csrf |
+| POST | /api/v1/ai/parse-bill | jwt+csrf |
+| POST | /api/v1/ai/research/company | jwt+csrf |
+| GET | /api/v1/ai/research/jobs | jwt+csrf |
+| POST | /api/v1/ai/research/jobs | jwt+csrf |
+| POST | /api/v1/ai/synthesize-notes | jwt+csrf |
+| POST | /api/v1/ai/triage | jwt+csrf |
+| GET | /api/v1/appointments | jwt+csrf |
+| POST | /api/v1/appointments | jwt+csrf |
+| DELETE | /api/v1/appointments/{id} | jwt+csrf |
+| PUT | /api/v1/appointments/{id} | jwt+csrf |
+| GET | /api/v1/appointments/{id}/ics | jwt+csrf |
+| GET | /api/v1/auth/accept-invite | none |
+| POST | /api/v1/auth/accept-invite | none |
+| POST | /api/v1/auth/change-password | jwt+csrf |
+| POST | /api/v1/auth/login | none |
+| POST | /api/v1/auth/logout | csrf-only |
+| POST | /api/v1/auth/logout-all | jwt+csrf |
+| POST | /api/v1/auth/refresh | csrf-only |
+| POST | /api/v1/auth/totp/disable | jwt+csrf |
+| POST | /api/v1/auth/totp/setup | jwt+csrf |
+| POST | /api/v1/auth/totp/verify | jwt+csrf |
+| GET | /api/v1/automations | jwt+csrf |
+| POST | /api/v1/automations | jwt+csrf |
+| GET | /api/v1/automations/runs | jwt+csrf |
+| POST | /api/v1/automations/runs/{id}/approve | jwt+csrf |
+| POST | /api/v1/automations/{id}/test-run | jwt+csrf |
+| POST | /api/v1/backup/drill | jwt+csrf |
+| GET | /api/v1/backup/export | jwt+csrf |
+| POST | /api/v1/backup/restore | jwt+csrf |
+| POST | /api/v1/calculator/solar | jwt+csrf |
+| GET | /api/v1/companies | jwt+csrf |
+| POST | /api/v1/companies | jwt+csrf |
+| DELETE | /api/v1/companies/{id} | jwt+csrf |
+| GET | /api/v1/companies/{id} | jwt+csrf |
+| PUT | /api/v1/companies/{id} | jwt+csrf |
+| POST | /api/v1/connectors/lead-intake | connector-token |
+| GET | /api/v1/contacts | jwt+csrf |
+| POST | /api/v1/contacts | jwt+csrf |
+| DELETE | /api/v1/contacts/{id} | jwt+csrf |
+| GET | /api/v1/contacts/{id} | jwt+csrf |
+| PUT | /api/v1/contacts/{id} | jwt+csrf |
+| GET | /api/v1/deals | jwt+csrf |
+| POST | /api/v1/deals | jwt+csrf |
+| DELETE | /api/v1/deals/{id} | jwt+csrf |
+| GET | /api/v1/deals/{id} | jwt+csrf |
+| PUT | /api/v1/deals/{id} | jwt+csrf |
+| POST | /api/v1/deals/{id}/revoke | jwt+csrf |
+| POST | /api/v1/deals/{id}/solar-calculation | jwt+csrf |
+| GET | /api/v1/email-templates | jwt+csrf |
+| POST | /api/v1/email-templates | jwt+csrf |
+| POST | /api/v1/email-templates/generate | jwt+csrf |
+| DELETE | /api/v1/email-templates/{key} | jwt+csrf |
+| PUT | /api/v1/email-templates/{key} | jwt+csrf |
+| GET | /api/v1/emails/accounts | jwt+csrf |
+| POST | /api/v1/emails/accounts | jwt+csrf |
+| DELETE | /api/v1/emails/accounts/{id} | jwt+csrf |
+| PATCH | /api/v1/emails/accounts/{id} | jwt+csrf |
+| POST | /api/v1/emails/accounts/{id}/sync | jwt+csrf |
+| POST | /api/v1/emails/accounts/{id}/test | jwt+csrf |
+| POST | /api/v1/emails/demo-ingest | jwt+csrf |
+| GET | /api/v1/emails/messages | jwt+csrf |
+| POST | /api/v1/emails/send | jwt+csrf |
+| GET | /api/v1/emails/threads/{threadID} | jwt+csrf |
+| PATCH | /api/v1/emails/{id}/tags | jwt+csrf |
+| GET | /api/v1/export/contacts.csv | jwt+csrf |
+| GET | /api/v1/health | none |
+| POST | /api/v1/import/contacts | jwt+csrf |
+| GET | /api/v1/me | jwt+csrf |
+| GET | /api/v1/notes | jwt+csrf |
+| POST | /api/v1/notes | jwt+csrf |
+| DELETE | /api/v1/notes/{id} | jwt+csrf |
+| GET | /api/v1/notes/{id} | jwt+csrf |
+| PUT | /api/v1/notes/{id} | jwt+csrf |
+| POST | /api/v1/notifications/read-all | jwt+csrf |
+| GET | /api/v1/notifications/unread | jwt+csrf |
+| POST | /api/v1/notifications/{id}/read | jwt+csrf |
+| POST | /api/v1/ownership/bulk-assign | jwt+csrf |
+| GET | /api/v1/reports/sales | jwt+csrf |
+| GET | /api/v1/settings/export | jwt+csrf |
+| POST | /api/v1/settings/import | jwt+csrf |
+| POST | /api/v1/telephony/calls | jwt+csrf |
+| GET | /api/v1/todos | jwt+csrf |
+| POST | /api/v1/todos | jwt+csrf |
+| DELETE | /api/v1/todos/{id} | jwt+csrf |
+| GET | /api/v1/todos/{id} | jwt+csrf |
+| PUT | /api/v1/todos/{id} | jwt+csrf |
+| GET | /api/v1/users | jwt+csrf |
+| POST | /api/v1/users/invite | jwt+csrf |
+| PUT | /api/v1/users/{id}/role | jwt+csrf |
+| PUT | /api/v1/users/{id}/status | jwt+csrf |
+| GET | /events/stream | jwt-inline |
 <!-- route-inventory:end -->
 
 ### 1. Healthcheck & Systemstatus
